@@ -1,0 +1,156 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "storix"
+dynamic = ["version"]
+description = "Storage Unix Style for Developers"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Mohanad Ghali", email = "mghalix@gmail.com" }]
+keywords = ["storage", "filesystem", "azure", "local", "async", "sandbox"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Filesystems",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "aiofiles",
+    "loguru",
+    "python-magic",
+    "pydantic",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+all = [
+    "azure-storage-file-datalake", 
+    "rich", 
+    "rich-toolkit", 
+    "typer",
+]
+azure = ["azure-storage-file-datalake"]
+cli = ["rich", "rich-toolkit", "typer"]
+
+[project.urls]
+Homepage = "https://github.com/mghalix/storix"
+Documentation = "https://github.com/mghalix/storix#readme"
+Repository = "https://github.com/mghalix/storix"
+Issues = "https://github.com/mghalix/storix/issues"
+Changelog = "https://github.com/mghalix/storix/blob/main/release-notes.md"
+
+[project.scripts]
+sx = "storix.cli.app:main"
+
+[tool.hatch.version]
+path = "storix/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["storix"]
+
+# [tool.mypy]
+# strict = true
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "D",   # pydocstyle
+    "B",   # flake8-bugbear
+    "W",   # pycodestyle warnings
+    "C4",  # flake8-comprehensions
+    "PIE", # flake8-pie
+    "ANN", # type annotations
+    "UP",  # pyupgrade
+    "N",   # pep8-naming
+    "RUF", # ruff specific rules
+    "ISC", # implicit string concat
+    "INP", # implicit namespace package
+    "RSE", # raise exception parantheses check
+    "RET", # flake8-return check
+    "SIM", # flake8-simplify check
+    "TD",  # todos
+    "FIX", # fixme
+]
+ignore = [
+    "E501",   # line too long, handled by black
+    "B008",   # do not perform function calls in argument defaults
+    "C901",   # too complex
+    "W191",   # indentation contains tabs
+    "ANN401", # allow dynamically typed expressions (typing.Any)
+    "D100",   # allow missing docstring in public module
+    "D104",   # allow missing docstring in public package
+    "TD003",  # allow missing link to todo issue
+    "FIX002", # allow todo
+]
+
+[tool.ruff.lint.isort]
+known-third-party = ["pydantic", "httpx", "loguru"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "INP", "TD", "ERA001", "RUF", "ANN201"]
+"examples/**" = ["D", "INP", "ERA001", "RUF"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.coverage.html]
+show_contexts = true
+
+[tool.coverage.run]
+source = ["storix"]
+omit = [
+    "*/tests/*", 
+    "*/test_*", 
+    "*/__pycache__/*", 
+    "*/venv/*", 
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 95
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "mypy",
+    "ruff",
+    "pre-commit",
+    "types-aiofiles>=24.1.0.20250606", # stub files for mypy
+    "coverage>=7.9.2",
+]
+

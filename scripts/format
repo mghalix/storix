@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -x
+
+ruff check storix --fix
+ruff format storix

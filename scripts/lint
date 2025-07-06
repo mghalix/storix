@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+
+set -e
+set -x
+
+mypy storix
+ruff check storix
+ruff format storix --check
