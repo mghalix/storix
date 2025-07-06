@@ -59,6 +59,14 @@ class Storage(Protocol):
     def isdir(self, path: PathLike) -> bool: ...
     def isfile(self, path: PathLike) -> bool: ...
 
+    def __enter__(self) -> Self: ...
+    def __exit__(
+        self,
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        traceback: TracebackType,
+    ) -> None: ...
+
 
 class BaseStorage(Storage, PathLogicMixin, ABC):
     """Abstract base class defining storage operations across different backends."""

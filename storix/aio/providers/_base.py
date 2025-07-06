@@ -61,6 +61,14 @@ class Storage(Protocol):
     async def isdir(self, path: PathLike) -> bool: ...
     async def isfile(self, path: PathLike) -> bool: ...
 
+    async def __aenter__(self) -> Self: ...
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        traceback: TracebackType,
+    ) -> None: ...
+
 
 class BaseStorage(Storage, PathLogicMixin, ABC):
     """Async base provider - REUSES all path logic from sync version."""
