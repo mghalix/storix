@@ -1,6 +1,6 @@
 """Sync version of storix."""
 
-from storix.typing import AvailableProviders, PathLike
+from storix.typing import AvailableProviders, StrPathLike
 
 from .providers import AzureDataLake, LocalFilesystem, Storage
 from .settings import settings
@@ -15,7 +15,7 @@ __all__ = [
 
 def get_storage(
     provider: AvailableProviders | str | None = None,
-    initialpath: PathLike | None = None,
+    initialpath: StrPathLike | None = None,
     sandboxed: bool | None = None,
 ) -> Storage:
     """Get a storage instance with optional runtime overrides.
@@ -52,6 +52,3 @@ def get_storage(
     if provider == "azure":
         return AzureDataLake(**params)
     raise ValueError(f"Unsupported storage provider: {provider}")
-
-
-__version__ = "0.0.1"

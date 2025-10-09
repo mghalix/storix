@@ -2,13 +2,12 @@ import os
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Any, Literal, Self, overload
 
 from loguru import logger
-from typing_extensions import Self
 
 from storix.sandbox import PathSandboxable, SandboxedPathHandler
-from storix.typing import PathLike
+from storix.typing import StrPathLike
 
 from ._base import BaseStorage
 
@@ -18,7 +17,7 @@ class LocalFilesystem(BaseStorage):
 
     def __init__(
         self,
-        initialpath: PathLike | None = None,
+        initialpath: StrPathLike | None = None,
         *,
         sandboxed: bool = True,
         sandbox_handler: type[PathSandboxable] = SandboxedPathHandler,
@@ -64,12 +63,12 @@ class LocalFilesystem(BaseStorage):
             initialpath, sandboxed=sandboxed, sandbox_handler=sandbox_handler
         )
 
-    def exists(self, path: PathLike) -> bool:
+    def exists(self, path: StrPathLike) -> bool:
         """Check if the given path exists."""
         path = self._topath(path)
         return path.exists()
 
-    def cd(self, path: PathLike | None = None) -> Self:
+    def cd(self, path: StrPathLike | None = None) -> Self:
         """Change the current working directory."""
         if path is None:
             path = self.home
@@ -87,23 +86,23 @@ class LocalFilesystem(BaseStorage):
     @overload
     def ls(
         self,
-        path: PathLike | None = None,
+        path: StrPathLike | None = None,
         *,
         abs: Literal[False] = False,
         all: bool = True,
     ) -> list[str]: ...
     @overload
     def ls(
-        self, path: PathLike | None = None, *, abs: Literal[True], all: bool = True
+        self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
     ) -> list[Path]: ...
     def ls(
-        self, path: PathLike | None = None, *, abs: bool = False, all: bool = True
+        self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[Path | str]:
         """List files and directories at the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
 
-        lst = list(path.iterdir())
+        lst: Sequence[Path] = list(path.iterdir())
 
         if not all:
             lst = self._filter_hidden(lst)
@@ -113,20 +112,20 @@ class LocalFilesystem(BaseStorage):
 
         return [file.name for file in lst]
 
-    def isdir(self, path: PathLike) -> bool:
+    def isdir(self, path: StrPathLike) -> bool:
         """Check if the given path is a directory."""
         return self._topath(path).is_dir()
 
-    def isfile(self, path: PathLike) -> bool:
+    def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""
         return self._topath(path).is_file()
 
-    def mkdir(self, path: PathLike, *, parents: bool = False) -> None:
+    def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
         path.mkdir(exist_ok=True, parents=parents)
 
-    def touch(self, path: PathLike | None, data: Any | None = None) -> bool:
+    def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
         """Create a file at the given path, optionally writing data."""
         path = self._topath(path)
 
@@ -144,7 +143,7 @@ class LocalFilesystem(BaseStorage):
             logger.error(f"tocuh: failed to write file '{path!s}': {err}")
             return False
 
-    def rmdir(self, path: PathLike, recursive: bool = False) -> bool:
+    def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool:
         """Remove a directory at the given path."""
         path = self._topath(path)
 
@@ -169,7 +168,7 @@ class LocalFilesystem(BaseStorage):
             logger.error(f"rmdir: failed to remove '{path!s}': {err}")
             return False
 
-    def cat(self, path: PathLike) -> bytes:
+    def cat(self, path: StrPathLike) -> bytes:
         """Read the contents of a file as bytes."""
         path = self._topath(path)
         self._ensure_exist(path)
@@ -180,7 +179,7 @@ class LocalFilesystem(BaseStorage):
 
         return data
 
-    def rm(self, path: PathLike) -> bool:
+    def rm(self, path: StrPathLike) -> bool:
         """Remove a file at the given path."""
         path = self._topath(path)
 
@@ -205,7 +204,7 @@ class LocalFilesystem(BaseStorage):
             logger.error(f"Failed to remove {path}: {err}")
             return False
 
-    def mv(self, source: PathLike, destination: PathLike) -> None:
+    def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Move a file or directory to a new location."""
         source = self._topath(source)
         self._ensure_exist(source)
@@ -214,7 +213,7 @@ class LocalFilesystem(BaseStorage):
 
         shutil.move(source, destination)
 
-    def cp(self, source: PathLike, destination: PathLike) -> None:
+    def cp(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Copy a file or directory to a new location."""
         source = self._topath(source)
         destination = self._topath(destination)
@@ -225,11 +224,11 @@ class LocalFilesystem(BaseStorage):
             shutil.copy2(source, destination)
 
     # TODO(mghalix): revise from here to bottom
-    def tree(self, path: PathLike | None = None, *, abs: bool = False) -> list[Path]:
+    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> list[Path]:
         """Return a tree view of files and directories starting at path."""
         raise NotImplementedError
 
-    def stat(self, path: PathLike) -> Any:
+    def stat(self, path: StrPathLike) -> Any:
         """Return stat information for the given path."""
         # path = self._topath(path)
         # self._ensure_exist(path)
@@ -237,7 +236,9 @@ class LocalFilesystem(BaseStorage):
         # return path.stat()
         raise NotImplementedError
 
-    def du(self, path: PathLike | None = None, *, human_readable: bool = True) -> Any:
+    def du(
+        self, path: StrPathLike | None = None, *, human_readable: bool = True
+    ) -> Any:
         """Return disk usage statistics for the given path."""
         path = self._topath(path)
         self._ensure_exist(path)

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"
 
 [project]
 name = "storix"
-dynamic = ["version"]
+version = "0.0.1"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -22,7 +22,7 @@ classifiers = [
     "Topic :: System :: Filesystems",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "aiofiles",
     "loguru",
@@ -51,17 +51,19 @@ Changelog = "https://github.com/mghalix/storix/blob/main/release-notes.md"
 [project.scripts]
 sx = "storix.cli.app:main"
 
-[tool.hatch.version]
-path = "storix/__init__.py"
-
-[tool.hatch.build.targets.wheel]
-packages = ["storix"]
-
 # [tool.mypy]
 # strict = true
 
 [tool.ruff]
 line-length = 88
+target-version = "py312"
+include = ["*.py", "*.pyi", "**/pyproject.toml", "*.ipynb"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint]
 select = [
@@ -100,18 +102,16 @@ ignore = [
 [tool.ruff.lint.isort]
 known-third-party = ["pydantic", "httpx", "loguru"]
 
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "INP", "TD", "ERA001", "RUF", "ANN201"]
 "examples/**" = ["D", "INP", "ERA001", "RUF"]
 
 [tool.pytest.ini_options]
-markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "integration: marks tests as integration tests",
-]
+pythonpath = ["src/storix"]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+# asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.coverage.html]
 show_contexts = true
@@ -153,4 +153,3 @@ dev = [
     "types-aiofiles>=24.1.0.20250606", # stub files for mypy
     "coverage>=7.9.2",
 ]
-

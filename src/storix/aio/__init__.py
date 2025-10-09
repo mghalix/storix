@@ -1,7 +1,7 @@
 """Async version of storix - identical API but with async/await."""
 
 from ..settings import settings
-from ..typing import AvailableProviders, PathLike
+from ..typing import AvailableProviders, StrPathLike
 from .providers import AzureDataLake, LocalFilesystem, Storage
 
 __all__ = [
@@ -14,7 +14,7 @@ __all__ = [
 
 def get_storage(
     provider: AvailableProviders | str | None = None,
-    initialpath: PathLike | None = None,
+    initialpath: StrPathLike | None = None,
     sandboxed: bool | None = None,
 ) -> Storage:
     """Get a storage instance with optional runtime overrides.

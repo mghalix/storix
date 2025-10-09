@@ -2,5 +2,5 @@
 
 set -x
 
-ruff check storix --fix
-ruff format storix
+ruff check src --fix
+ruff format src

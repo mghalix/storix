@@ -1,10 +1,10 @@
 import asyncio
+import datetime as dt
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from datetime import datetime as dt
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal, TypeVar, overload
+from typing import Any, Literal, Self, TypeVar, overload
 
 import magic
 from azure.storage.blob import ContentSettings
@@ -18,11 +18,11 @@ from azure.storage.filedatalake.aio import (
 from azure.storage.filedatalake.aio import FileSystemClient as AsyncFileSystemClient
 from loguru import logger
 from pydantic import BaseModel
-from typing_extensions import Self
 
 from storix.sandbox import PathSandboxable, SandboxedPathHandler
+from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
 from storix.settings import settings
-from storix.typing import PathLike
+from storix.typing import StrPathLike
 
 from ._base import BaseStorage
 
@@ -34,8 +34,8 @@ class FileProperties(BaseModel):
 
     name: str
     hdi_isfolder: bool = False
-    last_modified: dt
-    creation_time: dt
+    last_modified: dt.datetime
+    creation_time: dt.datetime
 
     model_config = {"from_attributes": True}
 
@@ -44,24 +44,24 @@ class AzureDataLake(BaseStorage):
     """Async Azure Data Lake Storage Gen2 implementation - identical interface to sync version."""
 
     __slots__ = (
-        "__filesystem",
-        "__service_client",
         "_current_path",
+        "_filesystem",
         "_home",
         "_min_depth",
         "_sandbox",
+        "_service_client",
     )
 
     _sandbox: PathSandboxable | None
-    __service_client: AsyncDataLakeServiceClient
-    __filesystem: AsyncFileSystemClient
+    _service_client: AsyncDataLakeServiceClient
+    _filesystem: AsyncFileSystemClient
     _home: Path
     _current_path: Path
     _min_depth: Path
 
     def __init__(
         self,
-        initialpath: PathLike | None = None,
+        initialpath: StrPathLike | None = None,
         container_name: str = str(settings.ADLSG2_CONTAINER_NAME),
         adlsg2_account_name: str | None = settings.ADLSG2_ACCOUNT_NAME,
         adlsg2_token: str | None = settings.ADLSG2_TOKEN,
@@ -107,11 +107,11 @@ class AzureDataLake(BaseStorage):
             "ADLSg2 account name and authentication token are required"
         )
 
-        self.__service_client = self._get_service_client(
+        self._service_client = self._get_service_client(
             adlsg2_account_name, adlsg2_token
         )
-        self.__filesystem = self._init_filesystem(
-            self.__service_client, str(container_name)
+        self._filesystem = self._init_filesystem(
+            self._service_client, str(container_name)
         )
 
         super().__init__(
@@ -134,7 +134,7 @@ class AzureDataLake(BaseStorage):
     # TODO(mghali): convert the return type to dict[str, str] or Tree DS
     # so that its O(1) from the ui-side to access
     async def tree(
-        self, path: PathLike | None = None, *, abs: bool = False
+        self, path: StrPathLike | None = None, *, abs: bool = False
     ) -> list[Path]:
         """Get a recursive listing of all files and directories.
 
@@ -149,7 +149,7 @@ class AzureDataLake(BaseStorage):
         path = self._topath(path)
         await self._ensure_exist(path)
 
-        all = self.__filesystem.get_paths(path=str(path), recursive=True)
+        all = self._filesystem.get_paths(path=str(path), recursive=True)
         paths: list[Path] = [self._topath(f.name) async for f in all]
 
         if self._sandbox:
@@ -160,7 +160,7 @@ class AzureDataLake(BaseStorage):
     @overload
     async def ls(
         self,
-        path: PathLike | None = None,
+        path: StrPathLike | None = None,
         *,
         abs: Literal[False] = False,
         all: bool = True,
@@ -168,19 +168,19 @@ class AzureDataLake(BaseStorage):
     @overload
     async def ls(
         self,
-        path: PathLike | None = None,
+        path: StrPathLike | None = None,
         *,
         abs: Literal[True] = True,
         all: bool = True,
     ) -> list[Path]: ...
     async def ls(
-        self, path: PathLike | None = None, *, abs: bool = False, all: bool = True
+        self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[Path | str]:
         """List all items at the given path as Path or str objects."""
         path = self._topath(path)
         await self._ensure_exist(path)
 
-        items = self.__filesystem.get_paths(path=str(path), recursive=False)
+        items = self._filesystem.get_paths(path=str(path), recursive=False)
         paths: Sequence[Path] = [self.home / f.name async for f in items]
 
         if not all:
@@ -191,18 +191,18 @@ class AzureDataLake(BaseStorage):
 
         return paths
 
-    async def mkdir(self, path: PathLike, *, parents: bool = False) -> None:
+    async def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
         # TODO(mghalix): add parents logic
-        await self.__filesystem.create_directory(str(path))
+        await self._filesystem.create_directory(str(path))
 
-    async def isdir(self, path: PathLike) -> bool:
+    async def isdir(self, path: StrPathLike) -> bool:
         """Check if the given path is a directory."""
         stats = await self.stat(path)
         return stats.hdi_isfolder
 
-    async def stat(self, path: PathLike) -> FileProperties:
+    async def stat(self, path: StrPathLike) -> FileProperties:
         """Return stat information for the given path."""
         path = self._topath(path)
         await self._ensure_exist(path)
@@ -216,13 +216,13 @@ class AzureDataLake(BaseStorage):
 
             return FileProperties.model_validate(dict(**props, **metadata))
 
-    async def isfile(self, path: PathLike) -> bool:
+    async def isfile(self, path: StrPathLike) -> bool:
         """Return True if the path is a file."""
         stats = await self.stat(path)
         return not stats.hdi_isfolder
 
     # TODO(mghali): add a confirm override option
-    async def mv(self, source: PathLike, destination: PathLike) -> None:
+    async def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Move a file or directory to a new location."""
         source = self._topath(source)
         destination = self._topath(destination)
@@ -240,7 +240,7 @@ class AzureDataLake(BaseStorage):
         # TODO(mghali): add fallback or error on touch fail (ensuring no data loss by rm)
         await asyncio.gather(self.touch(dest, data), self.rm(source))
 
-    async def cd(self, path: PathLike | None = None) -> Self:
+    async def cd(self, path: StrPathLike | None = None) -> Self:
         """Change to the given directory."""
         if path is None:
             path = self.home
@@ -259,7 +259,7 @@ class AzureDataLake(BaseStorage):
         self._current_path = path
         return self
 
-    async def rm(self, path: PathLike) -> bool:
+    async def rm(self, path: StrPathLike) -> bool:
         """Delete an item at the given path. Returns True if successful."""
         path = self._topath(path)
         await self._ensure_exist(path)
@@ -273,7 +273,7 @@ class AzureDataLake(BaseStorage):
 
         return True
 
-    async def rmdir(self, path: PathLike, recursive: bool = False) -> bool:
+    async def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool:
         """Remove a directory at the given path."""
         path = self._topath(path)
 
@@ -292,7 +292,7 @@ class AzureDataLake(BaseStorage):
 
         return True
 
-    async def touch(self, path: PathLike | None, data: Any | None = None) -> bool:
+    async def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
         """Create a file at the given path, optionally writing data."""
         path = self._topath(path)
 
@@ -311,7 +311,7 @@ class AzureDataLake(BaseStorage):
 
         return True
 
-    async def cat(self, path: PathLike) -> bytes:
+    async def cat(self, path: StrPathLike) -> bytes:
         """Read the contents of a file as bytes."""
         path = self._topath(path)
         await self._ensure_exist(path)
@@ -326,7 +326,7 @@ class AzureDataLake(BaseStorage):
 
         return blob
 
-    async def exists(self, path: PathLike) -> bool:
+    async def exists(self, path: StrPathLike) -> bool:
         """Return True if the path exists."""
         path = self._topath(path)
 
@@ -343,7 +343,7 @@ class AzureDataLake(BaseStorage):
             except Exception:
                 return False
 
-    async def cp(self, source: PathLike, destination: PathLike) -> None:
+    async def cp(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Copy a file or directory to a new location."""
         source = self._topath(source)
         destination = self._topath(destination)
@@ -358,7 +358,7 @@ class AzureDataLake(BaseStorage):
 
     # TODO(mghalix): review / remove - mirror in sync provider
     async def du(
-        self, path: PathLike | None = None, *, human_readable: bool = True
+        self, path: StrPathLike | None = None, *, human_readable: bool = True
     ) -> Any:
         """Get disk usage for Azure storage - placeholder implementation."""
         # Azure Data Lake doesn't provide direct disk usage stats
@@ -384,28 +384,85 @@ class AzureDataLake(BaseStorage):
 
     async def close(self) -> None:
         """Close the Azure Data Lake client and filesystem."""
-        await self.__filesystem.close()
-        await self.__service_client.close()
+        await self._filesystem.close()
+        await self._service_client.close()
 
     @asynccontextmanager
     async def _get_file_client(
-        self, filepath: PathLike
+        self, filepath: StrPathLike
     ) -> AsyncIterator[AsyncDataLakeFileClient]:
         filepath = self._topath(filepath)
-        async with self.__filesystem.get_file_client(str(filepath)) as client:
+        async with self._filesystem.get_file_client(str(filepath)) as client:
             yield client
 
     @asynccontextmanager
     async def _get_dir_client(
-        self, dirpath: PathLike
+        self, dirpath: StrPathLike
     ) -> AsyncIterator[AsyncDataLakeDirectoryClient]:
         dirpath = self._topath(dirpath)
-        async with self.__filesystem.get_directory_client(str(dirpath)) as client:
+        async with self._filesystem.get_directory_client(str(dirpath)) as client:
             yield client
+
+    async def make_url(
+        self, path: StrPathLike, *, astype: Literal["data_url", "sas"] = "sas"
+    ) -> str:
+        """Generate a url for a path."""
+        if astype == "sas":
+            return await self._generate_sas_url(
+                path, expires_in=SAS_EXPIRY_SECONDS, permissions=SAS_PERMISSIONS
+            )
+        return await super().make_url(path, astype=astype)
+
+    async def _generate_sas_url(
+        self,
+        path: StrPathLike,
+        *,
+        expires_in: int = 3600,
+        permissions: frozenset[Permissions] = frozenset({Permissions.READ}),
+    ) -> str:
+        from azure.storage.filedatalake import FileSasPermissions, generate_file_sas
+
+        from storix.utils import craft_adlsg2_url_sas
+
+        path = self._topath(path)
+        await self._ensure_exist(path)
+
+        if await self.isdir(path):
+            raise ValueError("cannot generate a sas token for a directory")
+
+        fs = self._filesystem
+        account_name: str = str(fs.account_name)
+        container: str = str(fs.file_system_name)
+        credential: str = str(fs.credential.account_key)
+
+        expiry = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=expires_in)
+        file_permissions = FileSasPermissions(**dict.fromkeys(permissions, True))
+
+        directory: str = str(path.parent).lstrip("/")
+        filename: str = path.parts[-1]
+
+        # pure local crypto op no i/o
+        token = generate_file_sas(
+            account_name=account_name,
+            file_system_name=container,
+            credential=credential,
+            directory_name=directory,
+            file_name=filename,
+            permission=file_permissions,
+            expiry=expiry,
+        )
+
+        return craft_adlsg2_url_sas(
+            account_name=account_name,
+            container=container,
+            directory=directory,
+            filename=filename,
+            sas_token=token,
+        )
 
     async def __aenter__(self) -> Self:
         """Enter the async context manager."""
-        return self
+        return await self.open()
 
     async def __aexit__(
         self,

@@ -1,5 +1,5 @@
 import os
 from typing import Literal
 
-PathLike = os.PathLike | str
+StrPathLike = os.PathLike[str] | str
 AvailableProviders = Literal["local", "azure"]

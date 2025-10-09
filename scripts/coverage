@@ -3,7 +3,7 @@
 set -e
 set -x
 
-coverage run --source=storix -m pytest
+coverage run --source=src/storix -m pytest
 coverage report --show-missing
 coverage html --title "${@-coverage}"
 xdg-open htmlcov/index.html

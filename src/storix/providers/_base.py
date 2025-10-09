@@ -2,76 +2,89 @@ from abc import ABC
 from collections.abc import Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal, Protocol, overload
-
-from typing_extensions import Self
+from typing import Any, Literal, Protocol, Self, overload
 
 from storix.sandbox import PathSandboxable
-from storix.typing import PathLike
+from storix.typing import StrPathLike
 from storix.utils import PathLogicMixin
 
 
 class Storage(Protocol):
-    """Async version of Storage protocol - identical interface but async methods."""
+    """Protocol for storage provider interface."""
 
     @property
     def root(self) -> Path: ...
     @property
     def home(self) -> Path: ...
 
-    def chroot(self, new_root: PathLike) -> Self: ...
-    async def touch(self, path: PathLike | None, data: Any | None = None) -> bool: ...
-    async def cat(self, path: PathLike) -> bytes: ...
-    async def cd(self, path: PathLike | None = None) -> Self: ...
+    def chroot(self, new_root: StrPathLike) -> Self: ...
+    def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool: ...
+    def cat(self, path: StrPathLike) -> bytes: ...
+    def cd(self, path: StrPathLike | None = None) -> Self: ...
     def pwd(self) -> Path: ...
-    async def mkdir(self, path: PathLike, *, parents: bool = True) -> None: ...
-    async def mv(self, source: PathLike, destination: PathLike) -> None: ...
-    async def cp(self, source: PathLike, destination: PathLike) -> None: ...
-    async def rm(self, path: PathLike) -> bool: ...
-    async def rmdir(self, path: PathLike, recursive: bool = False) -> bool: ...
+    def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None: ...
+    def mv(self, source: StrPathLike, destination: StrPathLike) -> None: ...
+    def cp(self, source: StrPathLike, destination: StrPathLike) -> None: ...
+    def rm(self, path: StrPathLike) -> bool: ...
+    def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool: ...
     @overload
-    async def ls(
+    def ls(
         self,
-        path: PathLike | None = None,
+        path: StrPathLike | None = None,
         *,
         abs: Literal[False] = False,
         all: bool = True,
     ) -> list[str]: ...
     @overload
-    async def ls(
-        self,
-        path: PathLike | None = None,
-        *,
-        abs: Literal[True] = True,
-        all: bool = True,
+    def ls(
+        self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
     ) -> list[Path]: ...
-    async def ls(
-        self, path: PathLike | None = None, *, abs: bool = False, all: bool = True
+    def ls(
+        self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[Path | str]: ...
-    async def tree(
-        self, path: PathLike | None = None, *, abs: bool = False
+    def tree(
+        self, path: StrPathLike | None = None, *, abs: bool = False
     ) -> list[Path]: ...
-    async def stat(self, path: PathLike) -> Any: ...
-    async def du(
-        self, path: PathLike | None = None, *, human_readable: bool = True
+    # TODO(@mghali): bind stat and du return type to Node or Tree for du
+    # the bound generic to TreeNode or Tree would cause circular import error...?
+    def stat(self, path: StrPathLike) -> Any: ...
+    def du(
+        self, path: StrPathLike | None = None, *, human_readable: bool = True
     ) -> Any: ...
 
     # non unix commands but useful utils
-    async def exists(self, path: PathLike) -> bool: ...
-    async def isdir(self, path: PathLike) -> bool: ...
-    async def isfile(self, path: PathLike) -> bool: ...
+    def exists(self, path: StrPathLike) -> bool: ...
+    def isdir(self, path: StrPathLike) -> bool: ...
+    def isfile(self, path: StrPathLike) -> bool: ...
+    def make_url(
+        self,
+        path: StrPathLike,
+        *,
+        astype: Literal["data_url"] = "data_url",
+    ) -> str: ...
+    def make_data_url(self, path: StrPathLike) -> str: ...
+    def parent(self, path: StrPathLike) -> Path: ...
+    def parents(self, path: StrPathLike) -> Sequence[Path]: ...
+    def empty(self, path: StrPathLike) -> bool: ...
+    def is_root(self, path: StrPathLike) -> bool: ...
 
-    async def __aenter__(self) -> Self: ...
-    async def __aexit__(
+    def open(self) -> Self: ...
+    def close(self) -> None: ...
+
+    def __enter__(self) -> Self:
+        return self.open()
+
+    def __exit__(
         self,
         exc_type: type[BaseException],
         exc_value: BaseException,
         traceback: TracebackType,
-    ) -> None: ...
+    ) -> None:
+        self.close()
 
 
 class BaseStorage(Storage, PathLogicMixin, ABC):
-    """Async base provider - REUSES all path logic from sync version."""
+    """Abstract base class defining storage operations across different backends."""
 
     __slots__ = (
         "_current_path",
@@ -87,12 +100,12 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
 
     def __init__(
         self,
-        initialpath: PathLike | None = None,
+        initialpath: StrPathLike | None = None,
         *,
         sandboxed: bool = False,
         sandbox_handler: type[PathSandboxable] | None = None,
     ) -> None:
-        """Initialize the async storage (identical to sync version).
+        """Initialize the storage.
 
         Sets up common operations for any filesystem storage implementation
         with optional path sandboxing. It expands and normalizes the provided path,
@@ -121,11 +134,24 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
             self._sandbox = None
             self._init_storage(initialpath=root)
 
-    async def _ensure_exist(self, path: PathLike) -> None:
-        if await self.exists(path):
+    def _ensure_exist(self, path: StrPathLike) -> None:
+        if self.exists(path):
             return
 
         raise ValueError(f"path '{path}' does not exist.")
+
+    def __enter__(self) -> Self:
+        """Enter the runtime context related to this object."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException],
+        exc_value: BaseException,
+        traceback: TracebackType,
+    ) -> None:
+        """Exit the runtime context and close resources."""
+        self.cd()
 
     @property
     def home(self) -> Path:
@@ -136,7 +162,7 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
     def root(self) -> Path:
         return Path("/")
 
-    def chroot(self, new_root: PathLike) -> Self:
+    def chroot(self, new_root: StrPathLike) -> Self:
         """Change storage root to a descendant path reconstructing the storage."""
         initialpath = self._topath(new_root)
         return self._init_storage(initialpath=initialpath)
@@ -145,22 +171,23 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
         """Return the current working directory."""
         return self._current_path
 
-    def _init_storage(self, initialpath: PathLike) -> Self:
+    def _init_storage(self, initialpath: StrPathLike) -> Self:
         initialpath = self._prepend_root(initialpath)
         self._min_depth = self._home = self._current_path = initialpath
         return self
 
-    def _prepend_root(self, path: PathLike | None = None) -> Path:
+    def _prepend_root(self, path: StrPathLike | None = None) -> Path:
         if path is None:
             return Path("/")
         return Path("/") / str(path).lstrip("/")
 
-    async def __aenter__(self) -> Self:
-        return self
-
-    async def __aexit__(
+    def make_url(
         self,
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        traceback: TracebackType,
-    ) -> None: ...
+        path: StrPathLike,
+        *,
+        astype: Literal["data_url"] = "data_url",
+    ) -> str:
+        if astype == "data_url":
+            return self.make_data_url(path)
+
+        raise NotImplementedError(f"cannot make url of type: {astype}")
