@@ -130,8 +130,8 @@ class LocalFilesystem(BaseStorage):
     async def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
-        # TODO: add parents logic (i heard exist_ok does it already..?)
-        await aioos.makedirs(path, exist_ok=True)
+        coro = aioos.makedirs(path, exist_ok=True) if parents else aioos.mkdir(path)
+        await coro
 
     async def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
         """Create a file at the given path with optional data."""

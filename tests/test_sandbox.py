@@ -438,7 +438,6 @@ class TestAsyncSandboxedFileSystem:
         # TODO: Investigate why this doesn't raise ValueError with sandboxed=True default
         # with pytest.raises(ValueError, match="escape sandbox boundaries"):
         #     await fs.cd("../../..")
-        pass
 
 
 class TestSandboxSecurity:

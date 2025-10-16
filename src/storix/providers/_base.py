@@ -1,89 +1,19 @@
+from __future__ import annotations
+
 from abc import ABC
-from collections.abc import Sequence
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Literal, Protocol, Self, overload
+from typing import TYPE_CHECKING, Literal, Self
 
-from storix.sandbox import PathSandboxable
-from storix.typing import StrPathLike
-from storix.utils import PathLogicMixin
+from ._proto import Storage
 
+if TYPE_CHECKING:
+    from storix.sandbox import PathSandboxable
+    from storix.typing import StrPathLike
 
-class Storage(Protocol):
-    """Protocol for storage provider interface."""
-
-    @property
-    def root(self) -> Path: ...
-    @property
-    def home(self) -> Path: ...
-
-    def chroot(self, new_root: StrPathLike) -> Self: ...
-    def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool: ...
-    def cat(self, path: StrPathLike) -> bytes: ...
-    def cd(self, path: StrPathLike | None = None) -> Self: ...
-    def pwd(self) -> Path: ...
-    def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None: ...
-    def mv(self, source: StrPathLike, destination: StrPathLike) -> None: ...
-    def cp(self, source: StrPathLike, destination: StrPathLike) -> None: ...
-    def rm(self, path: StrPathLike) -> bool: ...
-    def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool: ...
-    @overload
-    def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[False] = False,
-        all: bool = True,
-    ) -> list[str]: ...
-    @overload
-    def ls(
-        self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
-    ) -> list[Path]: ...
-    def ls(
-        self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[Path | str]: ...
-    def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[Path]: ...
-    # TODO(@mghali): bind stat and du return type to Node or Tree for du
-    # the bound generic to TreeNode or Tree would cause circular import error...?
-    def stat(self, path: StrPathLike) -> Any: ...
-    def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any: ...
-
-    # non unix commands but useful utils
-    def exists(self, path: StrPathLike) -> bool: ...
-    def isdir(self, path: StrPathLike) -> bool: ...
-    def isfile(self, path: StrPathLike) -> bool: ...
-    def make_url(
-        self,
-        path: StrPathLike,
-        *,
-        astype: Literal["data_url"] = "data_url",
-    ) -> str: ...
-    def make_data_url(self, path: StrPathLike) -> str: ...
-    def parent(self, path: StrPathLike) -> Path: ...
-    def parents(self, path: StrPathLike) -> Sequence[Path]: ...
-    def empty(self, path: StrPathLike) -> bool: ...
-    def is_root(self, path: StrPathLike) -> bool: ...
-
-    def open(self) -> Self: ...
-    def close(self) -> None: ...
-
-    def __enter__(self) -> Self:
-        return self.open()
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        traceback: TracebackType,
-    ) -> None:
-        self.close()
+from storix.utils import PathLogicMixin, to_data_url
 
 
-class BaseStorage(Storage, PathLogicMixin, ABC):
+class BaseStorage(PathLogicMixin, Storage, ABC):
     """Abstract base class defining storage operations across different backends."""
 
     __slots__ = (
@@ -140,19 +70,6 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
 
         raise ValueError(f"path '{path}' does not exist.")
 
-    def __enter__(self) -> Self:
-        """Enter the runtime context related to this object."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        traceback: TracebackType,
-    ) -> None:
-        """Exit the runtime context and close resources."""
-        self.cd()
-
     @property
     def home(self) -> Path:
         """Return the home path of the storage."""
@@ -181,6 +98,13 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
             return Path("/")
         return Path("/") / str(path).lstrip("/")
 
+    def empty(self, path: StrPathLike) -> bool:
+        return not bool(self.ls(path))
+
+    def make_data_url(self, path: StrPathLike) -> str:
+        data = self.cat(path)
+        return to_data_url(buf=data)
+
     def make_url(
         self,
         path: StrPathLike,
@@ -191,3 +115,9 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
             return self.make_data_url(path)
 
         raise NotImplementedError(f"cannot make url of type: {astype}")
+
+    def open(self) -> Self:
+        return self
+
+    def close(self) -> None:
+        self.cd()

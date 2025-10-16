@@ -3,19 +3,26 @@ import datetime as dt
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from types import TracebackType
 from typing import Any, Literal, Self, TypeVar, overload
 
 import magic
-from azure.storage.blob import ContentSettings
-from azure.storage.filedatalake.aio import (
-    DataLakeDirectoryClient as AsyncDataLakeDirectoryClient,
-)
-from azure.storage.filedatalake.aio import DataLakeFileClient as AsyncDataLakeFileClient
-from azure.storage.filedatalake.aio import (
-    DataLakeServiceClient as AsyncDataLakeServiceClient,
-)
-from azure.storage.filedatalake.aio import FileSystemClient as AsyncFileSystemClient
+
+try:
+    from azure.storage.blob import ContentSettings
+    from azure.storage.filedatalake.aio import (
+        DataLakeDirectoryClient as AsyncDataLakeDirectoryClient,
+    )
+    from azure.storage.filedatalake.aio import (
+        DataLakeFileClient as AsyncDataLakeFileClient,
+    )
+    from azure.storage.filedatalake.aio import (
+        DataLakeServiceClient as AsyncDataLakeServiceClient,
+    )
+    from azure.storage.filedatalake.aio import FileSystemClient as AsyncFileSystemClient
+except ImportError as err:
+    raise ImportError(
+        'azure backend not installed. Install it by running `"uv add storix[azure]"`.'
+    ) from err
 from loguru import logger
 from pydantic import BaseModel
 
@@ -459,16 +466,3 @@ class AzureDataLake(BaseStorage):
             filename=filename,
             sas_token=token,
         )
-
-    async def __aenter__(self) -> Self:
-        """Enter the async context manager."""
-        return await self.open()
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        traceback: TracebackType,
-    ) -> None:
-        """Exit the async context manager."""
-        await self.close()

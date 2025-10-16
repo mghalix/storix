@@ -1,93 +1,19 @@
+from __future__ import annotations
+
 from abc import ABC
-from collections.abc import Sequence
 from pathlib import Path
-from types import TracebackType
-from typing import Any, Literal, Protocol, Self, overload
+from typing import TYPE_CHECKING, Literal, Self
 
-from storix.sandbox import PathSandboxable
-from storix.typing import StrPathLike
-from storix.utils import PathLogicMixin, to_data_url
+from storix.utils import PathLogicMixin
 
+from ._proto import Storage
 
-class Storage(Protocol):
-    """Async version of Storage protocol - identical interface but async methods."""
-
-    @property
-    def root(self) -> Path: ...
-    @property
-    def home(self) -> Path: ...
-
-    def chroot(self, new_root: StrPathLike) -> Self: ...
-    async def touch(
-        self, path: StrPathLike | None, data: Any | None = None
-    ) -> bool: ...
-    async def cat(self, path: StrPathLike) -> bytes: ...
-    async def cd(self, path: StrPathLike | None = None) -> Self: ...
-    def pwd(self) -> Path: ...
-    async def mkdir(self, path: StrPathLike, *, parents: bool = True) -> None: ...
-    async def mv(self, source: StrPathLike, destination: StrPathLike) -> None: ...
-    async def cp(self, source: StrPathLike, destination: StrPathLike) -> None: ...
-    async def rm(self, path: StrPathLike) -> bool: ...
-    async def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool: ...
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[False] = False,
-        all: bool = True,
-    ) -> list[str]: ...
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[True] = True,
-        all: bool = True,
-    ) -> list[Path]: ...
-    async def ls(
-        self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[Path | str]: ...
-    async def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[Path]: ...
-    async def stat(self, path: StrPathLike) -> Any: ...
-    async def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any: ...
-
-    # non unix commands but useful utils
-    async def exists(self, path: StrPathLike) -> bool: ...
-    async def isdir(self, path: StrPathLike) -> bool: ...
-    async def isfile(self, path: StrPathLike) -> bool: ...
-    async def make_url(
-        self,
-        path: StrPathLike,
-        *,
-        astype: Literal["data_url"] = "data_url",
-    ) -> str: ...
-    async def make_data_url(self, path: StrPathLike) -> str: ...
-    def parent(self, path: StrPathLike) -> Path: ...
-    def parents(self, path: StrPathLike) -> Sequence[Path]: ...
-    async def empty(self, path: StrPathLike) -> bool: ...
-    def is_root(self, path: StrPathLike) -> bool: ...
-
-    async def open(self) -> Self: ...
-    async def close(self) -> None: ...
-
-    async def __aenter__(self) -> Self:
-        return await self.open()
-
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException],
-        exc_value: BaseException,
-        traceback: TracebackType,
-    ) -> None:
-        await self.close()
+if TYPE_CHECKING:
+    from storix.sandbox import PathSandboxable
+    from storix.typing import StrPathLike
 
 
-class BaseStorage(Storage, PathLogicMixin, ABC):
+class BaseStorage(PathLogicMixin, Storage, ABC):
     """Async base provider - REUSES all path logic from sync version."""
 
     __slots__ = (
@@ -148,7 +74,7 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
         return self
 
     async def close(self) -> None:
-        return None
+        await self.cd()
 
     @property
     def home(self) -> Path:
@@ -180,6 +106,8 @@ class BaseStorage(Storage, PathLogicMixin, ABC):
         raise NotImplementedError(f"cannot make url of type: {astype}")
 
     async def make_data_url(self, path: StrPathLike) -> str:
+        from storix.utils import to_data_url
+
         data = await self.cat(path)
         return to_data_url(buf=data)
 

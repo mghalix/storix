@@ -6,13 +6,20 @@ from types import TracebackType
 from typing import Any, Literal, Self, overload
 
 import magic
-from azure.storage.blob import ContentSettings
-from azure.storage.filedatalake import (
-    DataLakeDirectoryClient,
-    DataLakeFileClient,
-    DataLakeServiceClient,
-    FileSystemClient,
-)
+
+try:
+    from azure.storage.blob import ContentSettings
+    from azure.storage.filedatalake import (
+        DataLakeDirectoryClient,
+        DataLakeFileClient,
+        DataLakeServiceClient,
+        FileSystemClient,
+    )
+except ImportError as err:
+    raise ImportError(
+        'azure backend not installed. Install it by running `"uv add storix[azure]"`.'
+    ) from err
+
 from loguru import logger
 from pydantic import BaseModel
 
