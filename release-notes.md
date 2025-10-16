@@ -1,5 +1,23 @@
 # Release Notes
 
+## [0.0.2] – 2025‑10‑16
+
+### Highlights
+
+* **Python 3.12+ support** – raised the minimum Python version to 3.12 (tested on 3.13) and dropped support for older versions.
+* **`src` layout & build upgrade** – moved all code under the `src/` directory and switched from `hatchling` to **uv_build** for packaging.
+  This aligns with best practices and simplifies installation via `uv`.
+* **Lazy imports & module reorganisation** – refactored modules into `storix` and `storix.aio` packages under `src`, introducing `__getattr__` to lazily load providers (avoids importing optional dependencies until needed).
+* **Sandbox refactor** – replaced `PathSandboxable` with **PathSandboxer** and `SandboxedPathHandler`, strengthening sandbox enforcement and path‑resolution logic to block traversal & symlink escapes.
+* **New utility & model modules** – added `storix/utils` (e.g. `to_data_url`, `PathLogicMixin`) and data models such as `AzureFileProperties` to standardize metadata returned by `stat()`.
+* **Scripts & CLI updates** – updated scripts (`coverage`, `format`, `lint`) to operate on the new `src` layout; `pyproject.toml` now defines pytest discovery paths and richer `ruff` formatting/linting rules.
+* **Miscellaneous improvements** – improved `get_storage()` typing (`StrPathLike`), added lazy provider lookup maps, fixed configuration for docstring formatting, and defined version statically rather than dynamically.
+
+### Migration notes
+
+* **Sandbox handlers** – if you rely on custom sandbox handlers, update them to implement `PathSandboxer` rather than the old `PathSandboxable` interface.
+* **Async API** – the asynchronous API remains identical; just import from `storix.aio` and use `await` on file operations.
+
 ## [0.0.1] - 2024-07-06
 
 ### 🎉 Initial Release
@@ -64,6 +82,15 @@ ADLSG2_TOKEN=your-sas-token-or-account-key
 ---
 
 ## Version History
+
+### [0.0.2] – 2025‑10‑16
+
+- Introduced Python 3.12+ requirement and removed support for Python < 3.12.
+- Adopted a `src` layout and switched packaging to `uv_build`.
+- Implemented lazy imports via `__getattr__` and reorganized modules under `storix` and `storix.aio`.
+- Refactored sandbox to use `PathSandboxer`/`SandboxedPathHandler`.
+- Added new utility and model modules (`utils`, `AzureFileProperties`).
+- Updated scripts and tooling (`coverage`, `format`, `lint`, `pyproject.toml`).
 
 ### [0.0.1] - 2024-07-06
 

@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "storix"
-version = "0.0.1"
+version = "0.0.2"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
