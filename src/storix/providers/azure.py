@@ -3,9 +3,9 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal, Self, overload
+from typing import Any, AnyStr, Literal, Self, overload
 
-import magic
+from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 
 try:
     from azure.storage.blob import ContentSettings
@@ -26,7 +26,7 @@ from storix.models import AzureFileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
 from storix.settings import settings
-from storix.typing import StrPathLike
+from storix.typing import DataBuffer, StrPathLike, _EchoMode
 
 from ._base import BaseStorage
 
@@ -274,7 +274,7 @@ class AzureDataLake(BaseStorage):
 
         return True
 
-    def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
+    def touch(self, path: StrPathLike, data: Any | None = None) -> bool:
         """Create a file at the given path, optionally writing data."""
         path = self._topath(path)
 
@@ -284,10 +284,55 @@ class AzureDataLake(BaseStorage):
             if not data:
                 return True
 
-            content_type = magic.from_buffer(data, mime=True)
+            from storix.utils import get_mimetype
+
             f.upload_data(
                 data,
                 overwrite=True,
+                content_settings=ContentSettings(content_type=get_mimetype(buf=data)),
+            )
+
+        return True
+
+    def echo(
+        self,
+        data: DataBuffer[AnyStr],
+        path: StrPathLike,
+        *,
+        mode: _EchoMode = "w",
+        chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+    ) -> bool:
+        """Write (overwrite/append) data into a file."""
+        path = self._topath(path)
+
+        with self._get_file_client(path) as f:
+            from storix.constants import DEFAULT_MIMETYPE_DETECTION_PEEKSIZE
+            from storix.utils import get_mimetype
+            from storix.utils.streaming import normalize_data
+
+            stream = normalize_data(data)
+
+            offset = 0
+
+            if mode == "w" or not self.exists(path):
+                f.create_file()
+                head = stream.read(DEFAULT_MIMETYPE_DETECTION_PEEKSIZE)
+                content_type = get_mimetype(buf=head)
+                length = len(head)
+                f.append_data(head, offset=offset, length=length)
+                offset += length
+            else:
+                props = f.get_file_properties()
+                content_type = props.content_settings.content_type
+                offset = props.size
+
+            while chunk := stream.read(chunksize):
+                length = len(chunk)
+                f.append_data(chunk, offset=offset, length=length)
+                offset += length
+
+            f.flush_data(
+                offset=offset,
                 content_settings=ContentSettings(content_type=content_type),
             )
 

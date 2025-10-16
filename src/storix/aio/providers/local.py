@@ -3,14 +3,15 @@ import os
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal, Self, overload
+from typing import Any, AnyStr, Literal, Self, overload
 
 import aiofiles as aiof
 import aiofiles.os as aioos
 from loguru import logger
 
+from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
-from storix.typing import StrPathLike
+from storix.typing import AsyncDataBuffer, StrPathLike, _EchoMode
 
 from ._base import BaseStorage
 
@@ -133,7 +134,7 @@ class LocalFilesystem(BaseStorage):
         coro = aioos.makedirs(path, exist_ok=True) if parents else aioos.mkdir(path)
         await coro
 
-    async def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
+    async def touch(self, path: StrPathLike, data: Any | None = None) -> bool:
         """Create a file at the given path with optional data."""
         path = self._topath(path)
 
@@ -296,3 +297,42 @@ class LocalFilesystem(BaseStorage):
             return f"{size:.1f}PB"
 
         return size
+
+    async def echo(
+        self,
+        data: AsyncDataBuffer[AnyStr],
+        path: StrPathLike,
+        *,
+        mode: _EchoMode = "w",
+        chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+    ) -> bool:
+        """Write (overwrite/append) data into a file."""
+        path = self._topath(path)
+
+        if not await self.exists(path.parent):
+            logger.error(
+                f"echo: cannot echo into '{path!s}': No such file or directory"
+            )
+            return False
+
+        from storix.utils.streaming import normalize_data
+
+        stream = normalize_data(data)
+        try:
+            async with aiof.open(path, mode + "b") as f:
+                while True:
+                    chunk = stream.read(chunksize)
+
+                    if asyncio.iscoroutine(chunk):
+                        chunk = await chunk
+
+                    if not chunk:
+                        break
+
+                    await f.write(chunk)
+
+        except Exception as err:
+            logger.error(f"echo: failed to write into file '{path!s}': {err}")
+            return False
+
+        return True

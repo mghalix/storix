@@ -1,9 +1,17 @@
-from collections.abc import Sequence
+from collections.abc import AsyncIterable, Iterable, Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal, Protocol, Self, overload
+from typing import (
+    IO,
+    Any,
+    AnyStr,
+    Literal,
+    Protocol,
+    Self,
+    overload,
+)
 
-from storix.typing import StrPathLike
+from storix.typing import StrPathLike, _EchoMode
 
 
 class Storage(Protocol):
@@ -15,8 +23,14 @@ class Storage(Protocol):
     def home(self) -> Path: ...
 
     def chroot(self, new_root: StrPathLike) -> Self: ...
-    async def touch(
-        self, path: StrPathLike | None, data: Any | None = None
+    async def touch(self, path: StrPathLike, data: Any | None = None) -> bool: ...
+    async def echo(
+        self,
+        data: IO[AnyStr] | AnyStr | Iterable[AnyStr] | AsyncIterable[AnyStr],
+        path: StrPathLike,
+        *,
+        mode: _EchoMode = "w",
+        chunksize: int = ...,
     ) -> bool: ...
     async def cat(self, path: StrPathLike) -> bytes: ...
     async def cd(self, path: StrPathLike | None = None) -> Self: ...

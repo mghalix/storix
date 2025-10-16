@@ -1,9 +1,9 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Literal, Protocol, Self, overload
+from typing import IO, Any, AnyStr, Literal, Protocol, Self, overload
 
-from storix.typing import StrPathLike
+from storix.typing import StrPathLike, _EchoMode
 
 
 class Storage(Protocol):
@@ -15,7 +15,15 @@ class Storage(Protocol):
     def home(self) -> Path: ...
 
     def chroot(self, new_root: StrPathLike) -> Self: ...
-    def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool: ...
+    def touch(self, path: StrPathLike, data: Any | None = None) -> bool: ...
+    def echo(
+        self,
+        data: IO[AnyStr] | AnyStr | Iterable[AnyStr],
+        path: StrPathLike,
+        *,
+        mode: _EchoMode = "w",
+        chunksize: int = ...,
+    ) -> bool: ...
     def cat(self, path: StrPathLike) -> bytes: ...
     def cd(self, path: StrPathLike | None = None) -> Self: ...
     def pwd(self) -> Path: ...

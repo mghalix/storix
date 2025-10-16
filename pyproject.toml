@@ -38,7 +38,7 @@ all = [
     "rich-toolkit", 
     "typer",
 ]
-azure = ["azure-storage-file-datalake"]
+azure = ["azure-storage-file-datalake", "aiohttp"]
 cli = ["rich", "rich-toolkit", "typer"]
 
 [project.urls]
@@ -145,6 +145,9 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
+[tool.uv.sources]
+storix = { workspace = true }
+
 [dependency-groups]
 dev = [
     "pytest",
@@ -155,4 +158,5 @@ dev = [
     "pre-commit",
     "types-aiofiles>=24.1.0.20250606", # stub files for mypy
     "coverage>=7.9.2",
+    "storix[azure,cli]",
 ]

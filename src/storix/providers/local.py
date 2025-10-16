@@ -2,12 +2,13 @@ import os
 import shutil
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any, Literal, Self, overload
+from typing import Any, AnyStr, Literal, Self, overload
 
 from loguru import logger
 
+from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
-from storix.typing import StrPathLike
+from storix.typing import DataBuffer, StrPathLike, _EchoMode
 
 from ._base import BaseStorage
 
@@ -118,6 +119,7 @@ class LocalFilesystem(BaseStorage):
 
     def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""
+        print(self._topath(path))
         return self._topath(path).is_file()
 
     def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
@@ -125,7 +127,7 @@ class LocalFilesystem(BaseStorage):
         path = self._topath(path)
         path.mkdir(exist_ok=True, parents=parents)
 
-    def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
+    def touch(self, path: StrPathLike, data: Any | None = None) -> bool:
         """Create a file at the given path, optionally writing data."""
         path = self._topath(path)
 
@@ -140,7 +142,7 @@ class LocalFilesystem(BaseStorage):
                 f.write(data_bytes or b"")
             return True
         except Exception as err:
-            logger.error(f"tocuh: failed to write file '{path!s}': {err}")
+            logger.error(f"touch: failed to write file '{path!s}': {err}")
             return False
 
     def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool:
@@ -243,3 +245,34 @@ class LocalFilesystem(BaseStorage):
         path = self._topath(path)
         self._ensure_exist(path)
         raise NotImplementedError
+
+    def echo(
+        self,
+        data: DataBuffer[AnyStr],
+        path: StrPathLike,
+        *,
+        mode: _EchoMode = "w",
+        chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+    ) -> bool:
+        """Write (overwrite/append) data into a file."""
+        path = self._topath(path)
+
+        if not self.exists(path.parent):
+            logger.error(
+                f"echo: cannot echo into '{path!s}': No such file or directory"
+            )
+            return False
+
+        from storix.utils.streaming import normalize_data
+
+        stream = normalize_data(data)
+        try:
+            with path.open(mode + "b") as f:
+                while chunk := stream.read(chunksize):
+                    f.write(chunk)
+
+        except Exception as e:
+            logger.error(f"echo: failed writing to '{path}': {e}")
+            return False
+
+        return True

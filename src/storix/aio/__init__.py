@@ -6,7 +6,7 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..typing import AvailableProviders, StrPathLike
+    from ..typing import StrPathLike, _AvailableProviders
     from .providers import Storage
     from .providers.azure import AzureDataLake
     from .providers.local import LocalFilesystem
@@ -33,7 +33,7 @@ def __getattr__(name: str) -> Any:
 
 
 def get_storage(
-    provider: AvailableProviders | str | None = None,
+    provider: _AvailableProviders | str | None = None,
     initialpath: StrPathLike | None = None,
     sandboxed: bool | None = None,
 ) -> Storage:

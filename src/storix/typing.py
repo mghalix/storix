@@ -1,5 +1,10 @@
 import os
-from typing import Literal
+from collections.abc import AsyncIterable, Iterable
+from typing import IO, Literal
 
-StrPathLike = os.PathLike[str] | str
-AvailableProviders = Literal["local", "azure"]
+type StrPathLike = os.PathLike[str] | str
+type _AvailableProviders = Literal["local", "azure"]
+type _EchoMode = Literal["w", "a"]
+
+type DataBuffer[AnyStr: (str, bytes)] = AnyStr | Iterable[AnyStr] | IO[AnyStr]
+type AsyncDataBuffer[AnyStr: (str, bytes)] = DataBuffer[AnyStr] | AsyncIterable[AnyStr]
