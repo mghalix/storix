@@ -62,7 +62,7 @@ def get_storage(
         provider or settings.STORAGE_PROVIDER or os.environ.get("STORAGE_PROVIDER")
     ).lower()
 
-    params = {}
+    params: dict[str, Any] = {}
     if initialpath is not None:
         params["initialpath"] = initialpath
     if sandboxed is not None:

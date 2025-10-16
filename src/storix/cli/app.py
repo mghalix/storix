@@ -98,7 +98,7 @@ def ls(
                     else:
                         colored_files.append(Text(file, style="dim"))
                 else:
-                    colored_files.append(file)
+                    colored_files.append(Text(file))
 
             console.print(*colored_files)
 

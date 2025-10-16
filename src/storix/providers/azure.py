@@ -21,25 +21,14 @@ except ImportError as err:
     ) from err
 
 from loguru import logger
-from pydantic import BaseModel
 
-from storix.sandbox import PathSandboxable, SandboxedPathHandler
+from storix.models import AzureFileProperties
+from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
 from storix.settings import settings
 from storix.typing import StrPathLike
 
 from ._base import BaseStorage
-
-
-class FileProperties(BaseModel):
-    """Model representing file properties in Azure Data Lake."""
-
-    name: str
-    hdi_isfolder: bool = False
-    last_modified: dt.datetime
-    creation_time: dt.datetime
-
-    model_config = {"from_attributes": True}
 
 
 class AzureDataLake(BaseStorage):
@@ -54,7 +43,7 @@ class AzureDataLake(BaseStorage):
         "_service_client",
     )
 
-    _sandbox: PathSandboxable | None
+    _sandbox: PathSandboxer | None
     _service_client: DataLakeServiceClient
     _filesystem: FileSystemClient
     _home: Path
@@ -69,7 +58,7 @@ class AzureDataLake(BaseStorage):
         adlsg2_token: str | None = settings.ADLSG2_TOKEN,
         *,
         sandboxed: bool = True,
-        sandbox_handler: type[PathSandboxable] = SandboxedPathHandler,
+        sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
     ) -> None:
         """Initialize Azure Data Lake Storage Gen2 client.
 
@@ -123,9 +112,7 @@ class AzureDataLake(BaseStorage):
     def _init_filesystem(
         self, client: DataLakeServiceClient, container_name: str
     ) -> FileSystemClient:
-        return client.get_file_system_client(
-            container_name
-        ) or client.create_file_system(container_name)
+        return client.get_file_system_client(container_name)
 
     def _get_service_client(
         self, account_name: str, token: str
@@ -162,16 +149,16 @@ class AzureDataLake(BaseStorage):
     ) -> list[Path]: ...
     def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[Path | str]:
+    ) -> Sequence[StrPathLike]:
         """List all items at the given path as Path or str objects."""
         path = self._topath(path)
         self._ensure_exist(path)
 
         items = self._filesystem.get_paths(path=str(path), recursive=False)
-        paths: Sequence[Path] = [self.home / f.name for f in items]
+        paths = [self.home / f.name for f in items]
 
         if not all:
-            paths = self._filter_hidden(paths)
+            paths = list(self._filter_hidden(paths))
 
         if not abs:
             return [p.name for p in paths]
@@ -189,7 +176,7 @@ class AzureDataLake(BaseStorage):
         stats = self.stat(path)
         return stats.hdi_isfolder
 
-    def stat(self, path: StrPathLike) -> FileProperties:
+    def stat(self, path: StrPathLike) -> AzureFileProperties:
         """Return stat information for the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
@@ -201,7 +188,7 @@ class AzureDataLake(BaseStorage):
             props = fc.get_file_properties()
             metadata = props.get("metadata") or {}
 
-            return FileProperties.model_validate(dict(**props, **metadata))
+            return AzureFileProperties.model_validate(dict(**props, **metadata))
 
     def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""
@@ -409,7 +396,9 @@ class AzureDataLake(BaseStorage):
         credential: str = str(fs.credential.account_key)
 
         expiry = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=expires_in)
-        file_permissions = FileSasPermissions(**dict.fromkeys(permissions, True))
+        file_permissions = FileSasPermissions(
+            **dict.fromkeys(map(str, permissions), True)
+        )
 
         directory: str = str(path.parent).lstrip("/")
         filename: str = path.parts[-1]

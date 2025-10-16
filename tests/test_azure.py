@@ -1,8 +1,8 @@
 import contextlib
 import os
 from collections.abc import Generator
+from datetime import UTC
 from datetime import datetime as dt
-from datetime import timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -19,8 +19,8 @@ def create_mock_properties(
     base_props = {
         "name": name,
         "hdi_isfolder": is_folder,
-        "last_modified": dt.now(tz=timezone.utc),
-        "creation_time": dt.now(tz=timezone.utc),
+        "last_modified": dt.now(tz=UTC),
+        "creation_time": dt.now(tz=UTC),
         **extra_props,
     }
 
@@ -682,7 +682,7 @@ def test_stat(azure_storage: Storage, mock_azure_clients: Any) -> None:
         "filesystem"
     ].get_file_client.return_value.__enter__.return_value = mock_file_client
 
-    with patch("storix.providers.azure.FileProperties.model_validate") as mock_validate:
+    with patch("storix.models.AzureFileProperties.model_validate") as mock_validate:
         mock_file_props = MagicMock()
         mock_validate.return_value = mock_file_props
 

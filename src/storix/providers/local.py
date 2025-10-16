@@ -1,12 +1,12 @@
 import os
 import shutil
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, Literal, Self, overload
 
 from loguru import logger
 
-from storix.sandbox import PathSandboxable, SandboxedPathHandler
+from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.typing import StrPathLike
 
 from ._base import BaseStorage
@@ -20,7 +20,7 @@ class LocalFilesystem(BaseStorage):
         initialpath: StrPathLike | None = None,
         *,
         sandboxed: bool = True,
-        sandbox_handler: type[PathSandboxable] = SandboxedPathHandler,
+        sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
     ) -> None:
         """Initialize the local storage adapter.
 
@@ -97,18 +97,18 @@ class LocalFilesystem(BaseStorage):
     ) -> list[Path]: ...
     def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[Path | str]:
+    ) -> Sequence[StrPathLike]:
         """List files and directories at the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
 
-        lst: Sequence[Path] = list(path.iterdir())
+        lst: Iterable[Path] = path.iterdir()
 
         if not all:
             lst = self._filter_hidden(lst)
 
         if abs:
-            return lst
+            return list(lst)
 
         return [file.name for file in lst]
 

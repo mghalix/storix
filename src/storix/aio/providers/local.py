@@ -9,7 +9,7 @@ import aiofiles as aiof
 import aiofiles.os as aioos
 from loguru import logger
 
-from storix.sandbox import PathSandboxable, SandboxedPathHandler
+from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.typing import StrPathLike
 
 from ._base import BaseStorage
@@ -23,7 +23,7 @@ class LocalFilesystem(BaseStorage):
         initialpath: StrPathLike | None = None,
         *,
         sandboxed: bool = True,
-        sandbox_handler: type[PathSandboxable] = SandboxedPathHandler,
+        sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
     ) -> None:
         """Initialize the async local storage adapter.
 
@@ -104,13 +104,13 @@ class LocalFilesystem(BaseStorage):
     ) -> list[Path]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[Path | str]:
+    ) -> Sequence[StrPathLike]:
         """List all items at the given path."""
         path = self._topath(path)
         entries = await aioos.listdir(path)
 
         if not all:
-            entries = self._filter_hidden(entries)
+            entries = list(self._filter_hidden(entries))
 
         if abs:
             return [Path(path) / entry for entry in entries]

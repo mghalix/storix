@@ -2,14 +2,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol
 
 from storix.typing import StrPathLike
 
-T = TypeVar("T")
 
-
-class PathSandboxable(Protocol):
+class PathSandboxer(Protocol):
     """Protocol defining sandboxed filesystem path operations.
 
     This protocol defines the interface for classes that provide path sandboxing
@@ -65,7 +63,7 @@ class PathSandboxable(Protocol):
         """
         ...
 
-    def __call__(
+    def __call__[T: StrPathLike](
         self, func: Callable[..., T | Awaitable[T]]
     ) -> Callable[..., T | Awaitable[T]]:
         """Sandbox filesystem operations in a function.
@@ -141,7 +139,7 @@ class SandboxedPathHandler:
         """Get the real filesystem path that serves as the sandbox root."""
         return self._prefix
 
-    def __call__(
+    def __call__[T: StrPathLike](
         self, func: Callable[..., T | Awaitable[T]]
     ) -> Callable[..., T | Awaitable[T]]:
         """Decorator to sandbox a function's path arguments/results."""

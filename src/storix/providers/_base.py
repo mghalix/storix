@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal, Self
 from ._proto import Storage
 
 if TYPE_CHECKING:
-    from storix.sandbox import PathSandboxable
+    from storix.sandbox import PathSandboxer
     from storix.typing import StrPathLike
 
 from storix.utils import PathLogicMixin, to_data_url
@@ -26,14 +26,14 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
     _min_depth: Path
     _current_path: Path
     _home: Path
-    _sandbox: PathSandboxable | None
+    _sandbox: PathSandboxer | None
 
     def __init__(
         self,
         initialpath: StrPathLike | None = None,
         *,
         sandboxed: bool = False,
-        sandbox_handler: type[PathSandboxable] | None = None,
+        sandbox_handler: type[PathSandboxer] | None = None,
     ) -> None:
         """Initialize the storage.
 

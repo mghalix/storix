@@ -1,10 +1,10 @@
 import posixpath
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import reduce
 from pathlib import Path
 from typing import Self, TypeVar
 
-from storix.sandbox import PathSandboxable
+from storix.sandbox import PathSandboxer
 from storix.typing import StrPathLike
 
 T = TypeVar("T")
@@ -22,9 +22,6 @@ def pipeline[**P, R](*funcs: Callable[P, R]) -> Callable[P, R]:
     return reduce(compose_two, reversed(funcs), lambda x: x)  # type: ignore
 
 
-L = TypeVar("L", bound=StrPathLike)
-
-
 class PathLogicMixin:
     """Mixin for shared path logic between sync and async BaseStorage.
 
@@ -40,7 +37,7 @@ class PathLogicMixin:
     _min_depth: Path
     _current_path: Path
     _home: Path
-    _sandbox: PathSandboxable | None
+    _sandbox: PathSandboxer | None
 
     def _parse_dots(self, path: StrPathLike, *, graceful: bool = True) -> Path:
         path = Path(path)
@@ -141,8 +138,8 @@ class PathLogicMixin:
             return Path("/")
         return Path("/") / str(path).lstrip("/")
 
-    def _filter_hidden(self, output: Sequence[L]) -> Sequence[L]:
-        return list(filter(lambda q: not Path(q).name.startswith("."), output))
+    def _filter_hidden[T: StrPathLike](self, output: Iterable[T]) -> Iterable[T]:
+        return filter(lambda q: not Path(q).name.startswith("."), output)
 
 
 def craft_adlsg2_url(*, account_name: str) -> str:

@@ -112,6 +112,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 # asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "integration: marks tests as integration tests",
+]
 
 [tool.coverage.html]
 show_contexts = true
