@@ -100,7 +100,7 @@ class TestAsyncLocalFilesystem:
         assert await async_fs.isdir("newdir") is True
 
         # Create nested directories
-        await async_fs.mkdir("parent/child")
+        await async_fs.mkdir("parent/child", parents=True)
         assert await async_fs.exists("parent") is True
         assert await async_fs.exists("parent/child") is True
 

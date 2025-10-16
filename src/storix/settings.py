@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     STORAGE_INITIAL_PATH_LOCAL: str = STORAGE_INITIAL_PATH
     STORAGE_INITIAL_PATH_AZURE: str = STORAGE_INITIAL_PATH
 
-    # TODO: implement Storage Pool
+    # TODO(mghalix): implement Storage Pool
     STORAGE_POOL_MAX_CONNECTIONS: int = 10
 
     # Azure Data Lake Gen2

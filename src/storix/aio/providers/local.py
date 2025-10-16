@@ -3,15 +3,14 @@ import os
 import shutil
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal, overload
+from typing import Any, Literal, Self, overload
 
 import aiofiles as aiof
 import aiofiles.os as aioos
 from loguru import logger
-from typing_extensions import Self
 
-from storix.sandbox import PathSandboxable, SandboxedPathHandler
-from storix.typing import PathLike
+from storix.sandbox import PathSandboxer, SandboxedPathHandler
+from storix.typing import StrPathLike
 
 from ._base import BaseStorage
 
@@ -21,10 +20,10 @@ class LocalFilesystem(BaseStorage):
 
     def __init__(
         self,
-        initialpath: PathLike | None = None,
+        initialpath: StrPathLike | None = None,
         *,
         sandboxed: bool = True,
-        sandbox_handler: type[PathSandboxable] = SandboxedPathHandler,
+        sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
     ) -> None:
         """Initialize the async local storage adapter.
 
@@ -67,12 +66,12 @@ class LocalFilesystem(BaseStorage):
             initialpath, sandboxed=sandboxed, sandbox_handler=sandbox_handler
         )
 
-    async def exists(self, path: PathLike) -> bool:
+    async def exists(self, path: StrPathLike) -> bool:
         """Check if the given path exists."""
         path = self._topath(path)
         return await aioos.path.exists(path)
 
-    async def cd(self, path: PathLike | None = None) -> Self:
+    async def cd(self, path: StrPathLike | None = None) -> Self:
         """Change to the given directory."""
         if path is None:
             path = self.home
@@ -90,7 +89,7 @@ class LocalFilesystem(BaseStorage):
     @overload
     async def ls(
         self,
-        path: PathLike | None = None,
+        path: StrPathLike | None = None,
         *,
         abs: Literal[False] = False,
         all: bool = True,
@@ -98,43 +97,43 @@ class LocalFilesystem(BaseStorage):
     @overload
     async def ls(
         self,
-        path: PathLike | None = None,
+        path: StrPathLike | None = None,
         *,
         abs: Literal[True] = True,
         all: bool = True,
     ) -> list[Path]: ...
     async def ls(
-        self, path: PathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[Path | str]:
+        self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
+    ) -> Sequence[StrPathLike]:
         """List all items at the given path."""
         path = self._topath(path)
         entries = await aioos.listdir(path)
 
         if not all:
-            entries = self._filter_hidden(entries)
+            entries = list(self._filter_hidden(entries))
 
         if abs:
             return [Path(path) / entry for entry in entries]
 
         return entries
 
-    async def isdir(self, path: PathLike) -> bool:
+    async def isdir(self, path: StrPathLike) -> bool:
         """Return True if the path is a directory."""
         path = self._topath(path)
         return await aioos.path.isdir(path)
 
-    async def isfile(self, path: PathLike) -> bool:
+    async def isfile(self, path: StrPathLike) -> bool:
         """Return True if the path is a file."""
         path = self._topath(path)
         return await aioos.path.isfile(path)
 
-    async def mkdir(self, path: PathLike, *, parents: bool = False) -> None:
+    async def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
-        # TODO: add parents logic (i heard exist_ok does it already..?)
-        await aioos.makedirs(path, exist_ok=True)
+        coro = aioos.makedirs(path, exist_ok=True) if parents else aioos.mkdir(path)
+        await coro
 
-    async def touch(self, path: PathLike | None, data: Any | None = None) -> bool:
+    async def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
         """Create a file at the given path with optional data."""
         path = self._topath(path)
 
@@ -152,7 +151,7 @@ class LocalFilesystem(BaseStorage):
             logger.error(f"touch: failed to write file '{path!s}': {err}")
             return False
 
-    async def rmdir(self, path: PathLike, recursive: bool = False) -> bool:
+    async def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool:
         """Delete a directory at the given path. Returns True if successful."""
         path = self._topath(path)
 
@@ -178,7 +177,7 @@ class LocalFilesystem(BaseStorage):
             logger.error(f"rmdir: failed to remove '{path!s}': {err}")
             return False
 
-    async def cat(self, path: PathLike) -> bytes:
+    async def cat(self, path: StrPathLike) -> bytes:
         """Read the contents of a file."""
         path = self._topath(path)
         await self._ensure_exist(path)
@@ -186,7 +185,7 @@ class LocalFilesystem(BaseStorage):
         async with aiof.open(path, "rb") as f:
             return await f.read()
 
-    async def rm(self, path: PathLike) -> bool:
+    async def rm(self, path: StrPathLike) -> bool:
         """Delete an item at the given path. Returns True if successful."""
         path = self._topath(path)
 
@@ -210,7 +209,7 @@ class LocalFilesystem(BaseStorage):
             logger.error(f"Failed to remove {path}: {err}")
             return False
 
-    async def mv(self, source: PathLike, destination: PathLike) -> None:
+    async def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Move an item from source to destination."""
         source = self._topath(source)
         await self._ensure_exist(source)
@@ -220,7 +219,7 @@ class LocalFilesystem(BaseStorage):
         # TODO(mghalix): test below or switch to above
         await aioos.rename(source, destination)
 
-    async def cp(self, source: PathLike, destination: PathLike) -> None:
+    async def cp(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Copy an item from source to destination."""
         source = self._topath(source)
         destination = self._topath(destination)
@@ -242,7 +241,7 @@ class LocalFilesystem(BaseStorage):
 
     # TODO(mghalix): revise from here to bottom
     async def tree(
-        self, path: PathLike | None = None, *, abs: bool = False
+        self, path: StrPathLike | None = None, *, abs: bool = False
     ) -> list[Path]:
         """List all items recursively at the given path."""
         path = self._topath(path)
@@ -254,7 +253,7 @@ class LocalFilesystem(BaseStorage):
             return entries
         return [entry.relative_to(path) for entry in entries]
 
-    async def stat(self, path: PathLike) -> Any:
+    async def stat(self, path: StrPathLike) -> Any:
         """Get file/directory statistics using aiofiles."""
         # path = self._topath(path)
         # await self._ensure_exist(path)
@@ -263,7 +262,7 @@ class LocalFilesystem(BaseStorage):
         raise NotImplementedError
 
     async def du(
-        self, path: PathLike | None = None, *, human_readable: bool = True
+        self, path: StrPathLike | None = None, *, human_readable: bool = True
     ) -> Any:
         """Get disk usage for the given path."""
         path = self._topath(path)

@@ -581,7 +581,7 @@ class StorixShell:
         """Execute a shell command."""
         if command in self.commands:
             try:
-                self.commands[command](args)
+                self.commands[command](args)  # type: ignore[operator]
             except KeyboardInterrupt:
                 console.print("\n[yellow]Command interrupted[/yellow]")
             except Exception as e:

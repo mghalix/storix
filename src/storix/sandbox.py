@@ -2,14 +2,12 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol
 
-from storix.typing import PathLike
-
-T = TypeVar("T")
+from storix.typing import StrPathLike
 
 
-class PathSandboxable(Protocol):
+class PathSandboxer(Protocol):
     """Protocol defining sandboxed filesystem path operations.
 
     This protocol defines the interface for classes that provide path sandboxing
@@ -21,7 +19,7 @@ class PathSandboxable(Protocol):
     and a decorator that can sandbox functions that operate on paths.
     """
 
-    def __init__(self, prefix_path: PathLike) -> None:
+    def __init__(self, prefix_path: StrPathLike) -> None:
         """Initialize the path sandbox with a root directory.
 
         Args:
@@ -29,7 +27,7 @@ class PathSandboxable(Protocol):
 
         """
 
-    def to_virtual(self, real_path: PathLike) -> Path:
+    def to_virtual(self, real_path: StrPathLike) -> Path:
         """Convert a real filesystem path to a virtual sandboxed path.
 
         Args:
@@ -44,7 +42,7 @@ class PathSandboxable(Protocol):
         """
         ...
 
-    def to_real(self, virtual_path: PathLike) -> Path:
+    def to_real(self, virtual_path: StrPathLike) -> Path:
         """Convert a virtual sandboxed path to a real filesystem path.
 
         Args:
@@ -65,7 +63,7 @@ class PathSandboxable(Protocol):
         """
         ...
 
-    def __call__(
+    def __call__[T: StrPathLike](
         self, func: Callable[..., T | Awaitable[T]]
     ) -> Callable[..., T | Awaitable[T]]:
         """Sandbox filesystem operations in a function.
@@ -86,11 +84,11 @@ class PathSandboxable(Protocol):
 class SandboxedPathHandler:
     """Handler for mapping between real and virtual (sandboxed) paths."""
 
-    def __init__(self, prefix_path: PathLike) -> None:
+    def __init__(self, prefix_path: StrPathLike) -> None:
         """Initialize with a prefix path for the sandbox."""
         self._prefix = Path(prefix_path).resolve()
 
-    def to_virtual(self, real_path: PathLike) -> Path:
+    def to_virtual(self, real_path: StrPathLike) -> Path:
         """Convert a real path to its virtual (sandboxed) equivalent."""
         path = Path(real_path).resolve()
         try:
@@ -100,7 +98,7 @@ class SandboxedPathHandler:
                 f"Path '{real_path}' is outside the sandbox root '{self._prefix}'"
             ) from err
 
-    def to_real(self, virtual_path: PathLike | None = None) -> Path:
+    def to_real(self, virtual_path: StrPathLike | None = None) -> Path:
         """Convert a virtual (sandboxed) path to its real path."""
         if virtual_path is None:
             return self._prefix
@@ -141,7 +139,7 @@ class SandboxedPathHandler:
         """Get the real filesystem path that serves as the sandbox root."""
         return self._prefix
 
-    def __call__(
+    def __call__[T: StrPathLike](
         self, func: Callable[..., T | Awaitable[T]]
     ) -> Callable[..., T | Awaitable[T]]:
         """Decorator to sandbox a function's path arguments/results."""

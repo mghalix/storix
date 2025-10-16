@@ -1,5 +1,5 @@
 from collections.abc import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -47,8 +47,8 @@ class TestAsyncAzureDataLake:
                 return_value={
                     "name": "test.txt",
                     "hdi_isfolder": False,
-                    "last_modified": datetime.now(tz=timezone.utc),
-                    "creation_time": datetime.now(tz=timezone.utc),
+                    "last_modified": datetime.now(tz=UTC),
+                    "creation_time": datetime.now(tz=UTC),
                     "metadata": {},
                 }
             )
@@ -150,9 +150,7 @@ class TestAsyncAzureDataLake:
         )
         result = await azure_fs.touch("test.txt", "test content")
         assert result is True
-        file_mock = azure_fs._AzureDataLake__filesystem.get_file_client(  # type: ignore
-            "/test/test.txt"
-        )
+        file_mock = azure_fs._filesystem.get_file_client("/test/test.txt")
         file_mock.create_file.assert_called_once()
         file_mock.upload_data.assert_called_once()
 
@@ -189,14 +187,13 @@ class TestAsyncAzureDataLake:
             adlsg2_account_name="test",
             adlsg2_token="test_key",
         )
-        # Patch the private __filesystem attribute to the mock_filesystem
-        azure_fs._AzureDataLake__filesystem = mocks["filesystem"]  # type: ignore
+        azure_fs._filesystem = mocks["filesystem"]  # type: ignore
 
         await azure_fs.mkdir("testdir")
 
         # Assert create_directory was called on the filesystem mock
         # noqa: SLF001 (accessing protected member for test purposes)
-        azure_fs._AzureDataLake__filesystem.create_directory.assert_called_once_with(  # type: ignore
+        azure_fs._filesystem.create_directory.assert_called_once_with(  # type: ignore
             "/test/testdir"
         )
 
@@ -211,9 +208,7 @@ class TestAsyncAzureDataLake:
         )
         result = await azure_fs.exists("test.txt")
         assert result is True
-        file_mock = azure_fs._AzureDataLake__filesystem.get_file_client(  # type: ignore
-            "/test/test.txt"
-        )
+        file_mock = azure_fs._filesystem.get_file_client("/test/test.txt")
         file_mock.exists.assert_called_once()
 
     @pytest.mark.asyncio

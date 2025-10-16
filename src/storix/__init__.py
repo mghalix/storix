@@ -1,8 +1,16 @@
-"""Async version of storix - identical API but with async/await."""
+"""Sync version of storix."""
 
-from ..settings import settings
-from ..typing import AvailableProviders, PathLike
-from .providers import AzureDataLake, LocalFilesystem, Storage
+from __future__ import annotations
+
+import importlib
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from storix.typing import AvailableProviders, StrPathLike
+
+    from .providers import Storage
+    from .providers.azure import AzureDataLake
+    from .providers.local import LocalFilesystem
 
 __all__ = [
     "AzureDataLake",
@@ -11,10 +19,23 @@ __all__ = [
     "get_storage",
 ]
 
+_module_lookup = {
+    "LocalFilesystem": "storix.providers.local",
+    "AzureDataLake": "storix.providers.azure",
+    "Storage": "storix.providers",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _module_lookup:
+        module = importlib.import_module(_module_lookup[name])
+        return getattr(module, name)
+    raise AttributeError(f"module {__name__} has no attribute {name}")
+
 
 def get_storage(
     provider: AvailableProviders | str | None = None,
-    initialpath: PathLike | None = None,
+    initialpath: StrPathLike | None = None,
     sandboxed: bool | None = None,
 ) -> Storage:
     """Get a storage instance with optional runtime overrides.
@@ -36,18 +57,25 @@ def get_storage(
     """
     import os
 
+    from .settings import settings
+
     provider = str(
         provider or settings.STORAGE_PROVIDER or os.environ.get("STORAGE_PROVIDER")
     ).lower()
 
-    params = {}
+    params: dict[str, Any] = {}
     if initialpath is not None:
         params["initialpath"] = initialpath
     if sandboxed is not None:
         params["sandboxed"] = sandboxed
 
     if provider == "local":
+        from .providers.local import LocalFilesystem
+
         return LocalFilesystem(**params)
     if provider == "azure":
+        from .providers.azure import AzureDataLake
+
         return AzureDataLake(**params)
+
     raise ValueError(f"Unsupported storage provider: {provider}")
