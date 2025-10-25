@@ -1,11 +1,12 @@
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import IO, Any, AnyStr, Literal, Protocol, Self, overload
+from typing import IO, Any, AnyStr, Literal, Protocol, Self, overload, runtime_checkable
 
 from storix.typing import StrPathLike, _EchoMode
 
 
+@runtime_checkable
 class Storage(Protocol):
     """Protocol for storage provider interface."""
 

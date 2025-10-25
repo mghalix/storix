@@ -9,11 +9,13 @@ from typing import (
     Protocol,
     Self,
     overload,
+    runtime_checkable,
 )
 
 from storix.typing import StrPathLike, _EchoMode
 
 
+@runtime_checkable
 class Storage(Protocol):
     """Async version of Storage protocol - identical interface but async methods."""
 
