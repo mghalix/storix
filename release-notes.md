@@ -1,5 +1,11 @@
 # Release Notes
 
+## 0.0.3 - TBD
+### Fixes
+* settings are loaded by `get_settings`; to avoid cached settings, allowing
+    manipulation of environment dynamically during runtime affecting filesystems
+    initialization defaults and `get_storage()`.
+
 ## [0.0.2] – 2025‑10‑16
 
 ### Highlights

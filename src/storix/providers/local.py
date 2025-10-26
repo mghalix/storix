@@ -8,6 +8,7 @@ from loguru import logger
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
+from storix.settings import get_settings
 from storix.typing import DataBuffer, StrPathLike, _EchoMode
 
 from ._base import BaseStorage
@@ -45,7 +46,7 @@ class LocalFilesystem(BaseStorage):
 
         """
         if initialpath is None:
-            from storix.settings import settings
+            settings = get_settings()
 
             initialpath = (
                 settings.STORAGE_INITIAL_PATH_LOCAL or settings.STORAGE_INITIAL_PATH

@@ -25,7 +25,7 @@ from loguru import logger
 from storix.models import AzureFileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
-from storix.settings import settings
+from storix.settings import get_settings
 from storix.typing import DataBuffer, StrPathLike, _EchoMode
 
 from ._base import BaseStorage
@@ -53,9 +53,9 @@ class AzureDataLake(BaseStorage):
     def __init__(
         self,
         initialpath: StrPathLike | None = None,
-        container_name: str = str(settings.ADLSG2_CONTAINER_NAME),
-        adlsg2_account_name: str | None = settings.ADLSG2_ACCOUNT_NAME,
-        adlsg2_token: str | None = settings.ADLSG2_TOKEN,
+        container_name: str | None = None,
+        adlsg2_account_name: str | None = None,
+        adlsg2_token: str | None = None,
         *,
         sandboxed: bool = True,
         sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
@@ -86,6 +86,11 @@ class AzureDataLake(BaseStorage):
             AssertionError: If account name or SAS token are not provided.
 
         """
+        settings = get_settings()
+        container_name = container_name or str(settings.ADLSG2_CONTAINER_NAME)
+        adlsg2_account_name = adlsg2_account_name or settings.ADLSG2_ACCOUNT_NAME
+        adlsg2_token = adlsg2_token or settings.ADLSG2_TOKEN
+
         if initialpath is None:
             initialpath = (
                 settings.STORAGE_INITIAL_PATH_AZURE or settings.STORAGE_INITIAL_PATH

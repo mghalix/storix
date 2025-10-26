@@ -57,7 +57,9 @@ def get_storage(
     """
     import os
 
-    from .settings import settings
+    from .settings import get_settings
+
+    settings = get_settings()
 
     provider = str(
         provider or settings.STORAGE_PROVIDER or os.environ.get("STORAGE_PROVIDER")

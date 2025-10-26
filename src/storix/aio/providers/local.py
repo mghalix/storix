@@ -48,7 +48,9 @@ class LocalFilesystem(BaseStorage):
 
         """
         if initialpath is None:
-            from storix.settings import settings
+            from storix.settings import get_settings
+
+            settings = get_settings()
 
             initialpath = (
                 settings.STORAGE_INITIAL_PATH_LOCAL or settings.STORAGE_INITIAL_PATH
