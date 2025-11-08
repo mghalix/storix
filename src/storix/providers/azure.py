@@ -308,8 +308,23 @@ class AzureDataLake(BaseStorage):
 
         return True
 
-    def touch(self, path: StrPathLike, data: Any | None = None) -> bool:
-        """Create a file at the given path, optionally writing data."""
+    def touch(
+        self,
+        path: StrPathLike,
+        data: Any | None = None,
+        *,
+        content_type: str | None = None,
+    ) -> bool:
+        """Create a file at the given path, optionally writing data.
+
+        Args:
+            path: Target file path.
+            data: Optional data blob to write entirely in one go.
+            content_type: Explicit content type override. If omitted we try:
+                1) Guess from path extension
+                2) Sniff from the data buffer (libmagic)
+                3) Fallback to application/octet-stream
+        """
         path = self._topath(path)
 
         with self._get_file_client(path) as f:
@@ -317,13 +332,13 @@ class AzureDataLake(BaseStorage):
 
             if not data:
                 return True
+            from storix.utils import detect_mimetype
 
-            from storix.utils import get_mimetype
-
+            inferred = content_type or detect_mimetype(buf=data, path=path)
             f.upload_data(
                 data,
                 overwrite=True,
-                content_settings=ContentSettings(content_type=get_mimetype(buf=data)),
+                content_settings=ContentSettings(content_type=inferred),
             )
 
         return True
@@ -335,13 +350,28 @@ class AzureDataLake(BaseStorage):
         *,
         mode: EchoMode = "w",
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+        content_type: str | None = None,
     ) -> bool:
-        """Write (overwrite/append) data into a file."""
+        """Write (overwrite/append) data into a file.
+
+        Args:
+            data: Buffer / iterable of bytes-like chunks.
+            path: Destination file path.
+            mode: "w" to create/overwrite, "a" to append.
+            chunksize: Size of stream chunks for append logic.
+            content_type: Explicit content type override. If None and mode == "w" we
+                will:
+                1) Guess based on path extension
+                2) Peek first bytes and sniff
+                3) Fallback to application/octet-stream
+                For append mode we preserve existing content_type unless explicit
+                override is provided.
+        """
         path = self._topath(path)
 
         with self._get_file_client(path) as f:
             from storix.constants import DEFAULT_MIMETYPE_DETECTION_PEEKSIZE
-            from storix.utils import get_mimetype
+            from storix.utils import detect_mimetype
             from storix.utils.streaming import normalize_data
 
             stream = normalize_data(data)
@@ -351,13 +381,15 @@ class AzureDataLake(BaseStorage):
             if mode == "w" or not self.exists(path):
                 f.create_file()
                 head = stream.read(DEFAULT_MIMETYPE_DETECTION_PEEKSIZE)
-                content_type = get_mimetype(buf=head)
+                # Determine new content type unless explicitly overridden
+                ct = content_type or detect_mimetype(buf=head, path=path)
                 length = len(head)
                 f.append_data(head, offset=offset, length=length)
                 offset += length
             else:
                 props = f.get_file_properties()
-                content_type = props.content_settings.content_type
+                existing_ct = props.content_settings.content_type
+                ct = content_type or existing_ct
                 offset = props.size
 
             while chunk := stream.read(chunksize):
@@ -367,7 +399,7 @@ class AzureDataLake(BaseStorage):
 
             f.flush_data(
                 offset=offset,
-                content_settings=ContentSettings(content_type=content_type),
+                content_settings=ContentSettings(content_type=ct),
             )
 
         return True

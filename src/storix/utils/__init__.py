@@ -162,6 +162,47 @@ def get_mimetype(*, buf: bytes) -> str:
     return magic.from_buffer(buf, mime=True)
 
 
+def guess_mimetype_from_path(path: StrPathLike) -> str | None:
+    """Guess mimetype from file extension using stdlib.
+
+    Returns None when type can't be determined.
+    """
+    import mimetypes
+
+    mime, _ = mimetypes.guess_type(str(path))
+    return mime
+
+
+def detect_mimetype(
+    *,
+    buf: bytes | None = None,
+    path: StrPathLike | None = None,
+    default: str = "application/octet-stream",
+) -> str:
+    """Detect best content-type given optional path and/or buffer.
+
+    Precedence:
+    1) If a path is provided and has a known extension -> return its mimetype
+    2) Else if a non-empty buffer is provided -> sniff using libmagic
+    3) Else -> return `default`
+
+    This keeps lookups cheap while remaining robust when extensions are absent.
+    """
+    if path is not None:
+        guessed = guess_mimetype_from_path(path)
+        if guessed:
+            return guessed
+
+    if buf:
+        try:
+            return get_mimetype(buf=buf)
+        except Exception:
+            # Fall through to default on any sniffing error
+            pass
+
+    return default
+
+
 def to_data_url(*, buf: bytes, mimetype: str | None = None) -> str:
     """Create a data url."""
     template = "data:{mimetype};base64,{base64_data}"
