@@ -1,9 +1,10 @@
 import asyncio
+import contextlib
 import datetime as dt
 from collections.abc import AsyncIterator, Iterable, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AnyStr, Literal, Self, TypeVar, overload
+from typing import Any, AnyStr, Literal, Self, TypeVar, overload, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 
@@ -29,7 +30,7 @@ from storix.models import AzureFileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
 from storix.settings import get_settings
-from storix.typing import AsyncDataBuffer, StrPathLike, _EchoMode
+from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
 from ._base import BaseStorage
 
@@ -46,14 +47,17 @@ class AzureDataLake(BaseStorage):
         "_min_depth",
         "_sandbox",
         "_service_client",
+        "account_name",
+        "container_name",
+        "initialpath",
     )
 
     _sandbox: PathSandboxer | None
     _service_client: AsyncDataLakeServiceClient
     _filesystem: AsyncFileSystemClient
-    _home: Path
-    _current_path: Path
-    _min_depth: Path
+    _home: StorixPath
+    _current_path: StorixPath
+    _min_depth: StorixPath
 
     def __init__(
         self,
@@ -64,6 +68,7 @@ class AzureDataLake(BaseStorage):
         *,
         sandboxed: bool = True,
         sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
+        allow_container_name_in_paths: bool | None = None,
     ) -> None:
         """Initialize Azure Data Lake Storage Gen2 client.
 
@@ -86,15 +91,22 @@ class AzureDataLake(BaseStorage):
                 root directory ("/").
             sandbox_handler: The implementation class for path sandboxing.
                 Only used when sandboxed=True.
+            allow_container_name_in_paths: Accept having the container name shown in
+                any input path to any file operation, e.g., /raw/... or /processed/... .
 
         Raises:
             AssertionError: If account name or SAS token are not provided.
 
         """
         settings = get_settings()
-        container_name = container_name or str(settings.ADLSG2_CONTAINER_NAME)
-        adlsg2_account_name = adlsg2_account_name or settings.ADLSG2_ACCOUNT_NAME
+        self.container_name = container_name or str(settings.ADLSG2_CONTAINER_NAME)
+        self.account_name = adlsg2_account_name or settings.ADLSG2_ACCOUNT_NAME
         adlsg2_token = adlsg2_token or settings.ADLSG2_TOKEN
+        self._allow_container_name_in_paths = (
+            settings.ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS
+            if allow_container_name_in_paths is None
+            else allow_container_name_in_paths
+        )
 
         if initialpath is None:
             initialpath = (
@@ -105,20 +117,79 @@ class AzureDataLake(BaseStorage):
         if initialpath == "~":
             initialpath = "/"
 
-        assert adlsg2_account_name and adlsg2_token, (
+        assert self.account_name and adlsg2_token, (
             "ADLSg2 account name and authentication token are required"
         )
 
-        self._service_client = self._get_service_client(
-            adlsg2_account_name, adlsg2_token
-        )
+        self._service_client = self._get_service_client(self.account_name, adlsg2_token)
         self._filesystem = self._init_filesystem(
-            self._service_client, str(container_name)
+            self._service_client, str(self.container_name)
         )
 
         super().__init__(
             initialpath, sandboxed=sandboxed, sandbox_handler=sandbox_handler
         )
+
+    def strip_container_name(self, path: StrPathLike) -> StorixPath:
+        """Strip container name from a given path.
+
+        By default an adlsg2 path is bound to a container, meaning if your container is
+        raw, your root would be just `/` not `/raw`.
+
+        This function help you accept paths with the container included in their parts.
+
+        This could be useful if you need compatability logic for a function or so,
+        between this and another filesystem that doesn't default to this behavior, such
+        as `LocalFilesystem`.
+
+        * If you want to have this behaviro fixed within your instance, see parameter
+            `allow_container_name_in_paths`
+             or export
+            `ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS=true`
+
+        Examples:
+            * If your current filesystem container is `raw`, it would strip the `raw`
+                 part so it does not mess up with later on operations:
+
+            ```py
+            source_dataset = "/raw/file/to/dataset"
+            path = fs.strip_container_name(source_dataset)
+            print(path)
+            # /file/to/dataset
+            ```
+
+            * If your current filesystem is not `raw`, then this is a normal directory
+                inside your current container:
+
+            ```py
+            source_dataset = "/raw/file/to/dataset"
+            path = fs.strip_container_name(source_dataset)
+            print(path)
+            # /raw/file/to/dataset
+            ```
+        """
+        p = super()._topath(path)
+
+        container_idx = 1
+        parts = p.parts
+
+        with contextlib.suppress(IndexError):
+            container_part = parts[container_idx]
+
+            if container_part == self.container_name:
+                stripped_parts = parts[:container_idx] + parts[container_idx + 1 :]
+                return StorixPath(*stripped_parts)
+
+        return p
+
+    @override
+    def _topath(self, path: StrPathLike | None) -> StorixPath:
+        p = super()._topath(path)
+
+        if not self._allow_container_name_in_paths:
+            return p
+
+        return self.strip_container_name(p)
 
     def _init_filesystem(
         self, client: AsyncDataLakeServiceClient, container_name: str
@@ -135,7 +206,7 @@ class AzureDataLake(BaseStorage):
     # so that its O(1) from the ui-side to access
     async def tree(
         self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[Path]:
+    ) -> list[StorixPath]:
         """Get a recursive listing of all files and directories.
 
         Args:
@@ -150,7 +221,7 @@ class AzureDataLake(BaseStorage):
         await self._ensure_exist(path)
 
         all = self._filesystem.get_paths(path=str(path), recursive=True)
-        paths: list[Path] = [self._topath(f.name) async for f in all]
+        paths: list[StorixPath] = [self._topath(f.name) async for f in all]
 
         if self._sandbox:
             return [self._sandbox.to_virtual(p) for p in paths]
@@ -172,7 +243,7 @@ class AzureDataLake(BaseStorage):
         *,
         abs: Literal[True] = True,
         all: bool = True,
-    ) -> list[Path]: ...
+    ) -> list[StorixPath]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[StrPathLike]:
@@ -181,7 +252,7 @@ class AzureDataLake(BaseStorage):
         await self._ensure_exist(path)
 
         items = self._filesystem.get_paths(path=str(path), recursive=False)
-        paths: Iterable[Path] = [self.home / f.name async for f in items]
+        paths: Iterable[StorixPath] = [self.home / f.name async for f in items]
 
         if not all:
             paths = self._filter_hidden(paths)
@@ -233,7 +304,7 @@ class AzureDataLake(BaseStorage):
             raise NotImplementedError("mv is not yet supported for directories")
 
         data = await self.cat(source)
-        dest: Path = destination
+        dest: StorixPath = destination
         if await self.exists(dest) and await self.isdir(dest):
             dest /= source.name
 
@@ -317,7 +388,7 @@ class AzureDataLake(BaseStorage):
         data: AsyncDataBuffer[AnyStr],
         path: StrPathLike,
         *,
-        mode: _EchoMode = "w",
+        mode: EchoMode = "w",
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
     ) -> bool:
         """Write (overwrite/append) data into a file."""

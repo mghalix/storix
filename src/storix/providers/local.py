@@ -9,7 +9,7 @@ from loguru import logger
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.settings import get_settings
-from storix.typing import DataBuffer, StrPathLike, _EchoMode
+from storix.types import DataBuffer, EchoMode, StorixPath, StrPathLike
 
 from ._base import BaseStorage
 
@@ -68,7 +68,7 @@ class LocalFilesystem(BaseStorage):
     def exists(self, path: StrPathLike) -> bool:
         """Check if the given path exists."""
         path = self._topath(path)
-        return path.exists()
+        return Path(path).exists()
 
     def cd(self, path: StrPathLike | None = None) -> Self:
         """Change the current working directory."""
@@ -96,7 +96,7 @@ class LocalFilesystem(BaseStorage):
     @overload
     def ls(
         self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
-    ) -> list[Path]: ...
+    ) -> list[StorixPath]: ...
     def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[StrPathLike]:
@@ -104,7 +104,7 @@ class LocalFilesystem(BaseStorage):
         path = self._topath(path)
         self._ensure_exist(path)
 
-        lst: Iterable[Path] = path.iterdir()
+        lst: Iterable[Path] = Path(path).iterdir()
 
         if not all:
             lst = self._filter_hidden(lst)
@@ -116,17 +116,16 @@ class LocalFilesystem(BaseStorage):
 
     def isdir(self, path: StrPathLike) -> bool:
         """Check if the given path is a directory."""
-        return self._topath(path).is_dir()
+        return Path(self._topath(path)).is_dir()
 
     def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""
-        print(self._topath(path))
-        return self._topath(path).is_file()
+        return Path(self._topath(path)).is_file()
 
     def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
-        path.mkdir(exist_ok=True, parents=parents)
+        Path(path).mkdir(exist_ok=True, parents=parents)
 
     def touch(self, path: StrPathLike, data: Any | None = None) -> bool:
         """Create a file at the given path, optionally writing data."""
@@ -139,7 +138,7 @@ class LocalFilesystem(BaseStorage):
         data_bytes: bytes | None = data.encode() if isinstance(data, str) else data
 
         try:
-            with path.open("wb") as f:
+            with Path(path).open("wb") as f:
                 f.write(data_bytes or b"")
             return True
         except Exception as err:
@@ -148,7 +147,7 @@ class LocalFilesystem(BaseStorage):
 
     def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool:
         """Remove a directory at the given path."""
-        path = self._topath(path)
+        path = Path(self._topath(path))
 
         if not self.exists(path):
             logger.error(
@@ -177,7 +176,7 @@ class LocalFilesystem(BaseStorage):
         self._ensure_exist(path)
 
         data: bytes
-        with path.open("rb") as f:
+        with Path(path).open("rb") as f:
             data = f.read()
 
         return data
@@ -221,13 +220,15 @@ class LocalFilesystem(BaseStorage):
         source = self._topath(source)
         destination = self._topath(destination)
 
-        if source.is_dir():
+        if Path(source).is_dir():
             shutil.copytree(source, destination)
         else:
             shutil.copy2(source, destination)
 
     # TODO(mghalix): revise from here to bottom
-    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> list[Path]:
+    def tree(
+        self, path: StrPathLike | None = None, *, abs: bool = False
+    ) -> list[StorixPath]:
         """Return a tree view of files and directories starting at path."""
         raise NotImplementedError
 
@@ -252,7 +253,7 @@ class LocalFilesystem(BaseStorage):
         data: DataBuffer[AnyStr],
         path: StrPathLike,
         *,
-        mode: _EchoMode = "w",
+        mode: EchoMode = "w",
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
     ) -> bool:
         """Write (overwrite/append) data into a file."""
@@ -268,7 +269,7 @@ class LocalFilesystem(BaseStorage):
 
         stream = normalize_data(data)
         try:
-            with path.open(mode + "b") as f:
+            with Path(path).open(mode + "b") as f:
                 while chunk := stream.read(chunksize):
                     f.write(chunk)
 

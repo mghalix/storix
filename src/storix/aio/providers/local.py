@@ -2,7 +2,6 @@ import asyncio
 import os
 import shutil
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any, AnyStr, Literal, Self, overload
 
 import aiofiles as aiof
@@ -11,7 +10,7 @@ from loguru import logger
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
-from storix.typing import AsyncDataBuffer, StrPathLike, _EchoMode
+from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
 from ._base import BaseStorage
 
@@ -56,12 +55,17 @@ class LocalFilesystem(BaseStorage):
                 settings.STORAGE_INITIAL_PATH_LOCAL or settings.STORAGE_INITIAL_PATH
             )
 
-        initialpath = Path(str(initialpath).replace("~", str(Path.home()))).resolve()
+        from pathlib import Path
+
+        initialpath = StorixPath(
+            str(initialpath).replace("~", str(Path.home()))
+        ).resolve()
+        from pathlib import Path
 
         if not initialpath.is_absolute():
             initialpath = Path.home() / initialpath
 
-        if not Path.exists(initialpath):
+        if not Path(initialpath).exists():
             logger.info(f"Creating initial path: '{initialpath}'...")
             os.makedirs(initialpath)
 
@@ -104,7 +108,7 @@ class LocalFilesystem(BaseStorage):
         *,
         abs: Literal[True] = True,
         all: bool = True,
-    ) -> list[Path]: ...
+    ) -> list[StorixPath]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[StrPathLike]:
@@ -116,7 +120,7 @@ class LocalFilesystem(BaseStorage):
             entries = list(self._filter_hidden(entries))
 
         if abs:
-            return [Path(path) / entry for entry in entries]
+            return [StorixPath(path) / entry for entry in entries]
 
         return entries
 
@@ -245,13 +249,13 @@ class LocalFilesystem(BaseStorage):
     # TODO(mghalix): revise from here to bottom
     async def tree(
         self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[Path]:
+    ) -> list[StorixPath]:
         """List all items recursively at the given path."""
         path = self._topath(path)
         entries = []
         for root, _, files in await asyncio.to_thread(os.walk, path):
             for file in files:
-                entries.append(Path(root) / file)
+                entries.append(StorixPath(root) / file)
         if abs:
             return entries
         return [entry.relative_to(path) for entry in entries]
@@ -305,7 +309,7 @@ class LocalFilesystem(BaseStorage):
         data: AsyncDataBuffer[AnyStr],
         path: StrPathLike,
         *,
-        mode: _EchoMode = "w",
+        mode: EchoMode = "w",
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
     ) -> bool:
         """Write (overwrite/append) data into a file."""

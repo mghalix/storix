@@ -1,11 +1,12 @@
+import contextlib
 import datetime as dt
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from pathlib import Path
 from types import TracebackType
-from typing import Any, AnyStr, Literal, Self, overload
+from typing import Any, AnyStr, Literal, Self, overload, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.types import StorixPath
 
 try:
     from azure.storage.blob import ContentSettings
@@ -26,7 +27,7 @@ from storix.models import AzureFileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
 from storix.settings import get_settings
-from storix.typing import DataBuffer, StrPathLike, _EchoMode
+from storix.types import DataBuffer, EchoMode, StrPathLike
 
 from ._base import BaseStorage
 
@@ -41,14 +42,17 @@ class AzureDataLake(BaseStorage):
         "_min_depth",
         "_sandbox",
         "_service_client",
+        "account_name",
+        "container_name",
+        "initialpath",
     )
 
     _sandbox: PathSandboxer | None
     _service_client: DataLakeServiceClient
     _filesystem: FileSystemClient
-    _home: Path
-    _current_path: Path
-    _min_depth: Path
+    _home: StorixPath
+    _current_path: StorixPath
+    _min_depth: StorixPath
 
     def __init__(
         self,
@@ -59,6 +63,7 @@ class AzureDataLake(BaseStorage):
         *,
         sandboxed: bool = True,
         sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
+        allow_container_name_in_paths: bool = False,
     ) -> None:
         """Initialize Azure Data Lake Storage Gen2 client.
 
@@ -87,9 +92,13 @@ class AzureDataLake(BaseStorage):
 
         """
         settings = get_settings()
-        container_name = container_name or str(settings.ADLSG2_CONTAINER_NAME)
-        adlsg2_account_name = adlsg2_account_name or settings.ADLSG2_ACCOUNT_NAME
+        self.container_name = container_name or str(settings.ADLSG2_CONTAINER_NAME)
+        self.account_name = adlsg2_account_name or settings.ADLSG2_ACCOUNT_NAME
         adlsg2_token = adlsg2_token or settings.ADLSG2_TOKEN
+        self._allow_container_name_in_paths = (
+            allow_container_name_in_paths
+            or settings.ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS
+        )
 
         if initialpath is None:
             initialpath = (
@@ -99,15 +108,14 @@ class AzureDataLake(BaseStorage):
         if initialpath == "~":
             initialpath = "/"
 
-        assert adlsg2_account_name and adlsg2_token, (
+        self.initialpath = initialpath
+        assert self.account_name and adlsg2_token, (
             "ADLSg2 account name and authentication token are required"
         )
 
-        self._service_client = self._get_service_client(
-            adlsg2_account_name, adlsg2_token
-        )
+        self._service_client = self._get_service_client(self.account_name, adlsg2_token)
         self._filesystem = self._init_filesystem(
-            self._service_client, str(container_name)
+            self._service_client, str(self.container_name)
         )
 
         super().__init__(
@@ -127,18 +135,39 @@ class AzureDataLake(BaseStorage):
 
     # TODO(@mghali): convert the return type to dict[str, str] or Tree DS
     # so that its O(1) from the ui-side to access
-    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> list[Path]:
+    def tree(
+        self, path: StrPathLike | None = None, *, abs: bool = False
+    ) -> list[StorixPath]:
         """Return a tree view of files and directories starting at path."""
         path = self._topath(path)
         self._ensure_exist(path)
 
         all = self._filesystem.get_paths(path=str(path), recursive=True)
-        paths: list[Path] = [self._topath(f.name) for f in all]
+        paths: list[StorixPath] = [self._topath(f.name) for f in all]
 
         if self._sandbox:
             return [self._sandbox.to_virtual(p) for p in paths]
 
         return paths
+
+    @override
+    def _topath(self, path: StrPathLike | None) -> StorixPath:
+        p = super()._topath(path)
+
+        if not self._allow_container_name_in_paths:
+            return p
+
+        container_idx = 1
+        parts = p.parts
+
+        with contextlib.suppress(IndexError):
+            container_part = parts[container_idx]
+
+            if container_part == self.container_name:
+                stripped_parts = parts[:container_idx] + parts[container_idx + 1 :]
+                return StorixPath(*stripped_parts)
+
+        return p
 
     @overload
     def ls(
@@ -151,7 +180,7 @@ class AzureDataLake(BaseStorage):
     @overload
     def ls(
         self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
-    ) -> list[Path]: ...
+    ) -> list[StorixPath]: ...
     def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[StrPathLike]:
@@ -212,7 +241,7 @@ class AzureDataLake(BaseStorage):
             raise NotImplementedError("mv is not yet supported for directories")
 
         data = self.cat(source)
-        dest: Path = destination
+        dest: StorixPath = destination
         if self.exists(dest) and self.isdir(dest):
             dest /= source.name
 
@@ -304,7 +333,7 @@ class AzureDataLake(BaseStorage):
         data: DataBuffer[AnyStr],
         path: StrPathLike,
         *,
-        mode: _EchoMode = "w",
+        mode: EchoMode = "w",
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
     ) -> bool:
         """Write (overwrite/append) data into a file."""

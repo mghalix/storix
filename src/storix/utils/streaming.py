@@ -2,7 +2,7 @@ from collections.abc import AsyncIterable, Iterable, Iterator
 from io import BytesIO, UnsupportedOperation
 from typing import Any, Protocol, overload, runtime_checkable
 
-from storix.typing import AsyncDataBuffer, DataBuffer
+from storix.types import AsyncDataBuffer, DataBuffer
 
 
 class _IReadableStreamBase(Protocol):

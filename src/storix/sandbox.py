@@ -1,10 +1,9 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from pathlib import Path
 from typing import Any, Protocol
 
-from storix.typing import StrPathLike
+from storix.types import StorixPath, StrPathLike
 
 
 class PathSandboxer(Protocol):
@@ -27,7 +26,7 @@ class PathSandboxer(Protocol):
 
         """
 
-    def to_virtual(self, real_path: StrPathLike) -> Path:
+    def to_virtual(self, real_path: StrPathLike) -> StorixPath:
         """Convert a real filesystem path to a virtual sandboxed path.
 
         Args:
@@ -42,7 +41,7 @@ class PathSandboxer(Protocol):
         """
         ...
 
-    def to_real(self, virtual_path: StrPathLike) -> Path:
+    def to_real(self, virtual_path: StrPathLike) -> StorixPath:
         """Convert a virtual sandboxed path to a real filesystem path.
 
         Args:
@@ -54,7 +53,7 @@ class PathSandboxer(Protocol):
         """
         ...
 
-    def get_prefix(self) -> Path:
+    def get_prefix(self) -> StorixPath:
         """Get the real filesystem path that serves as the sandbox root.
 
         Returns:
@@ -86,24 +85,24 @@ class SandboxedPathHandler:
 
     def __init__(self, prefix_path: StrPathLike) -> None:
         """Initialize with a prefix path for the sandbox."""
-        self._prefix = Path(prefix_path).resolve()
+        self._prefix = StorixPath(prefix_path).resolve()
 
-    def to_virtual(self, real_path: StrPathLike) -> Path:
+    def to_virtual(self, real_path: StrPathLike) -> StorixPath:
         """Convert a real path to its virtual (sandboxed) equivalent."""
-        path = Path(real_path).resolve()
+        path = StorixPath(real_path).resolve()
         try:
-            return Path("/") / path.relative_to(self._prefix)
+            return StorixPath("/") / path.relative_to(self._prefix)
         except ValueError as err:
             raise ValueError(
                 f"Path '{real_path}' is outside the sandbox root '{self._prefix}'"
             ) from err
 
-    def to_real(self, virtual_path: StrPathLike | None = None) -> Path:
+    def to_real(self, virtual_path: StrPathLike | None = None) -> StorixPath:
         """Convert a virtual (sandboxed) path to its real path."""
         if virtual_path is None:
             return self._prefix
 
-        path = Path(virtual_path)
+        path = StorixPath(virtual_path)
 
         # Handle special cases first
         if str(path) in (".", "/"):
@@ -120,7 +119,7 @@ class SandboxedPathHandler:
             except ValueError:
                 # It's an absolute path that should be treated as virtual
                 # Remove the leading slash and treat as relative to sandbox
-                path = Path(*path.parts[1:])
+                path = StorixPath(*path.parts[1:])
 
         # Construct the full path and resolve it to handle .. and . properly
         full_path = (self._prefix / path).resolve()
@@ -135,7 +134,7 @@ class SandboxedPathHandler:
 
         return full_path
 
-    def get_prefix(self) -> Path:
+    def get_prefix(self) -> StorixPath:
         """Get the real filesystem path that serves as the sandbox root."""
         return self._prefix
 
@@ -149,7 +148,7 @@ class SandboxedPathHandler:
             new_args = []
 
             def is_sandboxable(arg: Any) -> bool:
-                return isinstance(arg, str | Path)
+                return isinstance(arg, str | StorixPath)
 
             for arg in args:
                 if is_sandboxable(arg):
@@ -167,11 +166,13 @@ class SandboxedPathHandler:
             return new_args, new_kwargs
 
         def convert_result(result: Any) -> Any:
-            if isinstance(result, str | Path):
+            if isinstance(result, str | StorixPath):
                 return self.to_virtual(result)
             if isinstance(result, list | tuple):
                 return [
-                    self.to_virtual(item) if isinstance(item, str | Path) else item
+                    self.to_virtual(item)
+                    if isinstance(item, str | StorixPath)
+                    else item
                     for item in result
                 ]
             return result

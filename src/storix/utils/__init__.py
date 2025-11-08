@@ -1,11 +1,10 @@
 import posixpath
 from collections.abc import Callable, Iterable, Sequence
 from functools import reduce
-from pathlib import Path
 from typing import Self, TypeVar
 
 from storix.sandbox import PathSandboxer
-from storix.typing import StrPathLike
+from storix.types import StorixPath, StrPathLike
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -34,36 +33,36 @@ class PathLogicMixin:
         - self.pwd(): method returning Path
     """
 
-    _min_depth: Path
-    _current_path: Path
-    _home: Path
+    _min_depth: StorixPath
+    _current_path: StorixPath
+    _home: StorixPath
     _sandbox: PathSandboxer | None
 
-    def _parse_dots(self, path: StrPathLike, *, graceful: bool = True) -> Path:
-        path = Path(path)
+    def _parse_dots(self, path: StrPathLike, *, graceful: bool = True) -> StorixPath:
+        path = StorixPath(path)
         bk_cnt: int = str(path).count("..")
         if bk_cnt:
             bk_cnt += 1
         target_path = eval(f"path{'.parent' * bk_cnt}")
         # ignore[attr-defined] because 'home' is guaranteed by inheriting class
-        if target_path >= Path(self.home):  # type: ignore[attr-defined]
+        if target_path >= StorixPath(self.home):  # type: ignore[attr-defined]
             return target_path
         if not graceful:
             raise ValueError(f"Cannot go back deeper than current path: {path}")
-        return Path(self.home)  # type: ignore[attr-defined]
+        return StorixPath(self.home)  # type: ignore[attr-defined]
 
-    def _parse_home(self, path: StrPathLike) -> Path:
+    def _parse_home(self, path: StrPathLike) -> StorixPath:
         # ignore[attr-defined] because 'home' is guaranteed by inheriting class
-        return Path(str(path).replace("~", str(self.home)))  # type: ignore[attr-defined]
+        return StorixPath(str(path).replace("~", str(self.home)))  # type: ignore[attr-defined]
 
-    def _makeabs(self, path: StrPathLike) -> Path:
-        path = Path(path)
+    def _makeabs(self, path: StrPathLike) -> StorixPath:
+        path = StorixPath(path)
         if path.is_absolute():
             return path
         # ignore[attr-defined] because 'pwd' is guaranteed by inheriting class
         return self.pwd() / path  # type: ignore[attr-defined]
 
-    def _topath(self, path: StrPathLike | None) -> Path:
+    def _topath(self, path: StrPathLike | None) -> StorixPath:
         sb = getattr(self, "_sandbox", None)
 
         path_str = str(path).strip()
@@ -72,15 +71,15 @@ class PathLogicMixin:
             path = self.pwd()  # type: ignore[attr-defined]
         elif path_str == "~":
             # ignore[attr-defined] because 'home' is guaranteed by inheriting class
-            path = Path(self.home)  # type: ignore[attr-defined]
+            path = StorixPath(self.home)  # type: ignore[attr-defined]
         else:
-            p = Path(path)
+            p = StorixPath(path)
             if sb and not p.is_absolute():
                 # ignore[attr-defined] because '_current_path' is guaranteed by inheriting class
                 path = self._current_path / p  # type: ignore[attr-defined]
 
         if sb:
-            path = Path(sb.to_real(path))
+            path = StorixPath(sb.to_real(path))
             path = path.resolve()
             try:
                 path.relative_to(sb.get_prefix().resolve())
@@ -92,7 +91,7 @@ class PathLogicMixin:
                 self._parse_home,
                 self._makeabs,
             )(path)
-            path = Path(path)
+            path = StorixPath(path)
         return path
 
     def chroot(self, new_root: StrPathLike) -> Self:
@@ -100,15 +99,15 @@ class PathLogicMixin:
         initialpath = self._topath(new_root)
         return self._init_storage(initialpath=initialpath)
 
-    def pwd(self) -> Path:
+    def pwd(self) -> StorixPath:
         """Return the current working directory."""
         return self._current_path
 
-    def parent(self, path: StrPathLike) -> Path:
+    def parent(self, path: StrPathLike) -> StorixPath:
         """The logical parent of the path."""
         return self._topath(path).parent
 
-    def parents(self, path: StrPathLike) -> Sequence[Path]:
+    def parents(self, path: StrPathLike) -> Sequence[StorixPath]:
         """A sequence of this path's logical parents."""
         path = self._topath(path)
 
@@ -133,13 +132,13 @@ class PathLogicMixin:
         self._min_depth = self._home = self._current_path = initialpath
         return self
 
-    def _prepend_root(self, path: StrPathLike | None = None) -> Path:
+    def _prepend_root(self, path: StrPathLike | None = None) -> StorixPath:
         if path is None:
-            return Path("/")
-        return Path("/") / str(path).lstrip("/")
+            return StorixPath("/")
+        return StorixPath("/") / str(path).lstrip("/")
 
     def _filter_hidden[T: StrPathLike](self, output: Iterable[T]) -> Iterable[T]:
-        return filter(lambda q: not Path(q).name.startswith("."), output)
+        return filter(lambda q: not StorixPath(q).name.startswith("."), output)
 
 
 def craft_adlsg2_url(*, account_name: str) -> str:

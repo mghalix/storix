@@ -2,8 +2,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from pathlib import Path
 from typing import TYPE_CHECKING
+
+from storix.types import StorixPath
 
 if TYPE_CHECKING:
     from ._base import BaseStorage
@@ -27,7 +28,7 @@ class StorageTree[S: BaseStorage, N: TreeNode](ABC):
         self._storage = storage
 
     @property
-    def root(self) -> Path:
+    def root(self) -> StorixPath:
         return self._storage.root
 
     @cached_property

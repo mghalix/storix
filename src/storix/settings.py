@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from storix.typing import _AvailableProviders
+from storix.types import AvailableProviders
 
 
 def find_env_file() -> str | None:
@@ -27,7 +27,7 @@ def find_env_file() -> str | None:
 class Settings(BaseSettings):
     """Application settings for storage providers and environment configuration."""
 
-    STORAGE_PROVIDER: _AvailableProviders = "local"
+    STORAGE_PROVIDER: AvailableProviders = "local"
 
     STORAGE_INITIAL_PATH: str = "."
     STORAGE_INITIAL_PATH_LOCAL: str = STORAGE_INITIAL_PATH
@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     ADLSG2_CONTAINER_NAME: str | None = None
     ADLSG2_ACCOUNT_NAME: str | None = None
     ADLSG2_TOKEN: str | None = None
+    ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS: bool | None = None
 
     model_config = SettingsConfigDict(
         env_file=find_env_file(),
