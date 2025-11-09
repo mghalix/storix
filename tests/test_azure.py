@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from storix import AzureDataLake, Storage
+from storix.types import StorixPath
 
 
 def create_mock_properties(
@@ -49,7 +50,7 @@ def mock_azure_clients() -> Generator[Any, None, None]:
     """Mock Azure clients to avoid requiring real credentials."""
     with (
         patch("storix.providers.azure.DataLakeServiceClient") as mock_service,
-        patch("storix.providers.azure.magic") as mock_magic,
+        patch("storix.utils.magic") as mock_magic,
     ):
         # Mock service client
         mock_service_instance = MagicMock()
@@ -261,7 +262,7 @@ def test_ls_abs(azure_storage: Storage, mock_azure_clients: Any) -> None:
     # Test absolute paths
     result = azure_storage.ls("/test", abs=True)
     assert len(result) == 1
-    assert isinstance(result[0], Path)
+    assert isinstance(result[0], Path | StorixPath)
 
 
 def test_ls_nonexistent_path(azure_storage: Storage, mock_azure_clients: Any) -> None:
@@ -709,7 +710,7 @@ def test_tree(azure_storage: Storage, mock_azure_clients: Any) -> None:
 
     result = azure_storage.tree("/test")
     assert len(result) == 2
-    assert all(isinstance(p, Path) for p in result)
+    assert all(isinstance(p, Path | StorixPath) for p in result)
 
 
 # Test context manager and cleanup

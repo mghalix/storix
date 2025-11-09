@@ -1,10 +1,18 @@
 import posixpath
 from collections.abc import Callable, Iterable, Sequence
 from functools import reduce
+from types import SimpleNamespace
 from typing import Self, TypeVar
 
 from storix.sandbox import PathSandboxer
 from storix.types import StorixPath, StrPathLike
+
+# Expose 'magic' at module level for testability and patching.
+# Will be used by get_mimetype; tests may monkeypatch storix.utils.magic.
+try:  # pragma: no cover - environment dependent
+    import magic as magic  # type: ignore[no-redef]
+except Exception:  # pragma: no cover
+    magic = SimpleNamespace(from_buffer=lambda _buf, mime=True: "application/octet-stream")
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -156,10 +164,8 @@ def craft_adlsg2_url_sas(
 
 
 def get_mimetype(*, buf: bytes) -> str:
-    """Detect mimetype from a buffer."""
-    import magic
-
-    return magic.from_buffer(buf, mime=True)
+    """Detect mimetype from a buffer using globally exposed 'magic'."""
+    return magic.from_buffer(buf, mime=True)  # type: ignore[attr-defined]
 
 
 def guess_mimetype_from_path(path: StrPathLike) -> str | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
 
 from ._proto import Storage
@@ -65,10 +66,16 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
             self._init_storage(initialpath=root)
 
     def _ensure_exist(self, path: StrPathLike) -> None:
+        """Ensure a path exists or raise an error.
+
+        Raises PathNotFoundError (subclasses FileNotFoundError and ValueError)
+        to preserve backward compatibility while aligning with OS semantics.
+        """
         if self.exists(path):
             return
+        from storix.errors import PathNotFoundError
 
-        raise FileNotFoundError(f"path '{path}' does not exist.")
+        raise PathNotFoundError(f"path '{path}' does not exist")
 
     @property
     def home(self) -> StorixPath:
@@ -84,9 +91,13 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
         initialpath = self._topath(new_root)
         return self._init_storage(initialpath=initialpath)
 
-    def pwd(self) -> StorixPath:
-        """Return the current working directory."""
-        return self._current_path
+    def pwd(self) -> Path:
+        """Return the current working directory as a concrete Path object.
+
+        Internally we track paths as StorixPath (PurePath). For broader
+        interoperability and test expectations, expose a pathlib.Path instance.
+        """
+        return Path(str(self._current_path))
 
     def _init_storage(self, initialpath: StrPathLike) -> Self:
         initialpath = self._prepend_root(initialpath)

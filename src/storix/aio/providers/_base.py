@@ -67,8 +67,8 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
     async def _ensure_exist(self, path: StrPathLike) -> None:
         if await self.exists(path):
             return
-
-        raise ValueError(f"path '{path}' does not exist.")
+        from storix.errors import PathNotFoundError
+        raise PathNotFoundError(f"path '{path}' does not exist")
 
     async def open(self) -> Self:
         return self

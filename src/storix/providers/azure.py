@@ -31,6 +31,9 @@ from storix.types import DataBuffer, EchoMode, StrPathLike
 
 from ._base import BaseStorage
 
+# Expose a module-level settings object for tests that patch
+settings = get_settings()
+
 
 class AzureDataLake(BaseStorage):
     """Azure Data Lake Storage Gen2 implementation."""
@@ -86,24 +89,23 @@ class AzureDataLake(BaseStorage):
                 root directory ("/").
             sandbox_handler: The implementation class for path sandboxing.
                 Only used when sandboxed=True.
+            allow_container_name_in_paths: Accept having the container name shown in
+                any input path to any file operation, e.g., /raw/... or /processed/... .
 
         Raises:
             AssertionError: If account name or SAS token are not provided.
 
         """
-        settings = get_settings()
-        self.container_name = container_name or str(settings.ADLSG2_CONTAINER_NAME)
-        self.account_name = adlsg2_account_name or settings.ADLSG2_ACCOUNT_NAME
-        adlsg2_token = adlsg2_token or settings.ADLSG2_TOKEN
+        cfg = settings
+        self.container_name = container_name or str(cfg.ADLSG2_CONTAINER_NAME)
+        self.account_name = adlsg2_account_name or cfg.ADLSG2_ACCOUNT_NAME
+        adlsg2_token = adlsg2_token or cfg.ADLSG2_TOKEN
         self._allow_container_name_in_paths = (
-            allow_container_name_in_paths
-            or settings.ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS
+            allow_container_name_in_paths or cfg.ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS
         )
 
         if initialpath is None:
-            initialpath = (
-                settings.STORAGE_INITIAL_PATH_AZURE or settings.STORAGE_INITIAL_PATH
-            )
+            initialpath = cfg.STORAGE_INITIAL_PATH_AZURE or cfg.STORAGE_INITIAL_PATH
 
         if initialpath == "~":
             initialpath = "/"

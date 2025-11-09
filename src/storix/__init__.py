@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
+from .errors import PathNotFoundError, StorixError
+
 if TYPE_CHECKING:
     from storix.types import AvailableProviders, StrPathLike
 
@@ -15,7 +17,9 @@ if TYPE_CHECKING:
 __all__ = [
     "AzureDataLake",
     "LocalFilesystem",
+    "PathNotFoundError",
     "Storage",
+    "StorixError",
     "get_storage",
 ]
 
