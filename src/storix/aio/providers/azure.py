@@ -3,7 +3,6 @@ import contextlib
 import datetime as dt
 from collections.abc import AsyncIterator, Iterable, Sequence
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, AnyStr, Literal, Self, TypeVar, overload, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
@@ -258,7 +257,7 @@ class AzureDataLake(BaseStorage):
             paths = self._filter_hidden(paths)
 
         if not abs:
-            return [Path(p.name) for p in paths]
+            return [StorixPath(p.name) for p in paths]
 
         return list(paths)
 
@@ -439,9 +438,7 @@ class AzureDataLake(BaseStorage):
                 if asyncio.iscoroutine(head):
                     head = await head
                 # Determine new content type unless explicitly overridden
-                content_type = content_type or detect_mimetype(
-                    buf=head, path=path
-                )
+                content_type = content_type or detect_mimetype(buf=head, path=path)
                 length = len(head)
                 await f.append_data(head, offset=offset, length=length)
                 offset += length
