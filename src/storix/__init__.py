@@ -5,21 +5,21 @@ from __future__ import annotations
 import importlib
 from typing import TYPE_CHECKING, Any
 
-from .errors import PathNotFoundError, StorixError
-
 if TYPE_CHECKING:
-    from storix.types import AvailableProviders, StrPathLike
-
+    from .errors import PathNotFoundError, StorixError
     from .providers import Storage
     from .providers.azure import AzureDataLake
     from .providers.local import LocalFilesystem
+    from .types import AvailableProviders, StorixPath, StrPathLike
 
 __all__ = [
+    "AvailableProviders",
     "AzureDataLake",
     "LocalFilesystem",
     "PathNotFoundError",
     "Storage",
     "StorixError",
+    "StorixPath",
     "get_storage",
 ]
 
@@ -27,6 +27,11 @@ _module_lookup = {
     "LocalFilesystem": "storix.providers.local",
     "AzureDataLake": "storix.providers.azure",
     "Storage": "storix.providers",
+    "StorixError": "storix.errors",
+    "PathNotFoundError": "storix.errors",
+    "StorixPath": "storix.types",
+    "StrPathLike": "storix.types",
+    "AvailableProviders": "storix.types",
 }
 
 
