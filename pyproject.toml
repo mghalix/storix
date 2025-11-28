@@ -86,6 +86,7 @@ plugins = [
 exclude = []
 disable_error_code = []
 cache_dir = ".cache/mypy"
+show_error_codes = true
 
 [[tool.mypy.overrides]]
 module = "samples.*"
@@ -104,6 +105,7 @@ line-length = 88
 target-version = "py313"
 include = ["*.py", "*.pyi", "**/pyproject.toml", "*.ipynb"]
 cache-dir = ".cache/ruff"
+output-format = "grouped"
 
 [tool.ruff.format]
 docstring-code-format = true
