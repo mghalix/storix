@@ -143,7 +143,7 @@ class TestAsyncProviderIntegration:
     async def test_async_provider_import_compatibility(self) -> None:
         """Test that async providers can be imported and used as expected."""
         # Test direct import
-        from storix.aio.providers import AzureDataLake, LocalFilesystem
+        from storix.aio import AzureDataLake, LocalFilesystem
 
         # Test that they're the async versions
         assert LocalFilesystem is AsyncLocalFilesystem

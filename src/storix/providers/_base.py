@@ -126,7 +126,7 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
         if astype == 'data_url':
             return self.make_data_url(path)
 
-        msg = f'cannot make url of type: {astype}'
+        msg = f'Cannot make url of type: {astype}'
         raise NotImplementedError(msg)
 
     def open(self) -> Self:

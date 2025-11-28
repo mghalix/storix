@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Sized
+from collections.abc import Sized
 from typing import TYPE_CHECKING, Self
 
 from storix.types import StorixPath, StrPathLike
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 
 class Tree(Sized):

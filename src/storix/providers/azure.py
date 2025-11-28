@@ -20,7 +20,7 @@ try:
         FileSystemClient,
     )
 except ImportError as err:
-    msg = 'azure backend not installed. Install it by running `"uv add storix[azure]"`.'
+    msg = 'azure backend not installed. Install it by running `uv add storix[azure]`.'
     raise ImportError(msg) from err
 
 from loguru import logger

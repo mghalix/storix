@@ -1,5 +1,6 @@
-from collections.abc import Callable, Iterator, Mapping, Sized
+from collections.abc import Mapping, Sized
 from typing import (
+    TYPE_CHECKING,
     Literal,
     Self,
     TypedDict,
@@ -8,6 +9,10 @@ from typing import (
     final,
     overload,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Mapping
 
 
 class DefaultWordCountResult(TypedDict, total=True):

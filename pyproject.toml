@@ -19,14 +19,18 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 requires-python = ">=3.12"
+#<--- dependencies --->#
+#
 dependencies = ["storix[core, local]"]
 
 [project.optional-dependencies]
 core = [
     "loguru>=0.7.3",
-    "pydantic>=2.12.5",
+    "pydantic-core>=2.41.5",
     "pydantic-settings>=2.12.0",
+    "pydantic>=2.12.5",
     "python-magic>=0.4.27",
+    "wrapt>=2.0.1",
 ]
 local = [
     "aiofiles>=25.1.0",
@@ -47,33 +51,39 @@ all = [
 [dependency-groups]
 dev = [
     "storix[all]",
-    "coverage>=7.9.2",
+    # --< tools >--
     "pyright>=1.1.407",
     "vulture>=2.14",
-    "pytest>=9.0.1",
-    "pytest-asyncio>=1.3.0",
-    "pytest-cov>=7.0.0",
     "mypy>=1.18.2",
     "ruff>=0.14.6",
     "pre-commit>=4.5.0",
-    "types-aiofiles>=24.1.0.20250606", # stub files for mypy
+    # --< test >--
+    "coverage>=7.9.2",
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    # --< stubs >--
+    "types-aiofiles>=24.1.0.20250606",
+    # --< docs >--
+    "mkdocs>=1.6.1",
 ]
-
+#<------------------------------------------------>#
 [build-system]
 requires = ["uv_build>=0.8.13,<0.9.0"]
 build-backend = "uv_build"
-
+#<------------------------------------------------>#
 [project.urls]
 Homepage = "https://github.com/mghalix/storix"
 Documentation = "https://github.com/mghalix/storix#readme"
 Repository = "https://github.com/mghalix/storix"
 Issues = "https://github.com/mghalix/storix/issues"
 Changelog = "https://github.com/mghalix/storix/blob/main/release-notes.md"
-
 [project.scripts]
 sx = "storix.cli.app:main"
+#<------------------------------------------------>#
 
-#+-- tools --+#
+#<--- tools --->#
+#
 [tool.pyright]
 include = ["src"]
 exclude = [
@@ -214,6 +224,4 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
-
-[tool.uv.sources]
-storix = { workspace = true }
+#<------------------------------------------------>#

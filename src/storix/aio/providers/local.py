@@ -20,7 +20,7 @@ from ._base import BaseStorage
 
 
 if TYPE_CHECKING:
-    from _typeshed import OpenBinaryMode
+    from ._types import OpenBinaryModeWriting
 
 
 class LocalFilesystem(BaseStorage):
@@ -339,7 +339,7 @@ class LocalFilesystem(BaseStorage):
 
         stream = normalize_data(data)
         try:
-            async with aiof.open(path, cast(OpenBinaryMode, mode + 'b')) as f:
+            async with aiof.open(path, cast(OpenBinaryModeWriting, mode + 'b')) as f:
                 while True:
                     chunk = stream.read(chunksize)
 
