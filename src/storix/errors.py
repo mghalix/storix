@@ -12,4 +12,3 @@ class PathNotFoundError(FileNotFoundError, ValueError, StorixError):
     compatibility with existing callers/tests that catch ValueError while also
     allowing users to catch the more specific FileNotFoundError.
     """
-

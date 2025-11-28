@@ -6,7 +6,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/mghalix/storix.svg?style=social)](https://github.com/mghalix/storix)
 [![License](https://img.shields.io/github/license/mghalix/storix.svg)](https://github.com/mghalix/storix/blob/main/LICENSE)
 
-<img src=".github/assets/storix-icon.png"/>
+<img src=".github/assets/storix-icon.png"/ alt="storix-icon">
 
 ---
 
@@ -163,9 +163,9 @@ ADLSG2_TOKEN=your-sas-token-or-account-key
 
 **Path Configuration**:
 
--   `STORAGE_INITIAL_PATH` is the shared default path for all providers
--   `STORAGE_INITIAL_PATH_LOCAL` and `STORAGE_INITIAL_PATH_AZURE` override the shared path for specific providers
--   Provider-specific paths take precedence over the shared path
+- `STORAGE_INITIAL_PATH` is the shared default path for all providers
+- `STORAGE_INITIAL_PATH_LOCAL` and `STORAGE_INITIAL_PATH_AZURE` override the shared path for specific providers
+- Provider-specific paths take precedence over the shared path
 
 ### CLI Usage
 
@@ -281,13 +281,13 @@ ADLSG2_CONTAINER_NAME=your_container
 >
 > > **Local:**
 > >
-> > -   if `STORAGE_INITIAL_PATH` set to "~", gets mapped to your home directory
-> > -   if `STORAGE_INITIAL_PATH` set to ".", gets mapped to your current working directory
+> > - if `STORAGE_INITIAL_PATH` set to "~", gets mapped to your home directory
+> > - if `STORAGE_INITIAL_PATH` set to ".", gets mapped to your current working directory
 >
 > > **Azure:**
 > >
-> > -   if `STORAGE_INITIAL_PATH` set to "~", gets mapped to root "/"
-> > -   if `STORAGE_INITIAL_PATH` set to ".", gets mapped to root "/"
+> > - if `STORAGE_INITIAL_PATH` set to "~", gets mapped to root "/"
+> > - if `STORAGE_INITIAL_PATH` set to ".", gets mapped to root "/"
 
 ## 🖼️ Media Support
 
@@ -327,46 +327,46 @@ async with fs:
 
 **It's that simple:**
 
--   No special APIs for media—just use `bytes` for any file type.
--   Works for images, audio, video, or any binary data.
--   Seamless support for both sync and async code.
+- No special APIs for media—just use `bytes` for any file type.
+- Works for images, audio, video, or any binary data.
+- Seamless support for both sync and async code.
 
 ## ✨ Features
 
--   **Sync & Async APIs:**
-    Use `from storix import LocalFilesystem` or `from storix.aio import LocalFilesystem` — just add `await` for async!
--   **Sandboxing:**
-    Restrict all file operations to a virtual root, blocking path traversal and symlink escapes.
--   **Consistent Path Handling:**
-    Absolute and relative paths, `cd`, `ls`, and more — just like a shell.
--   **Decorator Support:**
-    Automatic path conversion for your own functions.
--   **Easy Migration:**
-    Switch from sync to async in seconds.
--   **CLI Tool:**
-    Manage files and sandboxes from your terminal.
+- **Sync & Async APIs:**
+  Use `from storix import LocalFilesystem` or `from storix.aio import LocalFilesystem` — just add `await` for async!
+- **Sandboxing:**
+  Restrict all file operations to a virtual root, blocking path traversal and symlink escapes.
+- **Consistent Path Handling:**
+  Absolute and relative paths, `cd`, `ls`, and more — just like a shell.
+- **Decorator Support:**
+  Automatic path conversion for your own functions.
+- **Easy Migration:**
+  Switch from sync to async in seconds.
+- **CLI Tool:**
+  Manage files and sandboxes from your terminal.
 
 ---
 
 ## 🚀 Why storix
 
--   **Unified API:** Seamless sync and async support with identical interfaces.
--   **Rock-solid sandboxing:** Secure your file operations with robust path traversal and symlink protection.
--   **Plug-and-play:** Instantly switch between local and cloud (Azure) backends.
--   **CLI included:** Script and automate storage tasks from the command line.
--   **Extensible:** Clean, modern codebase ready for new providers and features.
--   **Tested & Secure:** Comprehensive test suite and security-first design.
+- **Unified API:** Seamless sync and async support with identical interfaces.
+- **Rock-solid sandboxing:** Secure your file operations with robust path traversal and symlink protection.
+- **Plug-and-play:** Instantly switch between local and cloud (Azure) backends.
+- **CLI included:** Script and automate storage tasks from the command line.
+- **Extensible:** Clean, modern codebase ready for new providers and features.
+- **Tested & Secure:** Comprehensive test suite and security-first design.
 
 ---
 
 ## 🔒 Security
 
--   **Path Traversal Protection:**
-    All `../` and symlink escapes are blocked.
--   **Virtual Root:**
-    Sandboxed mode makes `/` map to your chosen directory.
--   **Symlink Safety:**
-    Symlinks are resolved and validated before access.
+- **Path Traversal Protection:**
+  All `../` and symlink escapes are blocked.
+- **Virtual Root:**
+  Sandboxed mode makes `/` map to your chosen directory.
+- **Symlink Safety:**
+  Symlinks are resolved and validated before access.
 
 ---
 
@@ -386,9 +386,9 @@ Storix aims to be robust, secure, and easy to use. We value clear code, good doc
 
 To get started:
 
--   Star and fork the repository
--   Open an issue to discuss your idea or report a bug
--   Submit a pull request with your proposed changes
+- Star and fork the repository
+- Open an issue to discuss your idea or report a bug
+- Submit a pull request with your proposed changes
 
 For more details, see the documentation or join the discussion on GitHub.
 
@@ -402,9 +402,9 @@ If you like `storix` ⭐ star the repo, share it, and help us grow the community
 
 ## 📚 Documentation
 
--   [Sandbox Implementation Details](docs/SANDBOX_IMPLEMENTATION.md)
--   [Async Migration Guide](docs/ASYNC_MIGRATION.md)
--   [Release Notes](release-notes.md)
+- [Sandbox Implementation Details](docs/SANDBOX_IMPLEMENTATION.md)
+- [Async Migration Guide](docs/ASYNC_MIGRATION.md)
+- [Release Notes](release-notes.md)
 
 ---
 
@@ -426,34 +426,34 @@ uv run pytest -m integration # Run only integration tests
 
 Planned and upcoming features:
 
--   **`mv` support for directories in Azure sync/async providers**
--   **`du` (Disk Usage):**
-    -   Calculate and display the size of files and directories, similar to the Unix `du` command.
--   **`stat` (File Metadata):**
-    -   Retrieve and display detailed file metadata (size, permissions, timestamps, etc.),
-        similar to the Unix `stat` command.
-    -   Normalize the result using a shared model between the sync/async interfaces.
--   `touch`, `mkdir`, `rm`, `rmdir` should take **`*paths`** instead of a single path arg
--   **Storage Tree Structure (`tree`):**
-    -   Not just for visualization—enables programmatic operations such as copying, iterating, or transforming entire directory trees easily.
-    -   Will likely use a tree data structure (e.g., [anytree](https://anytree.readthedocs.io/), TBD) to represent and manipulate storage hierarchies efficiently.
-    -   Should be streaming for performance (leverage generators)
--   **Advanced CLI Features:**
-    -   Enhanced command-line tools for scripting and automation.
--   **Performance Improvements:**
-    -   Further optimize for speed and scalability.
--   **Additional Cloud Providers:**
-    -   Add support for more cloud storage backends (e.g., S3, GCS). Local filesystem support is already included.
--   **Auto Completions in the storix REPL (Interactive Shell)**
--   **Improve validation strategy**
-    -   Reduce code duplication in validation logic between sync/async providers
-    -   Evaluate shared utility functions, mixins, or decorator patterns
-    -   Focus on common operations like `rm`, `rmdir`, `touch` validation
-    -   Ensure consistent error messages and behavior across providers
--   **Storage Connection Pool**
-    -   Implement connection pooling for cloud storage providers to improve performance
-    -   Reuse connections across requests to reduce latency and overhead
-    -   Configurable pool sizes and connection timeouts
+- **`mv` support for directories in Azure sync/async providers**
+- **`du` (Disk Usage):**
+  - Calculate and display the size of files and directories, similar to the Unix `du` command.
+- **`stat` (File Metadata):**
+  - Retrieve and display detailed file metadata (size, permissions, timestamps, etc.),
+    similar to the Unix `stat` command.
+  - Normalize the result using a shared model between the sync/async interfaces.
+- `touch`, `mkdir`, `rm`, `rmdir` should take **`*paths`** instead of a single path arg
+- **Storage Tree Structure (`tree`):**
+  - Not just for visualization—enables programmatic operations such as copying, iterating, or transforming entire directory trees easily.
+  - Will likely use a tree data structure (e.g., [anytree](https://anytree.readthedocs.io/), TBD) to represent and manipulate storage hierarchies efficiently.
+  - Should be streaming for performance (leverage generators)
+- **Advanced CLI Features:**
+  - Enhanced command-line tools for scripting and automation.
+- **Performance Improvements:**
+  - Further optimize for speed and scalability.
+- **Additional Cloud Providers:**
+  - Add support for more cloud storage backends (e.g., S3, GCS). Local filesystem support is already included.
+- **Auto Completions in the storix REPL (Interactive Shell)**
+- **Improve validation strategy**
+  - Reduce code duplication in validation logic between sync/async providers
+  - Evaluate shared utility functions, mixins, or decorator patterns
+  - Focus on common operations like `rm`, `rmdir`, `touch` validation
+  - Ensure consistent error messages and behavior across providers
+- **Storage Connection Pool**
+  - Implement connection pooling for cloud storage providers to improve performance
+  - Reuse connections across requests to reduce latency and overhead
+  - Configurable pool sizes and connection timeouts
 
 ---
 

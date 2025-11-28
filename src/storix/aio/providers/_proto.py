@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterable, Iterable, Sequence
+from collections.abc import AsyncIterable, Buffer, Iterable, Sequence
 from types import TracebackType
 from typing import (
     IO,
@@ -27,7 +27,7 @@ class Storage(Protocol):
     async def touch(self, path: StrPathLike, data: Any | None = None) -> bool: ...
     async def echo(
         self,
-        data: IO[AnyStr] | AnyStr | Iterable[AnyStr] | AsyncIterable[AnyStr],
+        data: IO[AnyStr] | AnyStr | Iterable[Buffer] | AsyncIterable[Buffer] | Buffer,
         path: StrPathLike,
         *,
         mode: EchoMode = "w",

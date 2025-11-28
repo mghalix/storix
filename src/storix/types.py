@@ -1,6 +1,6 @@
 import abc
 import os
-from collections.abc import AsyncIterable, Iterable
+from collections.abc import AsyncIterable, Buffer, Iterable
 from pathlib import PurePath
 from typing import IO, Literal, Self
 
@@ -26,5 +26,9 @@ type StrPathLike = os.PathLike[str] | str
 type AvailableProviders = Literal["local", "azure"]
 type EchoMode = Literal["w", "a"]
 
-type DataBuffer[AnyStr: (str, bytes)] = AnyStr | Iterable[AnyStr] | IO[AnyStr]
-type AsyncDataBuffer[AnyStr: (str, bytes)] = DataBuffer[AnyStr] | AsyncIterable[AnyStr]
+type DataBuffer[AnyStr: (str, bytes)] = (
+    AnyStr | Buffer | Iterable[AnyStr | Buffer] | IO[AnyStr]
+)
+type AsyncDataBuffer[AnyStr: (str, bytes)] = (
+    DataBuffer[AnyStr] | AsyncIterable[AnyStr | Buffer]
+)

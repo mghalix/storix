@@ -2,6 +2,7 @@ from collections.abc import Iterable, Sequence
 from types import TracebackType
 from typing import IO, Any, AnyStr, Literal, Protocol, Self, overload, runtime_checkable
 
+from storix.core import Tree
 from storix.types import EchoMode, StorixPath, StrPathLike
 
 
@@ -47,9 +48,7 @@ class Storage(Protocol):
     def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[StorixPath | str]: ...
-    def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[StorixPath]: ...
+    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree: ...
     # TODO(@mghali): bind stat and du return type to Node or Tree for du
     # the bound generic to TreeNode or Tree would cause circular import error...?
     def stat(self, path: StrPathLike) -> Any: ...

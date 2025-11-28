@@ -1,15 +1,25 @@
+from __future__ import annotations
+
 import os
 import shutil
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
-from typing import Any, AnyStr, Literal, Self, overload
+from typing import (
+    Any,
+    AnyStr,
+    Literal,
+    Self,
+    overload,
+)
 
 from loguru import logger
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.core.tree import Tree
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.settings import get_settings
 from storix.types import DataBuffer, EchoMode, StorixPath, StrPathLike
+from storix.core import Finder
 
 from ._base import BaseStorage
 
@@ -97,9 +107,14 @@ class LocalFilesystem(BaseStorage):
     def ls(
         self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
     ) -> list[StorixPath]: ...
+
     def ls(
-        self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[StrPathLike]:
+        self,
+        path: StrPathLike | None = None,
+        *,
+        abs: bool = False,
+        all: bool = True,
+    ) -> Sequence[StrPathLike] | Iterator[StrPathLike]:
         """List files and directories at the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
@@ -226,11 +241,20 @@ class LocalFilesystem(BaseStorage):
             shutil.copy2(source, destination)
 
     # TODO(mghalix): revise from here to bottom
-    def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[StorixPath]:
+    # TODO(mghalix): add support for relative, currently are all abs implicitly
+    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """Return a tree view of files and directories starting at path."""
-        raise NotImplementedError
+        path = self._topath(path)
+        return Tree(
+            root=path,
+            dir_iterator=self.iterdir,
+            dir_checker=self.isdir,
+            file_checker=self.isfile,
+        )
+
+    def iterdir(self, path: StrPathLike | None = None) -> Iterator[StorixPath]:
+        path = self._topath(path)
+        return (StorixPath(p) for p in Path(path).iterdir())
 
     def stat(self, path: StrPathLike) -> Any:
         """Return stat information for the given path."""
@@ -278,3 +302,11 @@ class LocalFilesystem(BaseStorage):
             return False
 
         return True
+
+    def find(self, path: StrPathLike, type: Literal["f", "d"] | None = None) -> Finder:
+        return Finder(
+            self.tree(path=path).build(),
+            dir_checker=self.isdir,
+            file_checker=self.isfile,
+            type=type,
+        )
