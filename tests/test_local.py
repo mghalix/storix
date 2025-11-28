@@ -5,6 +5,7 @@ import pytest
 from pytest import MonkeyPatch
 
 from storix import LocalFilesystem, Storage
+from storix.types import StorixPath
 
 
 @pytest.fixture
@@ -318,7 +319,7 @@ def test_root_property(storage: Storage):
 def test_pwd(storage: Storage):
     """Test pwd returns current path"""
     current = storage.pwd()
-    assert isinstance(current, Path)
+    assert isinstance(current, StorixPath)
 
 
 # Test initialization scenarios
@@ -326,7 +327,7 @@ def test_init_with_tilde(tmp_path: Path):
     """Test initialization with tilde path"""
     # This will expand ~ to home directory
     storage = LocalFilesystem('~/test_dir', sandboxed=False)
-    assert isinstance(storage.pwd(), Path)
+    assert isinstance(storage.pwd(), StorixPath)
 
 
 def test_init_creates_directory(tmp_path: Path):
@@ -347,7 +348,7 @@ def test_init_absolute_path(tmp_path: Path):
 def test_init_relative_path():
     """Test initialization with relative path"""
     storage = LocalFilesystem('.', sandboxed=False)
-    assert isinstance(storage.pwd(), Path)
+    assert isinstance(storage.pwd(), StorixPath)
 
 
 def test_sandboxed_initialization(tmp_path: Path):

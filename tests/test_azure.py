@@ -143,7 +143,7 @@ def test_root_property(azure_storage: Storage) -> None:
 def test_pwd(azure_storage: Storage) -> None:
     """Test pwd returns current path."""
     current = azure_storage.pwd()
-    assert isinstance(current, Path)
+    assert isinstance(current, StorixPath)
 
 
 # Test directory operations
