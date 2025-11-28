@@ -1,30 +1,30 @@
 from collections.abc import AsyncGenerator, Generator
 
 
-def _test_data() -> Generator[str, None, None]:
-    return (str(i) + "\n" for i in range(100))
+def _test_data() -> Generator[str]:
+    return (str(i) + '\n' for i in range(100))
 
 
 def sync() -> None:
     from storix import LocalFilesystem
 
-    fs = LocalFilesystem(".", sandboxed=True)
-    fs.echo(_test_data(), "x.txt", mode="w")
+    fs = LocalFilesystem('.', sandboxed=True)
+    fs.echo(_test_data(), 'x.txt', mode='w')
 
 
-async def _atest_data() -> AsyncGenerator[str, None]:
+async def _atest_data() -> AsyncGenerator[str]:
     for i in range(100):
-        yield str(i) + "\n"
+        yield str(i) + '\n'
 
 
 async def a_sync() -> None:
     from storix.aio import LocalFilesystem
 
-    fs = LocalFilesystem(".", sandboxed=True)
-    await fs.echo(_atest_data(), "x.txt", mode="a")
+    fs = LocalFilesystem('.', sandboxed=True)
+    await fs.echo(_atest_data(), 'x.txt', mode='a')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import asyncio
 
     # sync()
