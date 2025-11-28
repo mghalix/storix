@@ -9,7 +9,7 @@ from rich.text import Text
 
 import storix as sx
 
-from storix.types import AvailableProviders
+from storix.types import AvailableProviders, StorixPath
 
 
 app = typer.Typer(
@@ -78,7 +78,7 @@ def ls(
                     file_type = 'FILE'
                     name = Text(file, style='white') if colors else file
                     try:
-                        size = str(full_path.stat().st_size)  # type: ignore[attr-defined]
+                        size = str(Path(full_path).stat().st_size)
                     except Exception:
                         size = '?'
                 else:
@@ -481,7 +481,7 @@ def find(
     ] = None,
 ) -> None:
     """Find files and directories (basic implementation)."""
-    start_path = path or fs.pwd()
+    start_path = Path(path or fs.pwd())
 
     try:
 
@@ -489,9 +489,10 @@ def find(
             current_path: Path,
             pattern: str | None = None,
             file_type: str | None = None,
-        ) -> list[Path]:
+        ) -> list[StorixPath]:
             """Recursively search for files matching a pattern."""
-            results = []
+            results: list[Path] = []
+            current_path = current_path
             try:
                 items = fs.ls(current_path)
                 for item in items:
@@ -508,7 +509,12 @@ def find(
                     if pattern and pattern not in item:
                         if fs.isdir(item_path):
                             results.extend(
-                                search_recursive(item_path, pattern, file_type)
+                                list(
+                                    map(
+                                        Path,
+                                        search_recursive(item_path, pattern, file_type),
+                                    )
+                                )
                             )
                         continue
 
@@ -516,12 +522,19 @@ def find(
 
                     # Recurse into directories
                     if fs.isdir(item_path):
-                        results.extend(search_recursive(item_path, pattern, file_type))
+                        results.extend(
+                            list(
+                                map(
+                                    Path,
+                                    search_recursive(item_path, pattern, file_type),
+                                )
+                            )
+                        )
 
             except Exception:
                 pass  # Skip directories we can't read
 
-            return results
+            return list(map(StorixPath, results))
 
         results = search_recursive(start_path, name, type)
         for result in results:
@@ -678,7 +691,7 @@ def upload(
 
         # Determine remote destination
         if remote_path is None:
-            remote_path = fs.pwd() / local_path.name
+            remote_path = Path(fs.pwd() / local_path.name)
 
         # Check if remote file exists
         if not overwrite and fs.exists(remote_path):

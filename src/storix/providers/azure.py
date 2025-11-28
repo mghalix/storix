@@ -7,6 +7,7 @@ from types import TracebackType
 from typing import Any, AnyStr, Literal, Self, overload, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.core.tree import Tree
 from storix.types import StorixPath
 
 
@@ -139,9 +140,7 @@ class AzureDataLake(BaseStorage):
 
     # TODO: convert the return type to dict[str, str] or Tree DS
     # so that its O(1) from the ui-side to access
-    def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[StorixPath]:
+    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """Return a tree view of files and directories starting at path."""
         path = self._topath(path)
         self._ensure_exist(path)
@@ -149,10 +148,25 @@ class AzureDataLake(BaseStorage):
         all = self._filesystem.get_paths(path=str(path), recursive=True)
         paths: list[StorixPath] = [self._topath(f.name) for f in all]
 
-        if self._sandbox:
-            return [self._sandbox.to_virtual(p) for p in paths]
+        it = (
+            paths if not self._sandbox else (self._sandbox.to_virtual(p) for p in paths)
+        )
+        return Tree.from_iterable(it)
+        # return Tree(
+        #     root=path,
+        #     dir_iterator=self.iterdir,
+        #     dir_checker=self.isdir,
+        #     file_checker=self.isfile,
+        # )
 
-        return paths
+    def iterdir(self, dir: StrPathLike | None = None) -> Iterator[StorixPath]:
+        dir = self._topath(dir) or self.pwd()
+        items = self.ls(dir, abs=True)
+
+        # if self._sandbox:
+        #     return (self._sandbox.to_virtual(p) for p in items)
+
+        return iter(items)
 
     @override
     def _topath(self, path: StrPathLike | None) -> StorixPath:
@@ -385,6 +399,8 @@ class AzureDataLake(BaseStorage):
             stream = normalize_data(data)
 
             offset = 0
+
+            ct: str | None
 
             if mode == 'w' or not self.exists(path):
                 f.create_file()

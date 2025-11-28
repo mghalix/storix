@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Self
 
 from ._proto import Storage
@@ -93,13 +92,13 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
         initialpath = self._topath(new_root)
         return self._init_storage(initialpath=initialpath)
 
-    def pwd(self) -> Path:
+    def pwd(self) -> StorixPath:
         """Return the current working directory as a concrete Path object.
 
         Internally we track paths as StorixPath (PurePath). For broader
         interoperability and test expectations, expose a pathlib.Path instance.
         """
-        return Path(str(self._current_path))
+        return StorixPath(str(self._current_path))
 
     def _init_storage(self, initialpath: StrPathLike) -> Self:
         initialpath = self._prepend_root(initialpath)

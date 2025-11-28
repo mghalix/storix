@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import shutil
 
 from collections.abc import Sequence
-from typing import Any, AnyStr, Literal, Self, overload
+from typing import TYPE_CHECKING, Any, AnyStr, Literal, Self, cast, overload
 
 import aiofiles as aiof
 import aiofiles.os as aioos
@@ -15,6 +17,10 @@ from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
 from ._base import BaseStorage
+
+
+if TYPE_CHECKING:
+    from _typeshed import OpenBinaryMode
 
 
 class LocalFilesystem(BaseStorage):
@@ -333,7 +339,7 @@ class LocalFilesystem(BaseStorage):
 
         stream = normalize_data(data)
         try:
-            async with aiof.open(path, mode + 'b') as f:
+            async with aiof.open(path, cast(OpenBinaryMode, mode + 'b')) as f:
                 while True:
                     chunk = stream.read(chunksize)
 

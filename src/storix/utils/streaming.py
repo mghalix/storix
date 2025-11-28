@@ -1,8 +1,11 @@
 from collections.abc import AsyncIterable, AsyncIterator, Buffer, Iterable, Iterator
 from io import BytesIO, UnsupportedOperation
-from typing import Any, Protocol, overload, runtime_checkable
+from typing import Any, Protocol, cast, overload, runtime_checkable
 
 from storix.types import AsyncDataBuffer, DataBuffer
+
+
+type Chunk = str | bytes | Buffer
 
 
 class _IReadableStreamBase(Protocol):
@@ -55,7 +58,7 @@ def normalize_data[AnyStr: (str, bytes)](
         return _AsyncIterStreamer(data, encoding=encoding)
 
     if isinstance(data, Iterable):
-        return _IterStreamer(data, encoding=encoding)
+        return _IterStreamer(cast(Iterable[Chunk], data), encoding=encoding)
 
     msg = f'Unsupported data type: {type(data)}'
     raise TypeError(msg)
@@ -74,10 +77,10 @@ class _BaseStreamer:
         raise UnsupportedOperation(msg)
 
 
-class _IterStreamer[ChunkT: (str, bytes, Buffer)](_BaseStreamer):
-    def __init__(self, generator: Iterable[ChunkT], *, encoding: str = 'utf-8') -> None:
-        self.generator: Iterable[ChunkT] = generator
-        self.iterator: Iterator[ChunkT] = iter(generator)
+class _IterStreamer(_BaseStreamer):
+    def __init__(self, generator: Iterable[Chunk], *, encoding: str = 'utf-8') -> None:
+        self.generator: Iterable[Chunk] = generator
+        self.iterator: Iterator[Chunk] = iter(generator)
         self.encoding = encoding
         self.leftover = b''
 
@@ -85,10 +88,10 @@ class _IterStreamer[ChunkT: (str, bytes, Buffer)](_BaseStreamer):
         # ignore[attr-defined] because not all iterables implement __len__
         return self.generator.__len__()  # type: ignore[attr-defined]
 
-    def __next__(self) -> ChunkT:
+    def __next__(self) -> Chunk:
         return next(self.iterator)
 
-    def __iter__(self) -> Iterator[ChunkT]:
+    def __iter__(self) -> Iterator[Chunk]:
         return self.iterator
 
     def read(self, size: int | None = None, /) -> bytes:
@@ -119,11 +122,11 @@ class _IterStreamer[ChunkT: (str, bytes, Buffer)](_BaseStreamer):
         return data[:size]
 
 
-class _AsyncIterStreamer[ChunkT: (str, bytes, Buffer)](_BaseStreamer):
+class _AsyncIterStreamer(_BaseStreamer):
     def __init__(
-        self, generator: AsyncIterable[ChunkT], *, encoding: str = 'utf-8'
+        self, generator: AsyncIterable[Chunk], *, encoding: str = 'utf-8'
     ) -> None:
-        self.iterator: AsyncIterator[ChunkT] = generator.__aiter__()
+        self.iterator: AsyncIterator[Chunk] = generator.__aiter__()
         self.encoding = encoding
         self.leftover = b''
 

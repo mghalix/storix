@@ -11,10 +11,10 @@ from storix.types import StorixPath, StrPathLike
 
 # Expose 'magic' at module level for testability and patching.
 # Will be used by get_mimetype; tests may monkeypatch storix.utils.magic.
-try:  # pragma: no cover - environment dependent
-    import magic as magic  # type: ignore[no-redef]
-except Exception:  # pragma: no cover
-    magic = SimpleNamespace(
+try:
+    import magic as magic
+except Exception:
+    magic = SimpleNamespace(  # type: ignore[assignment]
         from_buffer=lambda _buf, mime=True: 'application/octet-stream'
     )
 
