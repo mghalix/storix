@@ -1,20 +1,22 @@
 # Storix: Storage for Unix Lovers
 
-**A blazing-fast, secure, and developer-friendly storage abstraction for Python.**
+**A blazing-fast, secure, and developer-friendly storage abstraction for
+Python.**
 
 [![PyPI version](https://badge.fury.io/py/storix.svg)](https://pypi.org/project/storix/)
 [![GitHub stars](https://img.shields.io/github/stars/mghalix/storix.svg?style=social)](https://github.com/mghalix/storix)
 [![License](https://img.shields.io/github/license/mghalix/storix.svg)](https://github.com/mghalix/storix/blob/main/LICENSE)
 
-<img src=".github/assets/storix-icon.png"/ alt="storix-icon">
+![storix-icon](./.github/assets/storix-icon.png)
 
 ---
 
 ## 🎬 Demo
 
-![Storix Interactive Shell Demo](.github/assets/demo.gif)
+![Storix Interactive Shell Demo](./.github/assets/demo.gif)
 
-_Watch storix in action: navigating files, creating directories, and using the interactive shell mode._
+_Watch storix in action: navigating files, creating directories, and using the
+interactive shell mode._
 
 ---
 
@@ -131,7 +133,8 @@ uv run pip install -e .
 
 ### CLI Configuration (Optional)
 
-Create a `.env` file to customize your storage settings. Storix will automatically find your `.env` file in:
+Create a `.env` file to customize your storage settings. Storix will
+automatically find your `.env` file in:
 
 1. **Current directory** (where you run the command)
 2. **Parent directories** (searches up the directory tree)
@@ -159,12 +162,14 @@ ADLSG2_ACCOUNT_NAME=my-storage-account
 ADLSG2_TOKEN=your-sas-token-or-account-key
 ```
 
-**Smart Discovery**: You can run `sx` from any subdirectory of your project and it will find your `.env` file automatically!
+**Smart Discovery**: You can run `sx` from any subdirectory of your project and
+it will find your `.env` file automatically!
 
 **Path Configuration**:
 
 - `STORAGE_INITIAL_PATH` is the shared default path for all providers
-- `STORAGE_INITIAL_PATH_LOCAL` and `STORAGE_INITIAL_PATH_AZURE` override the shared path for specific providers
+- `STORAGE_INITIAL_PATH_LOCAL` and `STORAGE_INITIAL_PATH_AZURE` override the
+  shared path for specific providers
 - Provider-specific paths take precedence over the shared path
 
 ### CLI Usage
@@ -231,7 +236,8 @@ print((await fs.cat("async.txt")).decode())
 
 ### FastAPI Integration
 
-Storix integrates seamlessly with FastAPI for dependency injection and async file operations:
+Storix integrates seamlessly with FastAPI for dependency injection and async
+file operations:
 
 ```python
 from typing import AsyncGenerator
@@ -264,7 +270,7 @@ async def write_file(file_path: str, content: str, fs: StorageDep):
 
 **Configuration**: Set `STORAGE_PROVIDER` in your `.env` file to choose your backend:
 
-```
+```sh
 # For local filesystem
 STORAGE_PROVIDER=local
 STORAGE_INITIAL_PATH_LOCAL=/path/to/local/data
@@ -291,7 +297,8 @@ ADLSG2_CONTAINER_NAME=your_container
 
 ## 🖼️ Media Support
 
-Storix makes it effortless to store and retrieve images or any binary media files—just use Python's `bytes` type.
+Storix makes it effortless to store and retrieve images or any binary media
+files—just use Python's `bytes` type.
 
 ### Write an Image to Storage
 
@@ -334,9 +341,11 @@ async with fs:
 ## ✨ Features
 
 - **Sync & Async APIs:**
-  Use `from storix import LocalFilesystem` or `from storix.aio import LocalFilesystem` — just add `await` for async!
+  Use `from storix import LocalFilesystem` or `from storix.aio import
+LocalFilesystem` — just add `await` for async!
 - **Sandboxing:**
-  Restrict all file operations to a virtual root, blocking path traversal and symlink escapes.
+  Restrict all file operations to a virtual root, blocking path traversal and
+  symlink escapes.
 - **Consistent Path Handling:**
   Absolute and relative paths, `cd`, `ls`, and more — just like a shell.
 - **Decorator Support:**
@@ -351,7 +360,8 @@ async with fs:
 ## 🚀 Why storix
 
 - **Unified API:** Seamless sync and async support with identical interfaces.
-- **Rock-solid sandboxing:** Secure your file operations with robust path traversal and symlink protection.
+- **Rock-solid sandboxing:** Secure your file operations with robust path
+  traversal and symlink protection.
 - **Plug-and-play:** Instantly switch between local and cloud (Azure) backends.
 - **CLI included:** Script and automate storage tasks from the command line.
 - **Extensible:** Clean, modern codebase ready for new providers and features.
@@ -372,17 +382,24 @@ async with fs:
 
 ## 🙋 Need Help or Found a Bug?
 
-If you run into any issues, have questions, or spot a bug, please [open an issue](https://github.com/mghalix/storix/issues) on the GitHub repository.
+If you run into any issues, have questions, or spot a bug, please [open an
+issue](https://github.com/mghalix/storix/issues) on the GitHub repository.
 
-We welcome all feedback and contributions—your input helps make Storix better for everyone!
+We welcome all feedback and contributions—your input helps make Storix better
+for everyone!
 
 ---
 
 ## 🧑‍💻 Contributing
 
-Contributions are welcome and appreciated. If you have ideas for improvements, new features, or spot something that could be better, feel free to open an issue or a pull request.
+Contributions are welcome and appreciated. If you have ideas for improvements,
+new features, or spot something that could be better, feel free to open an
+issue or a pull request.
 
-Storix aims to be robust, secure, and easy to use. We value clear code, good documentation, and thoughtful discussion. Whether you want to add a new provider, enhance the CLI, share real-world examples, or review security, your input is valued.
+Storix aims to be robust, secure, and easy to use. We value clear code, good
+documentation, and thoughtful discussion. Whether you want to add a new
+provider, enhance the CLI, share real-world examples, or review security, your
+input is valued.
 
 To get started:
 
@@ -428,22 +445,28 @@ Planned and upcoming features:
 
 - **`mv` support for directories in Azure sync/async providers**
 - **`du` (Disk Usage):**
-  - Calculate and display the size of files and directories, similar to the Unix `du` command.
+  - Calculate and display the size of files and directories, similar to the
+    Unix `du` command.
 - **`stat` (File Metadata):**
   - Retrieve and display detailed file metadata (size, permissions, timestamps, etc.),
     similar to the Unix `stat` command.
   - Normalize the result using a shared model between the sync/async interfaces.
-- `touch`, `mkdir`, `rm`, `rmdir` should take **`*paths`** instead of a single path arg
+- `touch`, `mkdir`, `rm`, `rmdir` should take **`*paths`** instead of a single
+  path arg
 - **Storage Tree Structure (`tree`):**
-  - Not just for visualization—enables programmatic operations such as copying, iterating, or transforming entire directory trees easily.
-  - Will likely use a tree data structure (e.g., [anytree](https://anytree.readthedocs.io/), TBD) to represent and manipulate storage hierarchies efficiently.
+  - Not just for visualization—enables programmatic operations such as copying,
+    iterating, or transforming entire directory trees easily.
+  - Will likely use a tree data structure (e.g.,
+    [anytree](https://anytree.readthedocs.io/), TBD) to represent and manipulate
+    storage hierarchies efficiently.
   - Should be streaming for performance (leverage generators)
 - **Advanced CLI Features:**
   - Enhanced command-line tools for scripting and automation.
 - **Performance Improvements:**
   - Further optimize for speed and scalability.
 - **Additional Cloud Providers:**
-  - Add support for more cloud storage backends (e.g., S3, GCS). Local filesystem support is already included.
+  - Add support for more cloud storage backends (e.g., S3, GCS). Local
+    filesystem support is already included.
 - **Auto Completions in the storix REPL (Interactive Shell)**
 - **Improve validation strategy**
   - Reduce code duplication in validation logic between sync/async providers
