@@ -1,4 +1,5 @@
 import posixpath
+
 from collections.abc import Callable, Iterable, Sequence
 from functools import reduce
 from types import SimpleNamespace
@@ -7,16 +8,19 @@ from typing import Self, TypeVar
 from storix.sandbox import PathSandboxer
 from storix.types import StorixPath, StrPathLike
 
+
 # Expose 'magic' at module level for testability and patching.
 # Will be used by get_mimetype; tests may monkeypatch storix.utils.magic.
 try:  # pragma: no cover - environment dependent
     import magic as magic  # type: ignore[no-redef]
 except Exception:  # pragma: no cover
-    magic = SimpleNamespace(from_buffer=lambda _buf, mime=True: "application/octet-stream")
+    magic = SimpleNamespace(
+        from_buffer=lambda _buf, mime=True: 'application/octet-stream'
+    )
 
-T = TypeVar("T")
-U = TypeVar("U")
-V = TypeVar("V")
+T = TypeVar('T')
+U = TypeVar('U')
+V = TypeVar('V')
 
 
 def pipeline[**P, R](*funcs: Callable[P, R]) -> Callable[P, R]:
@@ -26,7 +30,7 @@ def pipeline[**P, R](*funcs: Callable[P, R]) -> Callable[P, R]:
         """Compose two functions."""
         return lambda x: f(g(x))
 
-    return reduce(compose_two, reversed(funcs), lambda x: x)  # type: ignore
+    return reduce(compose_two, reversed(funcs), lambda x: x)  # type: ignore[return-value]
 
 
 class PathLogicMixin:
@@ -48,20 +52,21 @@ class PathLogicMixin:
 
     def _parse_dots(self, path: StrPathLike, *, graceful: bool = True) -> StorixPath:
         path = StorixPath(path)
-        bk_cnt: int = str(path).count("..")
+        bk_cnt: int = str(path).count('..')
         if bk_cnt:
             bk_cnt += 1
-        target_path = eval(f"path{'.parent' * bk_cnt}")
+        target_path = eval(f'path{".parent" * bk_cnt}')
         # ignore[attr-defined] because 'home' is guaranteed by inheriting class
         if target_path >= StorixPath(self.home):  # type: ignore[attr-defined]
             return target_path
         if not graceful:
-            raise ValueError(f"Cannot go back deeper than current path: {path}")
+            msg = f'Cannot go back deeper than current path: {path}'
+            raise ValueError(msg)
         return StorixPath(self.home)  # type: ignore[attr-defined]
 
     def _parse_home(self, path: StrPathLike) -> StorixPath:
         # ignore[attr-defined] because 'home' is guaranteed by inheriting class
-        return StorixPath(str(path).replace("~", str(self.home)))  # type: ignore[attr-defined]
+        return StorixPath(str(path).replace('~', str(self.home)))  # type: ignore[attr-defined]
 
     def _makeabs(self, path: StrPathLike) -> StorixPath:
         path = StorixPath(path)
@@ -71,19 +76,20 @@ class PathLogicMixin:
         return self.pwd() / path  # type: ignore[attr-defined]
 
     def _topath(self, path: StrPathLike | None) -> StorixPath:
-        sb = getattr(self, "_sandbox", None)
+        sb = getattr(self, '_sandbox', None)
 
         path_str = str(path).strip()
-        if not path or path_str == ".":
+        if not path or path_str == '.':
             # ignore[attr-defined] because 'pwd' is guaranteed by inheriting class
             path = self.pwd()  # type: ignore[attr-defined]
-        elif path_str == "~":
+        elif path_str == '~':
             # ignore[attr-defined] because 'home' is guaranteed by inheriting class
             path = StorixPath(self.home)  # type: ignore[attr-defined]
         else:
             p = StorixPath(path)
             if sb and not p.is_absolute():
-                # ignore[attr-defined] because '_current_path' is guaranteed by inheriting class
+                # ignore[attr-defined] because '_current_path' is guaranteed by
+                # inheriting class
                 path = self._current_path / p  # type: ignore[attr-defined]
 
         if sb:
@@ -92,7 +98,8 @@ class PathLogicMixin:
             try:
                 path.relative_to(sb.get_prefix().resolve())
             except ValueError as err:
-                raise ValueError(f"Path '{path}' escapes sandbox boundaries") from err
+                msg = f"Path '{path}' escapes sandbox boundaries"
+                raise ValueError(msg) from err
         else:
             path = pipeline(
                 self._parse_dots,
@@ -126,12 +133,13 @@ class PathLogicMixin:
 
         Note: root here can be a sandboxed virtual root.
         """
-        root = getattr(self, "root", None)
+        root = getattr(self, 'root', None)
         if not root:
-            raise AttributeError(
+            msg = (
                 "Cannot check whether or not a path is root, when property 'root' is "
-                f"undefined for class: {self.__class__.__name__}"
+                f'undefined for class: {self.__class__.__name__}'
             )
+            raise AttributeError(msg)
 
         return self._topath(path) == root
 
@@ -142,16 +150,16 @@ class PathLogicMixin:
 
     def _prepend_root(self, path: StrPathLike | None = None) -> StorixPath:
         if path is None:
-            return StorixPath("/")
-        return StorixPath("/") / str(path).lstrip("/")
+            return StorixPath('/')
+        return StorixPath('/') / str(path).lstrip('/')
 
     def _filter_hidden[T: StrPathLike](self, output: Iterable[T]) -> Iterable[T]:
-        return filter(lambda q: not StorixPath(q).name.startswith("."), output)
+        return filter(lambda q: not StorixPath(q).name.startswith('.'), output)
 
 
 def craft_adlsg2_url(*, account_name: str) -> str:
     """Structure an Azure Datalake Gen2 URL."""
-    return f"https://{account_name}.dfs.core.windows.net"
+    return f'https://{account_name}.dfs.core.windows.net'
 
 
 def craft_adlsg2_url_sas(
@@ -159,8 +167,8 @@ def craft_adlsg2_url_sas(
 ) -> str:
     """Structure an Azure Datalake Gen2 URL with a SAS token embedded."""
     base_url = craft_adlsg2_url(account_name=account_name)
-    path = posixpath.join(*(p.strip("/") for p in (container, directory, filename)))
-    return f"{base_url}/{path}?{sas_token.lstrip('?')}"
+    path = posixpath.join(*(p.strip('/') for p in (container, directory, filename)))
+    return f'{base_url}/{path}?{sas_token.lstrip("?")}'
 
 
 def get_mimetype(*, buf: bytes) -> str:
@@ -183,7 +191,7 @@ def detect_mimetype(
     *,
     buf: bytes | None = None,
     path: StrPathLike | None = None,
-    default: str = "application/octet-stream",
+    default: str = 'application/octet-stream',
 ) -> str:
     """Detect best content-type given optional path and/or buffer.
 
@@ -211,7 +219,7 @@ def detect_mimetype(
 
 def to_data_url(*, buf: bytes, mimetype: str | None = None) -> str:
     """Create a data url."""
-    template = "data:{mimetype};base64,{base64_data}"
+    template = 'data:{mimetype};base64,{base64_data}'
 
     b64_data = _b64_encode(buf=buf)
     mimetype = mimetype or get_mimetype(buf=buf)
@@ -222,4 +230,4 @@ def to_data_url(*, buf: bytes, mimetype: str | None = None) -> str:
 def _b64_encode(*, buf: bytes) -> str:
     import base64
 
-    return base64.b64encode(buf).decode("utf-8")
+    return base64.b64encode(buf).decode('utf-8')

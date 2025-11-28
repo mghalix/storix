@@ -30,7 +30,7 @@ class Storage(Protocol):
         data: IO[AnyStr] | AnyStr | Iterable[Buffer] | AsyncIterable[Buffer] | Buffer,
         path: StrPathLike,
         *,
-        mode: EchoMode = "w",
+        mode: EchoMode = 'w',
         chunksize: int = ...,
     ) -> bool: ...
     async def cat(self, path: StrPathLike) -> bytes: ...
@@ -76,7 +76,7 @@ class Storage(Protocol):
         self,
         path: StrPathLike,
         *,
-        astype: Literal["data_url"] = "data_url",
+        astype: Literal['data_url'] = 'data_url',
     ) -> str: ...
     async def make_data_url(self, path: StrPathLike) -> str: ...
     def parent(self, path: StrPathLike) -> StorixPath: ...

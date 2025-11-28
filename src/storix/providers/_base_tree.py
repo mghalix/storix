@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from storix.types import StorixPath
 
+
 if TYPE_CHECKING:
     from ._base import BaseStorage
 
@@ -17,7 +18,7 @@ class TreeNode:
     """Base class for tree nodes in storage trees."""
 
 
-# TODO(@mghali): add total_dirs and total_files like unix cli tree at the end of output
+# TODO: add total_dirs and total_files like unix cli tree at the end of output
 class StorageTree[S: BaseStorage, N: TreeNode](ABC):
     """Abstract base class for storage tree structures."""
 
@@ -47,7 +48,7 @@ class StorageTree[S: BaseStorage, N: TreeNode](ABC):
     @abstractmethod
     def search(self, pattern: str) -> Sequence[N]: ...
 
-    # TODO(@mghali): should i implement those, also include them as algorithm selection in
+    # TODO: should i implement those, also include them as algorithm selection in
     # search method? do they return dictionary of nodes? check anytree lib
     # def dfs(self) -> ??
     # def bfs(self) -> ??

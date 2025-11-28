@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib
+
 from typing import TYPE_CHECKING, Any
+
 
 if TYPE_CHECKING:
     from .errors import PathNotFoundError, StorixError
@@ -13,25 +15,25 @@ if TYPE_CHECKING:
     from .types import AvailableProviders, StorixPath, StrPathLike
 
 __all__ = [
-    "AvailableProviders",
-    "AzureDataLake",
-    "LocalFilesystem",
-    "PathNotFoundError",
-    "Storage",
-    "StorixError",
-    "StorixPath",
-    "get_storage",
+    'AvailableProviders',
+    'AzureDataLake',
+    'LocalFilesystem',
+    'PathNotFoundError',
+    'Storage',
+    'StorixError',
+    'StorixPath',
+    'get_storage',
 ]
 
 _module_lookup = {
-    "LocalFilesystem": "storix.providers.local",
-    "AzureDataLake": "storix.providers.azure",
-    "Storage": "storix.providers",
-    "StorixError": "storix.errors",
-    "PathNotFoundError": "storix.errors",
-    "StorixPath": "storix.types",
-    "StrPathLike": "storix.types",
-    "AvailableProviders": "storix.types",
+    'LocalFilesystem': 'storix.providers.local',
+    'AzureDataLake': 'storix.providers.azure',
+    'Storage': 'storix.providers',
+    'StorixError': 'storix.errors',
+    'PathNotFoundError': 'storix.errors',
+    'StorixPath': 'storix.types',
+    'StrPathLike': 'storix.types',
+    'AvailableProviders': 'storix.types',
 }
 
 
@@ -39,7 +41,8 @@ def __getattr__(name: str) -> Any:
     if name in _module_lookup:
         module = importlib.import_module(_module_lookup[name])
         return getattr(module, name)
-    raise AttributeError(f"module {__name__} has no attribute {name}")
+    msg = f'module {__name__} has no attribute {name}'
+    raise AttributeError(msg)
 
 
 def get_storage(
@@ -71,22 +74,23 @@ def get_storage(
     settings = get_settings()
 
     provider = str(
-        provider or settings.STORAGE_PROVIDER or os.environ.get("STORAGE_PROVIDER")
+        provider or settings.STORAGE_PROVIDER or os.environ.get('STORAGE_PROVIDER')
     ).lower()
 
     params: dict[str, Any] = {}
     if initialpath is not None:
-        params["initialpath"] = initialpath
+        params['initialpath'] = initialpath
     if sandboxed is not None:
-        params["sandboxed"] = sandboxed
+        params['sandboxed'] = sandboxed
 
-    if provider == "local":
+    if provider == 'local':
         from .providers.local import LocalFilesystem
 
         return LocalFilesystem(**params)
-    if provider == "azure":
+    if provider == 'azure':
         from .providers.azure import AzureDataLake
 
         return AzureDataLake(**params)
 
-    raise ValueError(f"Unsupported storage provider: {provider}")
+    msg = f'Unsupported storage provider: {provider}'
+    raise ValueError(msg)

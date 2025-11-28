@@ -22,7 +22,7 @@ class Storage(Protocol):
         data: IO[AnyStr] | AnyStr | Iterable[AnyStr],
         path: StrPathLike,
         *,
-        mode: EchoMode = "w",
+        mode: EchoMode = 'w',
         chunksize: int = ...,
     ) -> bool: ...
     def cat(self, path: StrPathLike) -> bytes: ...
@@ -49,7 +49,7 @@ class Storage(Protocol):
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[StorixPath | str]: ...
     def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree: ...
-    # TODO(@mghali): bind stat and du return type to Node or Tree for du
+    # TODO: bind stat and du return type to Node or Tree for du
     # the bound generic to TreeNode or Tree would cause circular import error...?
     def stat(self, path: StrPathLike) -> Any: ...
     def du(
@@ -64,7 +64,7 @@ class Storage(Protocol):
         self,
         path: StrPathLike,
         *,
-        astype: Literal["data_url"] = "data_url",
+        astype: Literal['data_url'] = 'data_url',
     ) -> str: ...
     def make_data_url(self, path: StrPathLike) -> str: ...
     def parent(self, path: StrPathLike) -> StorixPath: ...

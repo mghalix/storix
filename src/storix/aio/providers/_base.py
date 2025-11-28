@@ -8,6 +8,7 @@ from storix.utils import PathLogicMixin
 
 from ._proto import Storage
 
+
 if TYPE_CHECKING:
     from storix.sandbox import PathSandboxer
     from storix.types import StrPathLike
@@ -17,10 +18,10 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
     """Async base provider - REUSES all path logic from sync version."""
 
     __slots__ = (
-        "_current_path",
-        "_home",
-        "_min_depth",
-        "_sandbox",
+        '_current_path',
+        '_home',
+        '_min_depth',
+        '_sandbox',
     )
 
     _min_depth: StorixPath
@@ -59,7 +60,7 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
                 "'sandbox_handler' cannot be None when 'sandboxed' is set to True"
             )
             self._sandbox = sandbox_handler(root)
-            self._init_storage(initialpath=StorixPath("/"))
+            self._init_storage(initialpath=StorixPath('/'))
         else:
             self._sandbox = None
             self._init_storage(initialpath=root)
@@ -68,7 +69,9 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
         if await self.exists(path):
             return
         from storix.errors import PathNotFoundError
-        raise PathNotFoundError(f"path '{path}' does not exist")
+
+        msg = f"path '{path}' does not exist"
+        raise PathNotFoundError(msg)
 
     async def open(self) -> Self:
         return self
@@ -83,7 +86,7 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
 
     @property
     def root(self) -> StorixPath:
-        return StorixPath("/")
+        return StorixPath('/')
 
     def chroot(self, new_root: StrPathLike) -> Self:
         """Change storage root to a descendant path reconstructing the storage."""
@@ -98,12 +101,13 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
         self,
         path: StrPathLike,
         *,
-        astype: Literal["data_url"] = "data_url",
+        astype: Literal['data_url'] = 'data_url',
     ) -> str:
-        if astype == "data_url":
+        if astype == 'data_url':
             return await self.make_data_url(path)
 
-        raise NotImplementedError(f"cannot make url of type: {astype}")
+        msg = f'cannot make url of type: {astype}'
+        raise NotImplementedError(msg)
 
     async def make_data_url(self, path: StrPathLike) -> str:
         from storix.utils import to_data_url
@@ -121,5 +125,5 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
 
     def _prepend_root(self, path: StrPathLike | None = None) -> StorixPath:
         if path is None:
-            return StorixPath("/")
-        return StorixPath("/") / str(path).lstrip("/")
+            return StorixPath('/')
+        return StorixPath('/') / str(path).lstrip('/')

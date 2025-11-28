@@ -5,17 +5,18 @@ from typing import TYPE_CHECKING
 
 from storix.types import StorixPath
 
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
 
 class Tree:
     __slots__ = (
-        "_built",
-        "dir_checker",
-        "dir_iter",
-        "file_checker",
-        "root",
+        '_built',
+        'dir_checker',
+        'dir_iter',
+        'file_checker',
+        'root',
     )
 
     def __init__(
@@ -53,16 +54,13 @@ class Tree:
                     file_checker=self.file_checker,
                 )
 
-    # TODO(mghalix): make prettier as tree, when integrating nodes and pointers to Tree
+    # TODO: make prettier as tree, when integrating nodes and pointers to Tree
     def __repr__(self) -> str:
-        extension = "├──"
-        extension_end = "└──"
-
         def _decor(p: StorixPath, prefix: str) -> str:
-            return f"{prefix} {p}"
+            return f'{prefix} {p}'
 
-        dir = partial(_decor, prefix="📁")
-        file = partial(_decor, prefix="📄")
+        dir = partial(_decor, prefix='📁')
+        file = partial(_decor, prefix='📄')
 
         res = []
 
@@ -72,5 +70,5 @@ class Tree:
             view = dir if self.dir_checker(p) else file
             res.append(view(p))
 
-        return "\n".join(res)
+        return '\n'.join(res)
         # return "\n".join(map(str, self.build()))

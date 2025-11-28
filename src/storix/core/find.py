@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Literal
 
 from storix.types import StorixPath
 
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
@@ -11,7 +12,7 @@ if TYPE_CHECKING:
 class Finder:
     """Finder of paths."""
 
-    __slots__ = ("dir_checker", "file_checker", "paths")
+    __slots__ = ('dir_checker', 'file_checker', 'paths')
 
     def __init__(
         self,
@@ -19,7 +20,7 @@ class Finder:
         *,
         dir_checker: Callable[[StorixPath], bool],
         file_checker: Callable[[StorixPath], bool],
-        type: Literal["f", "d"] | None = None,
+        type: Literal['f', 'd'] | None = None,
     ) -> None:
         """Initialize find object."""
         self.dir_checker = dir_checker
@@ -27,16 +28,16 @@ class Finder:
         self.paths: set[StorixPath] = self._resolve(paths=paths, type=type)
 
     def _resolve(
-        self, paths: Sequence[StorixPath], type: Literal["f", "d"] | None = None
+        self, paths: Sequence[StorixPath], type: Literal['f', 'd'] | None = None
     ) -> set[StorixPath]:
         if not type:
             return set(paths)
 
-        checker = self.dir_checker if type == "d" else self.file_checker
+        checker = self.dir_checker if type == 'd' else self.file_checker
         return set(filter(checker, paths))
 
     def __repr__(self) -> str:
-        return "\n".join(map(str, self.paths))
+        return '\n'.join(map(str, self.paths))
 
     def __iter__(self) -> Iterator[StorixPath]:
         return iter(self.paths)
