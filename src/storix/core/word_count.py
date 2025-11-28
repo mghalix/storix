@@ -1,5 +1,6 @@
-from collections.abc import Callable, Iterator, Mapping, Sized
+from collections.abc import Mapping, Sized
 from typing import (
+    TYPE_CHECKING,
     Literal,
     Self,
     TypedDict,
@@ -10,35 +11,39 @@ from typing import (
 )
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator, Mapping
+
+
 class DefaultWordCountResult(TypedDict, total=True):
     words: int
     lines: int
     chars: int
 
 
-Counts = Literal["words", "lines", "chars"]
+Counts = Literal['words', 'lines', 'chars']
 
 
 class WordCountResult(Mapping[Counts, int]):
-    __slots__ = ("_counts",)
+    __slots__ = ('_counts',)
 
     def __init__(self, **counts: Unpack[DefaultWordCountResult]) -> None:
         self._counts = cast(Mapping[Counts, int], counts)
 
     @property
     def words(self) -> int:
-        return self._counts["words"]
+        return self._counts['words']
 
     @property
     def chars(self) -> int:
-        return self._counts["chars"]
+        return self._counts['chars']
 
     @property
     def lines(self) -> int:
-        return self._counts["lines"]
+        return self._counts['lines']
 
     def __repr__(self) -> str:
-        return f"\t{self.words}\t{self.lines}\t{self.chars}"
+        return f'\t{self.words}\t{self.lines}\t{self.chars}'
 
     # mapping interface
     def __getitem__(self, key: Counts, /) -> int:
@@ -56,7 +61,7 @@ Countable = Sized
 
 
 class WordCountArg:
-    __slots__ = ("_counter",)
+    __slots__ = ('_counter',)
 
     def __init__(self, counter: Callable[[Countable], int]) -> None:
         self._counter = counter
@@ -88,25 +93,26 @@ class WordCount:
         m: bool = False,
     ) -> Self | WordCountArg:
         counts: Mapping[Counts, bool] = {
-            "words": w,
-            "lines": l,
-            "chars": m,
+            'words': w,
+            'lines': l,
+            'chars': m,
         }
 
         if not any(counts.values()):
             return self
 
         if sum(counts.values()) > 1:
-            raise ValueError(
-                "Only one of the counts must only be set when using `with_counts`. "
-                f"Got: {counts}"
+            msg = (
+                'Only one of the counts must only be set when using `with_counts`. '
+                f'Got: {counts}'
             )
+            raise ValueError(msg)
 
         key: Counts = next(k for k, v in counts.items() if v)
         mapping: Mapping[Counts, Callable[[Countable], int]] = {
-            "words": self._count_words,
-            "lines": self._count_lines,
-            "chars": self._count_chars,
+            'words': self._count_words,
+            'lines': self._count_lines,
+            'chars': self._count_chars,
         }
 
         return WordCountArg(mapping[key])

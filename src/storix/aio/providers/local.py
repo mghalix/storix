@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 import asyncio
 import os
 import shutil
+
 from collections.abc import Sequence
-from typing import Any, AnyStr, Literal, Self, overload
+from typing import TYPE_CHECKING, Any, AnyStr, Literal, Self, cast, overload
 
 import aiofiles as aiof
 import aiofiles.os as aioos
+
 from loguru import logger
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
@@ -13,6 +17,10 @@ from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
 from ._base import BaseStorage
+
+
+if TYPE_CHECKING:
+    from ._types import OpenBinaryModeWriting
 
 
 class LocalFilesystem(BaseStorage):
@@ -58,7 +66,7 @@ class LocalFilesystem(BaseStorage):
         from pathlib import Path
 
         initialpath = StorixPath(
-            str(initialpath).replace("~", str(Path.home()))
+            str(initialpath).replace('~', str(Path.home()))
         ).resolve()
         from pathlib import Path
 
@@ -86,7 +94,8 @@ class LocalFilesystem(BaseStorage):
             await self._ensure_exist(path)
         path = self._topath(path)
         if await self.isfile(path):
-            raise ValueError(f"cd: not a directory: {path}")
+            msg = f'cd: not a directory: {path}'
+            raise ValueError(msg)
         if self._sandbox:
             self._current_path = self._sandbox.to_virtual(path)
             return self
@@ -156,8 +165,8 @@ class LocalFilesystem(BaseStorage):
         data_bytes: bytes | None = data.encode() if isinstance(data, str) else data
 
         try:
-            async with aiof.open(path, "wb") as f:
-                await f.write(data_bytes or b"")
+            async with aiof.open(path, 'wb') as f:
+                await f.write(data_bytes or b'')
             return True
         except Exception as err:
             logger.error(f"touch: failed to write file '{path!s}': {err}")
@@ -194,7 +203,7 @@ class LocalFilesystem(BaseStorage):
         path = self._topath(path)
         await self._ensure_exist(path)
 
-        async with aiof.open(path, "rb") as f:
+        async with aiof.open(path, 'rb') as f:
             return await f.read()
 
     async def rm(self, path: StrPathLike) -> bool:
@@ -212,13 +221,13 @@ class LocalFilesystem(BaseStorage):
             await aioos.remove(path)
             return True
         except FileNotFoundError:
-            logger.error(f"File not found: {path}")
+            logger.error(f'File not found: {path}')
             return False
         except PermissionError:
-            logger.error(f"Permission denied: {path}")
+            logger.error(f'Permission denied: {path}')
             return False
         except Exception as err:
-            logger.error(f"Failed to remove {path}: {err}")
+            logger.error(f'Failed to remove {path}: {err}')
             return False
 
     async def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
@@ -228,7 +237,7 @@ class LocalFilesystem(BaseStorage):
 
         destination = self._topath(destination)
 
-        # TODO(mghalix): test below or switch to above
+        # TODO: test below or switch to above
         await aioos.rename(source, destination)
 
     async def cp(self, source: StrPathLike, destination: StrPathLike) -> None:
@@ -241,17 +250,17 @@ class LocalFilesystem(BaseStorage):
         # else:
         #     await asyncio.to_thread(shutil.copy2, *(source, destination))
 
-        # TODO(mghalix): test below or switch to above
+        # TODO: test below or switch to above
         if await self.isdir(source):
             await asyncio.to_thread(shutil.copytree, str(source), str(destination))
         else:
             async with (
-                aiof.open(source, "rb") as src,
-                aiof.open(destination, "wb") as dst,
+                aiof.open(source, 'rb') as src,
+                aiof.open(destination, 'wb') as dst,
             ):
                 await dst.write(await src.read())
 
-    # TODO(mghalix): revise from here to bottom
+    # TODO: revise from here to bottom
     async def tree(
         self, path: StrPathLike | None = None, *, abs: bool = False
     ) -> list[StorixPath]:
@@ -301,11 +310,11 @@ class LocalFilesystem(BaseStorage):
 
         if human_readable:
             # Simple human readable format
-            for unit in ["B", "KB", "MB", "GB", "TB"]:
+            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
                 if size < 1024.0:
-                    return f"{size:.1f}{unit}"
+                    return f'{size:.1f}{unit}'
                 size /= 1024.0
-            return f"{size:.1f}PB"
+            return f'{size:.1f}PB'
 
         return size
 
@@ -314,7 +323,7 @@ class LocalFilesystem(BaseStorage):
         data: AsyncDataBuffer[AnyStr],
         path: StrPathLike,
         *,
-        mode: EchoMode = "w",
+        mode: EchoMode = 'w',
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
     ) -> bool:
         """Write (overwrite/append) data into a file."""
@@ -330,7 +339,7 @@ class LocalFilesystem(BaseStorage):
 
         stream = normalize_data(data)
         try:
-            async with aiof.open(path, mode + "b") as f:
+            async with aiof.open(path, cast(OpenBinaryModeWriting, mode + 'b')) as f:
                 while True:
                     chunk = stream.read(chunksize)
 

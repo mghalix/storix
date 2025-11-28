@@ -1,4 +1,5 @@
 import asyncio
+
 from collections.abc import Awaitable, Callable
 from functools import wraps
 from typing import Any, Protocol
@@ -91,11 +92,10 @@ class SandboxedPathHandler:
         """Convert a real path to its virtual (sandboxed) equivalent."""
         path = StorixPath(real_path).resolve()
         try:
-            return StorixPath("/") / path.relative_to(self._prefix)
+            return StorixPath('/') / path.relative_to(self._prefix)
         except ValueError as err:
-            raise ValueError(
-                f"Path '{real_path}' is outside the sandbox root '{self._prefix}'"
-            ) from err
+            msg = f"Path '{real_path}' is outside the sandbox root '{self._prefix}'"
+            raise ValueError(msg) from err
 
     def to_real(self, virtual_path: StrPathLike | None = None) -> StorixPath:
         """Convert a virtual (sandboxed) path to its real path."""
@@ -105,7 +105,7 @@ class SandboxedPathHandler:
         path = StorixPath(virtual_path)
 
         # Handle special cases first
-        if str(path) in (".", "/"):
+        if str(path) in ('.', '/'):
             return self._prefix
 
         # For absolute paths, we need to treat them as virtual paths
@@ -128,9 +128,8 @@ class SandboxedPathHandler:
         try:
             full_path.relative_to(self._prefix.resolve())
         except ValueError as err:
-            raise ValueError(
-                f"Path '{virtual_path}' would escape sandbox boundaries"
-            ) from err
+            msg = f"Path '{virtual_path}' would escape sandbox boundaries"
+            raise ValueError(msg) from err
 
         return full_path
 
@@ -178,14 +177,14 @@ class SandboxedPathHandler:
             return result
 
         @wraps(func)
-        async def async_wrapper(*args, **kwargs):  # noqa
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             new_args, new_kwargs = get_new_args_kwargs(*args, **kwargs)
             assert asyncio.iscoroutinefunction(func)
             result = await func(*new_args, **new_kwargs)
             return convert_result(result)
 
         @wraps(func)
-        def sync_wrapper(*args, **kwargs):  # noqa
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             new_args, new_kwargs = get_new_args_kwargs(*args, **kwargs)
             result = func(*new_args, **new_kwargs)
             return convert_result(result)

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+uv sync --dev
+uv pip install -e .

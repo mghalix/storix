@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import (
@@ -15,11 +16,11 @@ from typing import (
 from loguru import logger
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.core import Finder
 from storix.core.tree import Tree
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.settings import get_settings
 from storix.types import DataBuffer, EchoMode, StorixPath, StrPathLike
-from storix.core import Finder
 
 from ._base import BaseStorage
 
@@ -62,7 +63,7 @@ class LocalFilesystem(BaseStorage):
                 settings.STORAGE_INITIAL_PATH_LOCAL or settings.STORAGE_INITIAL_PATH
             )
 
-        initialpath = Path(str(initialpath).replace("~", str(Path.home()))).resolve()
+        initialpath = Path(str(initialpath).replace('~', str(Path.home()))).resolve()
 
         if not initialpath.is_absolute():
             initialpath = Path.home() / initialpath
@@ -88,7 +89,8 @@ class LocalFilesystem(BaseStorage):
             self._ensure_exist(path)
         path = self._topath(path)
         if self.isfile(path):
-            raise ValueError(f"cd: not a directory: {path}")
+            msg = f'cd: not a directory: {path}'
+            raise ValueError(msg)
         if self._sandbox:
             self._current_path = self._sandbox.to_virtual(path)
             return self
@@ -153,8 +155,8 @@ class LocalFilesystem(BaseStorage):
         data_bytes: bytes | None = data.encode() if isinstance(data, str) else data
 
         try:
-            with Path(path).open("wb") as f:
-                f.write(data_bytes or b"")
+            with Path(path).open('wb') as f:
+                f.write(data_bytes or b'')
             return True
         except Exception as err:
             logger.error(f"touch: failed to write file '{path!s}': {err}")
@@ -191,7 +193,7 @@ class LocalFilesystem(BaseStorage):
         self._ensure_exist(path)
 
         data: bytes
-        with Path(path).open("rb") as f:
+        with Path(path).open('rb') as f:
             data = f.read()
 
         return data
@@ -212,13 +214,13 @@ class LocalFilesystem(BaseStorage):
             os.remove(path)
             return True
         except FileNotFoundError:
-            logger.error(f"File not found: {path}")
+            logger.error(f'File not found: {path}')
             return False
         except PermissionError:
-            logger.error(f"Permission denied: {path}")
+            logger.error(f'Permission denied: {path}')
             return False
         except Exception as err:
-            logger.error(f"Failed to remove {path}: {err}")
+            logger.error(f'Failed to remove {path}: {err}')
             return False
 
     def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
@@ -240,8 +242,8 @@ class LocalFilesystem(BaseStorage):
         else:
             shutil.copy2(source, destination)
 
-    # TODO(mghalix): revise from here to bottom
-    # TODO(mghalix): add support for relative, currently are all abs implicitly
+    # TODO: revise from here to bottom
+    # TODO: add support for relative, currently are all abs implicitly
     def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """Return a tree view of files and directories starting at path."""
         path = self._topath(path)
@@ -277,7 +279,7 @@ class LocalFilesystem(BaseStorage):
         data: DataBuffer[AnyStr],
         path: StrPathLike,
         *,
-        mode: EchoMode = "w",
+        mode: EchoMode = 'w',
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
     ) -> bool:
         """Write (overwrite/append) data into a file."""
@@ -293,7 +295,7 @@ class LocalFilesystem(BaseStorage):
 
         stream = normalize_data(data)
         try:
-            with Path(path).open(mode + "b") as f:
+            with Path(path).open(mode + 'b') as f:
                 while chunk := stream.read(chunksize):
                     f.write(chunk)
 
@@ -303,7 +305,7 @@ class LocalFilesystem(BaseStorage):
 
         return True
 
-    def find(self, path: StrPathLike, type: Literal["f", "d"] | None = None) -> Finder:
+    def find(self, path: StrPathLike, type: Literal['f', 'd'] | None = None) -> Finder:
         return Finder(
             self.tree(path=path).build(),
             dir_checker=self.isdir,

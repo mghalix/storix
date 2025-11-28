@@ -1,6 +1,3 @@
-from __future__ import annotations
-
-
 class StorixError(Exception):
     """Base class for Storix-specific exceptions."""
 

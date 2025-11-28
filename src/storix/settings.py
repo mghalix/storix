@@ -11,13 +11,13 @@ def find_env_file() -> str | None:
 
     # Search current directory and all parent directories
     while current != current.parent:
-        env_file = current / ".env"
+        env_file = current / '.env'
         if env_file.exists():
             return str(env_file)
         current = current.parent
 
     # Also check user's home directory
-    home_env = Path.home() / ".storix" / ".env"
+    home_env = Path.home() / '.storix' / '.env'
     if home_env.exists():
         return str(home_env)
 
@@ -27,14 +27,14 @@ def find_env_file() -> str | None:
 class Settings(BaseSettings):
     """Application settings for storage providers and environment configuration."""
 
-    STORAGE_PROVIDER: AvailableProviders = "local"
+    STORAGE_PROVIDER: AvailableProviders = 'local'
 
-    STORAGE_INITIAL_PATH: str = "."
+    STORAGE_INITIAL_PATH: str = '.'
     STORAGE_INITIAL_PATH_LOCAL: str = STORAGE_INITIAL_PATH
     STORAGE_INITIAL_PATH_AZURE: str = STORAGE_INITIAL_PATH
 
-    # TODO(mghalix): implement Storage Pool
-    STORAGE_POOL_MAX_CONNECTIONS: int = 10
+    # TODO: implement Storage Pool
+    # STORAGE_POOL_MAX_CONNECTIONS: int = 10
 
     # Azure Data Lake Gen2
     ADLSG2_CONTAINER_NAME: str | None = None
@@ -44,8 +44,8 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_file=find_env_file(),
-        env_file_encoding="utf-8",
-        extra="ignore",
+        env_file_encoding='utf-8',
+        extra='ignore',
         case_sensitive=True,
     )
 

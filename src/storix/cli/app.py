@@ -2,16 +2,19 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
 import storix as sx
-from storix.types import AvailableProviders
+
+from storix.types import AvailableProviders, StorixPath
+
 
 app = typer.Typer(
-    rich_markup_mode="rich",
-    help="Storix CLI - Unix-like filesystem commands",
+    rich_markup_mode='rich',
+    help='Storix CLI - Unix-like filesystem commands',
     no_args_is_help=False,
 )
 console = Console()
@@ -35,21 +38,21 @@ def ls(
     path: Annotated[
         Path | None,
         typer.Argument(
-            help="A path to a directory. If not provided, lists current directory"
+            help='A path to a directory. If not provided, lists current directory'
         ),
     ] = None,
     *,
     long: Annotated[
         bool,
-        typer.Option("-l", "--long", help="Use long listing format"),
+        typer.Option('-l', '--long', help='Use long listing format'),
     ] = False,
     all: Annotated[
         bool,
-        typer.Option("-a", "--all", help="Show hidden files"),
+        typer.Option('-a', '--all', help='Show hidden files'),
     ] = False,
     colors: Annotated[
         bool,
-        typer.Option("--color/--no-color", help="Enable/disable colors"),
+        typer.Option('--color/--no-color', help='Enable/disable colors'),
     ] = True,
 ) -> None:
     """List directory contents."""
@@ -60,28 +63,28 @@ def ls(
             return
 
         if long:
-            table = Table(show_header=True, header_style="bold blue")
-            table.add_column("Type")
-            table.add_column("Name")
-            table.add_column("Size")
+            table = Table(show_header=True, header_style='bold blue')
+            table.add_column('Type')
+            table.add_column('Name')
+            table.add_column('Size')
 
             for file in files:
-                full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore
+                full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore[attr-defined]
                 if fs.isdir(full_path):
-                    file_type = "DIR"
-                    name = Text(file, style="bold blue") if colors else file
-                    size = "-"
+                    file_type = 'DIR'
+                    name = Text(file, style='bold blue') if colors else file
+                    size = '-'
                 elif fs.isfile(full_path):
-                    file_type = "FILE"
-                    name = Text(file, style="white") if colors else file
+                    file_type = 'FILE'
+                    name = Text(file, style='white') if colors else file
                     try:
-                        size = str(full_path.stat().st_size)
+                        size = str(Path(full_path).stat().st_size)
                     except Exception:
-                        size = "?"
+                        size = '?'
                 else:
-                    file_type = "?"
+                    file_type = '?'
                     name = file
-                    size = "?"
+                    size = '?'
 
                 table.add_row(file_type, name, size)
 
@@ -89,21 +92,21 @@ def ls(
         else:
             colored_files = []
             for file in files:
-                full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore
+                full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore[attr-defined]
                 if colors:
                     if fs.isdir(full_path):
-                        colored_files.append(Text(file, style="bold blue"))
+                        colored_files.append(Text(file, style='bold blue'))
                     elif fs.isfile(full_path):
-                        colored_files.append(Text(file, style="white"))
+                        colored_files.append(Text(file, style='white'))
                     else:
-                        colored_files.append(Text(file, style="dim"))
+                        colored_files.append(Text(file, style='dim'))
                 else:
                     colored_files.append(Text(file))
 
             console.print(*colored_files)
 
     except Exception as e:
-        console.print(f"[red]ls: {e}[/red]")
+        console.print(f'[red]ls: {e}[/red]')
         raise typer.Exit(1) from e
 
 
@@ -117,15 +120,15 @@ def pwd() -> None:
 def cd(
     path: Annotated[
         Path | None,
-        typer.Argument(help="Directory to change to. If not provided, goes to home"),
+        typer.Argument(help='Directory to change to. If not provided, goes to home'),
     ] = None,
 ) -> None:
     """Change the current directory."""
     try:
         fs.cd(path)
-        console.print(f"Changed to: {fs.pwd()}")
+        console.print(f'Changed to: {fs.pwd()}')
     except Exception as e:
-        console.print(f"[red]cd: {e}[/red]")
+        console.print(f'[red]cd: {e}[/red]')
         raise typer.Exit(1) from e
 
 
@@ -133,17 +136,17 @@ def cd(
 def mkdir(
     directories: Annotated[
         list[Path],
-        typer.Argument(help="Directories to create"),
+        typer.Argument(help='Directories to create'),
     ],
     *,
     parents: Annotated[
         bool,
-        typer.Option("-p", "--parents", help="Create parent directories as needed"),
+        typer.Option('-p', '--parents', help='Create parent directories as needed'),
     ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
-            "-v", "--verbose", help="Print a message for each created directory"
+            '-v', '--verbose', help='Print a message for each created directory'
         ),
     ] = False,
 ) -> None:
@@ -152,7 +155,7 @@ def mkdir(
         try:
             fs.mkdir(directory, parents=parents)
             if verbose:
-                console.print(f"Created directory: {directory}")
+                console.print(f'Created directory: {directory}')
         except Exception as e:
             console.print(
                 f"[red]mkdir: cannot create directory '{directory}': {e}[/red]"
@@ -164,21 +167,21 @@ def mkdir(
 def rmdir(
     directories: Annotated[
         list[Path],
-        typer.Argument(help="Directories to remove"),
+        typer.Argument(help='Directories to remove'),
     ],
     *,
     recursive: Annotated[
         bool,
         typer.Option(
-            "-r",
-            "--recursive",
-            help="Remove directories and their contents recursively",
+            '-r',
+            '--recursive',
+            help='Remove directories and their contents recursively',
         ),
     ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
-            "-v", "--verbose", help="Print a message for each removed directory"
+            '-v', '--verbose', help='Print a message for each removed directory'
         ),
     ] = False,
 ) -> None:
@@ -187,12 +190,12 @@ def rmdir(
         try:
             if fs.rmdir(directory, recursive=recursive):
                 if verbose:
-                    console.print(f"Removed directory: {directory}")
+                    console.print(f'Removed directory: {directory}')
             else:
                 console.print(f"[red]rmdir: failed to remove '{directory}'[/red]")
                 raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]rmdir: {e}[/red]")
+            console.print(f'[red]rmdir: {e}[/red]')
             raise typer.Exit(1) from e
 
 
@@ -200,19 +203,19 @@ def rmdir(
 def touch(
     files: Annotated[
         list[Path],
-        typer.Argument(help="Files to create or update"),
+        typer.Argument(help='Files to create or update'),
     ],
 ) -> None:
     """Create empty files or update timestamps."""
     for file in files:
         try:
             if fs.touch(file):
-                console.print(f"Touched: {file}")
+                console.print(f'Touched: {file}')
             else:
                 console.print(f"[red]touch: failed to touch '{file}'[/red]")
                 raise typer.Exit(1)
         except Exception as e:
-            console.print(f"[red]touch: {e}[/red]")
+            console.print(f'[red]touch: {e}[/red]')
             raise typer.Exit(1) from e
 
 
@@ -220,16 +223,16 @@ def touch(
 def rm(
     files: Annotated[
         list[Path],
-        typer.Argument(help="Files to remove"),
+        typer.Argument(help='Files to remove'),
     ],
     *,
     force: Annotated[
         bool,
-        typer.Option("-f", "--force", help="Ignore nonexistent files"),
+        typer.Option('-f', '--force', help='Ignore nonexistent files'),
     ] = False,
     verbose: Annotated[
         bool,
-        typer.Option("-v", "--verbose", help="Print a message for each removed file"),
+        typer.Option('-v', '--verbose', help='Print a message for each removed file'),
     ] = False,
 ) -> None:
     """Remove files."""
@@ -237,29 +240,29 @@ def rm(
         try:
             if fs.rm(file):
                 if verbose:
-                    console.print(f"Removed: {file}")
+                    console.print(f'Removed: {file}')
             else:
                 if not force:
                     console.print(f"[red]rm: failed to remove '{file}'[/red]")
                     raise typer.Exit(1)
         except Exception as err:
             if not force:
-                console.print(f"[red]rm: {err}[/red]")
+                console.print(f'[red]rm: {err}[/red]')
                 raise typer.Exit(1) from err
 
 
 @app.command()
 def cp(
-    source: Annotated[Path, typer.Argument(help="Source file or directory")],
-    destination: Annotated[Path, typer.Argument(help="Destination file or directory")],
+    source: Annotated[Path, typer.Argument(help='Source file or directory')],
+    destination: Annotated[Path, typer.Argument(help='Destination file or directory')],
     *,
     recursive: Annotated[
         bool,
-        typer.Option("-r", "-R", "--recursive", help="Copy directories recursively"),
+        typer.Option('-r', '-R', '--recursive', help='Copy directories recursively'),
     ] = False,
     verbose: Annotated[
         bool,
-        typer.Option("-v", "--verbose", help="Print copied files"),
+        typer.Option('-v', '--verbose', help='Print copied files'),
     ] = False,
 ) -> None:
     """Copy files or directories."""
@@ -270,29 +273,29 @@ def cp(
 
         fs.cp(source, destination)
         if verbose:
-            console.print(f"Copied: {source} -> {destination}")
+            console.print(f'Copied: {source} -> {destination}')
     except Exception as e:
-        console.print(f"[red]cp: {e}[/red]")
+        console.print(f'[red]cp: {e}[/red]')
         raise typer.Exit(1) from e
 
 
 @app.command()
 def mv(
-    source: Annotated[Path, typer.Argument(help="Source file or directory")],
-    destination: Annotated[Path, typer.Argument(help="Destination file or directory")],
+    source: Annotated[Path, typer.Argument(help='Source file or directory')],
+    destination: Annotated[Path, typer.Argument(help='Destination file or directory')],
     *,
     verbose: Annotated[
         bool,
-        typer.Option("-v", "--verbose", help="Print moved files"),
+        typer.Option('-v', '--verbose', help='Print moved files'),
     ] = False,
 ) -> None:
     """Move/rename files or directories."""
     try:
         fs.mv(source, destination)
         if verbose:
-            console.print(f"Moved: {source} -> {destination}")
+            console.print(f'Moved: {source} -> {destination}')
     except Exception as e:
-        console.print(f"[red]mv: {e}[/red]")
+        console.print(f'[red]mv: {e}[/red]')
         raise typer.Exit(1) from e
 
 
@@ -300,17 +303,17 @@ def mv(
 def cat(
     files: Annotated[
         list[Path],
-        typer.Argument(help="Files to display"),
+        typer.Argument(help='Files to display'),
     ],
     *,
     number: Annotated[
         bool,
-        typer.Option("-n", "--number", help="Number output lines"),
+        typer.Option('-n', '--number', help='Number output lines'),
     ] = False,
     binary: Annotated[
         bool,
         typer.Option(
-            "-b", "--binary", help="Output raw binary data (use with caution)"
+            '-b', '--binary', help='Output raw binary data (use with caution)'
         ),
     ] = False,
 ) -> None:
@@ -327,38 +330,41 @@ def cat(
                 if not data:
                     return False
                 # Check for null bytes or high percentage of non-printable characters
-                null_bytes = data.count(b"\x00")
+                null_bytes = data.count(b'\x00')
                 if null_bytes > 0:
                     return True
 
                 try:
-                    data.decode("utf-8")
+                    data.decode('utf-8')
                     return False
                 except UnicodeDecodeError:
                     return True
 
             if is_binary(content) and not binary:
                 console.print(
-                    f"[yellow]cat: {file}: Binary file (use --binary to force output or 'download' command to save)[/yellow]"
+                    f'[yellow]cat: {file}: Binary file (use --binary to force output '
+                    "or 'download' command to save)[/yellow]"
                 )
                 # Show some basic info about the file
-                console.print(f"File size: {len(content)} bytes")
+                console.print(f'File size: {len(content)} bytes')
 
                 # Try to identify file type by extension
                 suffix = str(file).lower()
                 if any(
                     suffix.endswith(ext)
-                    for ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp"]
+                    for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
                 ):
                     console.print(
-                        "File appears to be an image. Use 'download' command to save it locally."
+                        "File appears to be an image. Use 'download' command to save "
+                        'it locally.'
                     )
                 elif any(
                     suffix.endswith(ext)
-                    for ext in [".pdf", ".doc", ".docx", ".zip", ".tar", ".gz"]
+                    for ext in ['.pdf', '.doc', '.docx', '.zip', '.tar', '.gz']
                 ):
                     console.print(
-                        "File appears to be a document/archive. Use 'download' command to save it locally."
+                        "File appears to be a document/archive. Use 'download' command "
+                        'to save it locally.'
                     )
 
                 continue
@@ -368,31 +374,31 @@ def cat(
                 sys.stdout.buffer.write(content)
             else:
                 # Decode as text
-                text = content.decode("utf-8", errors="replace")
+                text = content.decode('utf-8', errors='replace')
 
                 if number:
                     lines = text.splitlines()
                     for i, line in enumerate(lines, 1):
-                        console.print(f"{i:6}\t{line}")
+                        console.print(f'{i:6}\t{line}')
                 else:
-                    console.print(text, end="")
+                    console.print(text, end='')
 
         except Exception as e:
-            console.print(f"[red]cat: {file}: {e}[/red]")
+            console.print(f'[red]cat: {file}: {e}[/red]')
             raise typer.Exit(1) from e
 
 
 @app.command()
 def echo(
-    text: Annotated[str, typer.Argument(help="Text to display")],
+    text: Annotated[str, typer.Argument(help='Text to display')],
     *,
     file: Annotated[
         Path | None,
-        typer.Option("-f", "--file", help="Write to file instead of stdout"),
+        typer.Option('-f', '--file', help='Write to file instead of stdout'),
     ] = None,
     append: Annotated[
         bool,
-        typer.Option("-a", "--append", help="Append to file instead of overwriting"),
+        typer.Option('-a', '--append', help='Append to file instead of overwriting'),
     ] = False,
 ) -> None:
     """Display text or write to file."""
@@ -400,13 +406,13 @@ def echo(
         try:
             if append and fs.exists(file):
                 existing_content = fs.cat(file)
-                new_content = existing_content + text.encode() + b"\n"
+                new_content = existing_content + text.encode() + b'\n'
             else:
-                new_content = text.encode() + b"\n"
+                new_content = text.encode() + b'\n'
 
             fs.touch(file, new_content)
         except Exception as e:
-            console.print(f"[red]echo: {e}[/red]")
+            console.print(f'[red]echo: {e}[/red]')
             raise typer.Exit(1) from e
     else:
         console.print(text)
@@ -416,13 +422,13 @@ def echo(
 def exists(
     paths: Annotated[
         list[Path],
-        typer.Argument(help="Paths to check"),
+        typer.Argument(help='Paths to check'),
     ],
     *,
     quiet: Annotated[
         bool,
         typer.Option(
-            "-q", "--quiet", help="Don't print messages, just return exit codes"
+            '-q', '--quiet', help="Don't print messages, just return exit codes"
         ),
     ] = False,
 ) -> None:
@@ -432,14 +438,14 @@ def exists(
         try:
             if fs.exists(path):
                 if not quiet:
-                    console.print(f"[green]✓[/green] {path} exists")
+                    console.print(f'[green]✓[/green] {path} exists')
             else:
                 if not quiet:
-                    console.print(f"[red]✗[/red] {path} does not exist")
+                    console.print(f'[red]✗[/red] {path} does not exist')
                 all_exist = False
         except Exception as e:
             if not quiet:
-                console.print(f"[red]exists: {e}[/red]")
+                console.print(f'[red]exists: {e}[/red]')
             all_exist = False
 
     if not all_exist:
@@ -450,11 +456,11 @@ def exists(
 def tree(
     path: Annotated[
         Path | None,
-        typer.Argument(help="Directory to show tree for"),
+        typer.Argument(help='Directory to show tree for'),
     ] = None,
 ) -> None:
     """Display directory tree (not implemented)."""
-    console.print("[yellow]tree: command not implemented yet[/yellow]")
+    console.print('[yellow]tree: command not implemented yet[/yellow]')
     raise typer.Exit(1)
 
 
@@ -462,20 +468,20 @@ def tree(
 def find(
     path: Annotated[
         Path | None,
-        typer.Argument(help="Starting directory for search"),
+        typer.Argument(help='Starting directory for search'),
     ] = None,
     *,
     name: Annotated[
         str | None,
-        typer.Option("-name", help="Find files with this name pattern"),
+        typer.Option('-name', help='Find files with this name pattern'),
     ] = None,
     type: Annotated[
         str | None,
-        typer.Option("-type", help="Find files of this type (f=file, d=directory)"),
+        typer.Option('-type', help='Find files of this type (f=file, d=directory)'),
     ] = None,
 ) -> None:
     """Find files and directories (basic implementation)."""
-    start_path = path or fs.pwd()
+    start_path = Path(path or fs.pwd())
 
     try:
 
@@ -483,9 +489,10 @@ def find(
             current_path: Path,
             pattern: str | None = None,
             file_type: str | None = None,
-        ) -> list[Path]:
+        ) -> list[StorixPath]:
             """Recursively search for files matching a pattern."""
-            results = []
+            results: list[Path] = []
+            current_path = current_path
             try:
                 items = fs.ls(current_path)
                 for item in items:
@@ -493,16 +500,21 @@ def find(
 
                     # Type filtering
                     if file_type:
-                        if file_type == "f" and not fs.isfile(item_path):
+                        if file_type == 'f' and not fs.isfile(item_path):
                             continue
-                        if file_type == "d" and not fs.isdir(item_path):
+                        if file_type == 'd' and not fs.isdir(item_path):
                             continue
 
                     # Name filtering (simple pattern matching)
                     if pattern and pattern not in item:
                         if fs.isdir(item_path):
                             results.extend(
-                                search_recursive(item_path, pattern, file_type)
+                                list(
+                                    map(
+                                        Path,
+                                        search_recursive(item_path, pattern, file_type),
+                                    )
+                                )
                             )
                         continue
 
@@ -510,19 +522,26 @@ def find(
 
                     # Recurse into directories
                     if fs.isdir(item_path):
-                        results.extend(search_recursive(item_path, pattern, file_type))
+                        results.extend(
+                            list(
+                                map(
+                                    Path,
+                                    search_recursive(item_path, pattern, file_type),
+                                )
+                            )
+                        )
 
             except Exception:
                 pass  # Skip directories we can't read
 
-            return results
+            return list(map(StorixPath, results))
 
         results = search_recursive(start_path, name, type)
         for result in results:
             console.print(result)
 
     except Exception as e:
-        console.print(f"[red]find: {e}[/red]")
+        console.print(f'[red]find: {e}[/red]')
         raise typer.Exit(1) from e
 
 
@@ -530,20 +549,20 @@ def find(
 def wc(
     files: Annotated[
         list[Path],
-        typer.Argument(help="Files to count"),
+        typer.Argument(help='Files to count'),
     ],
     *,
     lines: Annotated[
         bool,
-        typer.Option("-l", "--lines", help="Count lines only"),
+        typer.Option('-l', '--lines', help='Count lines only'),
     ] = False,
     words: Annotated[
         bool,
-        typer.Option("-w", "--words", help="Count words only"),
+        typer.Option('-w', '--words', help='Count words only'),
     ] = False,
     chars: Annotated[
         bool,
-        typer.Option("-c", "--chars", help="Count characters only"),
+        typer.Option('-c', '--chars', help='Count characters only'),
     ] = False,
 ) -> None:
     """Count lines, words, and characters in files."""
@@ -551,7 +570,7 @@ def wc(
 
     for file in files:
         try:
-            content = fs.cat(file).decode("utf-8", errors="replace")
+            content = fs.cat(file).decode('utf-8', errors='replace')
 
             line_count = len(content.splitlines())
             word_count = len(content.split())
@@ -570,10 +589,10 @@ def wc(
                 output.append(str(char_count))
 
             output.append(str(file))
-            console.print(" ".join(output))
+            console.print(' '.join(output))
 
         except Exception as e:
-            console.print(f"[red]wc: {file}: {e}[/red]")
+            console.print(f'[red]wc: {file}: {e}[/red]')
             raise typer.Exit(1) from e
 
     if len(files) > 1:
@@ -584,27 +603,27 @@ def wc(
             output.append(str(total_words))
         if chars or (not lines and not words and not chars):
             output.append(str(total_chars))
-        output.append("total")
-        console.print(" ".join(output))
+        output.append('total')
+        console.print(' '.join(output))
 
 
 @app.command()
 def download(
-    remote_path: Annotated[Path, typer.Argument(help="Remote file to download")],
+    remote_path: Annotated[Path, typer.Argument(help='Remote file to download')],
     local_path: Annotated[
         Path | None,
         typer.Argument(
-            help="Local destination path (defaults to filename in current directory)"
+            help='Local destination path (defaults to filename in current directory)'
         ),
     ] = None,
     *,
     overwrite: Annotated[
         bool,
-        typer.Option("-f", "--force", help="Overwrite existing local files"),
+        typer.Option('-f', '--force', help='Overwrite existing local files'),
     ] = False,
     verbose: Annotated[
         bool,
-        typer.Option("-v", "--verbose", help="Show download progress"),
+        typer.Option('-v', '--verbose', help='Show download progress'),
     ] = False,
 ) -> None:
     """Download files from remote storage to local filesystem."""
@@ -619,7 +638,8 @@ def download(
         # Check if local file exists
         if local_path.exists() and not overwrite:
             console.print(
-                f"[red]download: '{local_path}' already exists (use --force to overwrite)[/red]"
+                f"[red]download: '{local_path}' already exists "
+                '(use --force to overwrite)[/red]'
             )
             raise typer.Exit(1)
 
@@ -627,38 +647,39 @@ def download(
         local_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Write content to local file
-        with open(local_path, "wb") as f:
+        with open(local_path, 'wb') as f:
             f.write(content)
 
         if verbose:
             console.print(
-                f"Downloaded {len(content)} bytes: {remote_path} -> {local_path}"
+                f'Downloaded {len(content)} bytes: {remote_path} -> {local_path}'
             )
         else:
-            console.print(f"Downloaded: {remote_path} -> {local_path}")
+            console.print(f'Downloaded: {remote_path} -> {local_path}')
 
     except Exception as e:
-        console.print(f"[red]download: {e}[/red]")
+        console.print(f'[red]download: {e}[/red]')
         raise typer.Exit(1) from e
 
 
 @app.command()
 def upload(
-    local_path: Annotated[Path, typer.Argument(help="Local file to upload")],
+    local_path: Annotated[Path, typer.Argument(help='Local file to upload')],
     remote_path: Annotated[
         Path | None,
         typer.Argument(
-            help="Remote destination path (defaults to filename in current remote directory)"
+            help='Remote destination path (defaults to filename in current '
+            'remote directory)'
         ),
     ] = None,
     *,
     overwrite: Annotated[
         bool,
-        typer.Option("-f", "--force", help="Overwrite existing remote files"),
+        typer.Option('-f', '--force', help='Overwrite existing remote files'),
     ] = False,
     verbose: Annotated[
         bool,
-        typer.Option("-v", "--verbose", help="Show upload progress"),
+        typer.Option('-v', '--verbose', help='Show upload progress'),
     ] = False,
 ) -> None:
     """Upload files from local filesystem to remote storage."""
@@ -670,17 +691,18 @@ def upload(
 
         # Determine remote destination
         if remote_path is None:
-            remote_path = fs.pwd() / local_path.name
+            remote_path = Path(fs.pwd() / local_path.name)
 
         # Check if remote file exists
         if not overwrite and fs.exists(remote_path):
             console.print(
-                f"[red]upload: '{remote_path}' already exists (use --force to overwrite)[/red]"
+                f"[red]upload: '{remote_path}' already exists "
+                '(use --force to overwrite)[/red]'
             )
             raise typer.Exit(1)
 
         # Read local file content
-        with open(local_path, "rb") as f:
+        with open(local_path, 'rb') as f:
             content = f.read()
 
         # Upload to remote storage
@@ -688,13 +710,13 @@ def upload(
 
         if verbose:
             console.print(
-                f"Uploaded {len(content)} bytes: {local_path} -> {remote_path}"
+                f'Uploaded {len(content)} bytes: {local_path} -> {remote_path}'
             )
         else:
-            console.print(f"Uploaded: {local_path} -> {remote_path}")
+            console.print(f'Uploaded: {local_path} -> {remote_path}')
 
     except Exception as e:
-        console.print(f"[red]upload: {e}[/red]")
+        console.print(f'[red]upload: {e}[/red]')
         raise typer.Exit(1) from e
 
 
@@ -703,19 +725,20 @@ def provider() -> None:
     """Show current storage provider information."""
     provider_type = type(fs).__name__
 
-    if provider_type == "LocalFilesystem":
-        console.print("[green]Current provider:[/green] Local Filesystem")
-        console.print(f"[blue]Working directory:[/blue] {fs.pwd()}")
-        console.print(f"[blue]Home directory:[/blue] {fs.home}")
-    elif provider_type == "AzureDataLake":
-        console.print("[green]Current provider:[/green] Azure Data Lake Storage Gen2")
-        console.print(f"[blue]Current path:[/blue] {fs.pwd()}")
-        console.print(f"[blue]Home path:[/blue] {fs.home}")
+    if provider_type == 'LocalFilesystem':
+        console.print('[green]Current provider:[/green] Local Filesystem')
+        console.print(f'[blue]Working directory:[/blue] {fs.pwd()}')
+        console.print(f'[blue]Home directory:[/blue] {fs.home}')
+    elif provider_type == 'AzureDataLake':
+        console.print('[green]Current provider:[/green] Azure Data Lake Storage Gen2')
+        console.print(f'[blue]Current path:[/blue] {fs.pwd()}')
+        console.print(f'[blue]Home path:[/blue] {fs.home}')
     else:
-        console.print(f"[green]Current provider:[/green] {provider_type}")
+        console.print(f'[green]Current provider:[/green] {provider_type}')
 
     console.print(
-        "\n[dim]To switch providers, set the STORAGE_PROVIDER environment variable to 'local' or 'azure'[/dim]"
+        '\n[dim]To switch providers, set the STORAGE_PROVIDER environment variable to '
+        "'local' or 'azure'[/dim]"
     )
 
 
@@ -746,18 +769,18 @@ def callback(
     ctx: typer.Context,
     interactive: Annotated[
         bool,
-        typer.Option("-i", "--interactive", help="Start interactive shell session"),
+        typer.Option('-i', '--interactive', help='Start interactive shell session'),
     ] = False,
     provider: Annotated[
         str | None,
         typer.Option(
-            "-p", "--provider", help="Select storage provider (local or azure)"
+            '-p', '--provider', help='Select storage provider (local or azure)'
         ),
     ] = None,
 ) -> None:
     """Storix CLI - Unix-like filesystem commands for local and cloud storage."""
     # Store the provider in context for commands to use
-    ctx.obj = {"provider": provider}
+    ctx.obj = {'provider': provider}
 
     if ctx.invoked_subcommand is None or interactive:
         # No command provided or interactive flag used, start interactive shell
