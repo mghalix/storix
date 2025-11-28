@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     STORAGE_INITIAL_PATH_AZURE: str = STORAGE_INITIAL_PATH
 
     # TODO: implement Storage Pool
-    STORAGE_POOL_MAX_CONNECTIONS: int = 10
+    # STORAGE_POOL_MAX_CONNECTIONS: int = 10
 
     # Azure Data Lake Gen2
     ADLSG2_CONTAINER_NAME: str | None = None
