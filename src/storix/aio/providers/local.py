@@ -5,7 +5,7 @@ import os
 import shutil
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, AnyStr, Literal, Self, cast, overload
+from typing import Any, AnyStr, Literal, Self, cast, overload
 
 import aiofiles as aiof
 import aiofiles.os as aioos
@@ -13,14 +13,12 @@ import aiofiles.os as aioos
 from loguru import logger
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.core import Tree
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
 from ._base import BaseStorage
-
-
-if TYPE_CHECKING:
-    from ._types import OpenBinaryModeWriting
+from ._types import OpenBinaryModeWriting  #  TODO: move to a shared typing module
 
 
 class LocalFilesystem(BaseStorage):
@@ -261,9 +259,7 @@ class LocalFilesystem(BaseStorage):
                 await dst.write(await src.read())
 
     # TODO: revise from here to bottom
-    async def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[StorixPath]:
+    async def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """List all items recursively at the given path."""
         path = self._topath(path)
         entries = []

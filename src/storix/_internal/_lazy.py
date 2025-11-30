@@ -10,28 +10,8 @@ except ImportError as err:
     raise ImportError(msg) from err
 
 
-def _proxy_instancecheck(obj: object, instance: type) -> bool:
-    target: Any = getattr(obj, '__wrapped__', None) or obj
-    try:
-        return isinstance(instance, target)
-    except TypeError:
-        return False
-
-
-def _proxy_subclasscheck(cls: type, subclass: type) -> bool:
-    target = getattr(cls, '__wrapped__', None) or cls
-    try:
-        return issubclass(subclass, target)
-    except TypeError:
-        return False
-
-
-wrapt.proxies.ObjectProxy.__instancecheck__ = _proxy_instancecheck  # type: ignore[attr-defined]
-wrapt.proxies.ObjectProxy.__subclasscheck__ = _proxy_subclasscheck  # type: ignore[attr-defined]
-wrapt.proxies.LazyObjectProxy.__instancecheck__ = _proxy_instancecheck  # type: ignore[attr-defined]
-wrapt.proxies.LazyObjectProxy.__subclasscheck__ = _proxy_subclasscheck  # type: ignore[attr-defined]
-
-
+# NOTE: use lazy import only to import non-type objects that needn't to be used
+# for instance checks, as the lazy proxy could mess it up when first accessed.
 @overload
 def lazy_import(module: str, /) -> Any:
     """import module."""

@@ -2,11 +2,12 @@ import asyncio
 
 from collections.abc import Awaitable, Callable
 from functools import wraps
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from storix.types import StorixPath, StrPathLike
 
 
+@runtime_checkable
 class PathSandboxer(Protocol):
     """Protocol defining sandboxed filesystem path operations.
 

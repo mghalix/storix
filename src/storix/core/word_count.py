@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Mapping, Sized
 from typing import (
     TYPE_CHECKING,
@@ -5,6 +7,7 @@ from typing import (
     Self,
     TypedDict,
     Unpack,
+    assert_never,
     cast,
     final,
     overload,

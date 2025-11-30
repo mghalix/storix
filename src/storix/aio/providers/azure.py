@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AnyStr, Literal, Self, TypeVar, overload, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.core import Tree
 
 
 try:
@@ -203,9 +204,7 @@ class AzureDataLake(BaseStorage):
 
     # TODO: convert the return type to dict[str, str] or Tree DS
     # so that its O(1) from the ui-side to access
-    async def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[StorixPath]:
+    async def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """Get a recursive listing of all files and directories.
 
         Args:
@@ -216,16 +215,27 @@ class AzureDataLake(BaseStorage):
             A list of Path objects for all files and directories.
 
         """
+        # path = self._topath(path)
+        # await self._ensure_exist(path)
+        #
+        # all = self._filesystem.get_paths(path=str(path), recursive=True)
+        # paths: list[StorixPath] = [self._topath(f.name) async for f in all]
+        #
+        # if self._sandbox:
+        #     return [self._sandbox.to_virtual(p) for p in paths]
+        #
+        # return paths
+
         path = self._topath(path)
         await self._ensure_exist(path)
 
         all = self._filesystem.get_paths(path=str(path), recursive=True)
         paths: list[StorixPath] = [self._topath(f.name) async for f in all]
 
-        if self._sandbox:
-            return [self._sandbox.to_virtual(p) for p in paths]
-
-        return paths
+        it = (
+            paths if not self._sandbox else (self._sandbox.to_virtual(p) for p in paths)
+        )
+        return Tree.from_iterable(it)
 
     @overload
     async def ls(

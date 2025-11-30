@@ -1,7 +1,6 @@
-from collections.abc import AsyncIterable, Buffer, Iterable, Sequence
+from collections.abc import Sequence
 from types import TracebackType
 from typing import (
-    IO,
     Any,
     AnyStr,
     Literal,
@@ -11,7 +10,8 @@ from typing import (
     runtime_checkable,
 )
 
-from storix.types import EchoMode, StorixPath, StrPathLike
+from storix.core import Tree
+from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
 
 @runtime_checkable
@@ -27,12 +27,21 @@ class Storage(Protocol):
     async def touch(self, path: StrPathLike, data: Any | None = None) -> bool: ...
     async def echo(
         self,
-        data: IO[AnyStr] | AnyStr | Iterable[Buffer] | AsyncIterable[Buffer] | Buffer,
+        data: AsyncDataBuffer[AnyStr],
         path: StrPathLike,
         *,
         mode: EchoMode = 'w',
         chunksize: int = ...,
+        content_type: str | None = None,
     ) -> bool: ...
+    # async def echo(
+    #     self,
+    #     data: IO[AnyStr] | AnyStr | Iterable[Buffer] | AsyncIterable[Buffer] | Buffer,
+    #     path: StrPathLike,
+    #     *,
+    #     mode: EchoMode = 'w',
+    #     chunksize: int = ...,
+    # ) -> bool: ...
     async def cat(self, path: StrPathLike) -> bytes: ...
     async def cd(self, path: StrPathLike | None = None) -> Self: ...
     def pwd(self) -> StorixPath: ...
@@ -62,7 +71,7 @@ class Storage(Protocol):
     ) -> Sequence[StorixPath | str]: ...
     async def tree(
         self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[StorixPath]: ...
+    ) -> Tree: ...
     async def stat(self, path: StrPathLike) -> Any: ...
     async def du(
         self, path: StrPathLike | None = None, *, human_readable: bool = True
