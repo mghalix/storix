@@ -528,8 +528,8 @@ class AzureDataLake(BaseStorage):
 
     # TODO: review / remove - mirror in sync provider
     async def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any:
+        self, path: StrPathLike | None = None, *, human_readable: bool = False
+    ) -> int:
         """Get disk usage for Azure storage - placeholder implementation."""
         # Azure Data Lake doesn't provide direct disk usage stats
         # This is a placeholder implementation
@@ -537,20 +537,32 @@ class AzureDataLake(BaseStorage):
         await self._ensure_exist(path)
 
         if await self.isfile(path):
-            props = await self.stat(path)
-            # Return file size if available
-            return getattr(props, 'size', 0)
+            # already checked that its file
+            return await self._file_size(path, no_check=True)
 
-        # For directories, we'd need to traverse all files
-        # This is a simplified implementation
-        total_size = 0
-        files = await self.tree(path)
-        for file_path in files:
-            if await self.isfile(file_path):
-                props = await self.stat(file_path)
-                total_size += getattr(props, 'size', 0)
+        return await self._dir_size(root=path)
 
-        return total_size
+    async def _file_size(self, file: StorixPath, *, no_check: bool = False) -> int:
+        check = not no_check
+        if check and not await self.isfile(file):
+            return 0
+
+        props = await self.stat(file)
+        return int(getattr(props, 'size', 0))
+
+    async def _dir_size(self, root: StorixPath) -> int:
+        files = await self.tree(root)
+
+        async def _check_one(p: StorixPath) -> int:
+            if await self.isdir(p):
+                return await self._dir_size(p)
+
+            return await self._file_size(p, no_check=True)
+
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(_check_one(file_path)) for file_path in files]
+
+        return sum(t.result() for t in tasks)
 
     async def close(self) -> None:
         """Close the Azure Data Lake client and filesystem."""

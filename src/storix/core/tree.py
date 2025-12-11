@@ -57,7 +57,8 @@ class Tree(Sized):
         )
 
     def __iter__(self) -> Iterator[StorixPath]:
-        for p in self.dir_iter(self.root):
+        it = self._built or self.dir_iter(self.root)
+        for p in it:
             if self.file_checker(p):
                 yield p
                 continue

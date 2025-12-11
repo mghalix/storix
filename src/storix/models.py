@@ -25,6 +25,7 @@ class AzureFileProperties(StorixBaseModel):
     """Properties for Azure Data Lake files and directories."""
 
     name: str
+    size: int
     hdi_isfolder: bool = False
     last_modified: dt.datetime
     creation_time: dt.datetime
