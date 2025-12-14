@@ -18,6 +18,26 @@ class StorixPath(PurePath, abc.ABC):
 
         return self.__class__(Path(self).resolve(strict=strict))
 
+    def maybe_file(self) -> bool:
+        from storix.utils.paths import is_file_approx
+
+        return is_file_approx(self)
+
+    def maybe_dir(self) -> bool:
+        from storix.utils.paths import is_dir_approx
+
+        return is_dir_approx(self)
+
+    def guess_mimetype(self) -> str | None:
+        """Guess mimetype from file extension using stdlib.
+
+        Returns:
+            None when type can't be determined.
+        """
+        from storix.utils import guess_mimetype_from_path
+
+        return guess_mimetype_from_path(self)
+
     # TODO: Implement this per sync/async
     # @abc.abstractmethod
     # def open(self) -> IO[Any]: ...
