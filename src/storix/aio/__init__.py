@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from storix._internal._lazy import lazy_import as _limp
 
+from ..types import AvailableProviders, StorixPath, StrPathLike
 from .providers._proto import Storage
 
 
@@ -19,11 +20,6 @@ __all__ = (
     'get_storage',
 )
 
-
-# <-- types --> #
-StorixPath = _limp('storix.types', 'StorixPath')
-StrPathLike = _limp('storix.types', 'StrPathLike')
-AvailableProviders = _limp('storix.types', 'AvailableProviders')
 
 # <-- interface & factory --> #
 get_storage = _limp('.factory', 'get_storage')
@@ -51,7 +47,6 @@ def __getattr__(name: str) -> Any:
 
 
 if TYPE_CHECKING:
-    from ..types import AvailableProviders, StorixPath, StrPathLike
     from .factory import get_storage
     from .providers.azure import AzureDataLake
     from .providers.local import LocalFilesystem

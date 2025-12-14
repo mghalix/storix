@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from storix import StorixPath
 from storix.aio import LocalFilesystem as AsyncLocalFilesystem
 from storix.sandbox import SandboxedPathHandler
 
@@ -111,7 +112,8 @@ class TestAsyncLocalFilesystem:
 
         # List with absolute paths
         abs_contents = await async_fs.ls('parent', abs=True)
-        assert all(isinstance(item, Path) for item in abs_contents)
+        print(abs_contents)
+        assert all(isinstance(item, StorixPath) for item in abs_contents)
 
     async def test_async_file_operations(self, async_fs_with_data: Any) -> None:
         """Test async file manipulation operations."""

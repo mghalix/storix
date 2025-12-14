@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from storix._internal._lazy import _limp
 
 from .providers._proto import Storage
+from .types import AvailableProviders, StorixPath, StrPathLike
 
 
 __all__ = (
@@ -35,10 +36,6 @@ get_storage = _limp('.factory', 'get_storage')
 # AzureDataLake = _limp('.providers.azure', 'AzureDataLake')
 # LocalFilesystem = _limp('.providers.local', 'LocalFilesystem')
 
-# <-- types --> #
-StorixPath = _limp('.types', 'StorixPath')
-StrPathLike = _limp('.types', 'StrPathLike')
-AvailableProviders = _limp('.types', 'AvailableProviders')
 
 _dynamic_imports = {
     'AzureDataLake': (__spec__.parent, '.providers.azure'),

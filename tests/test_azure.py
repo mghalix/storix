@@ -107,17 +107,28 @@ def test_azure_init_success(mock_azure_clients: Any) -> None:
 
 def test_azure_init_missing_credentials() -> None:
     """Test Azure Data Lake initialization fails without credentials."""
-    with pytest.raises(
-        AssertionError,
-        match='ADLSg2 account name and authentication token are required',
-    ):
-        AzureDataLake(adlsg2_account_name=None, adlsg2_token='token')
+    # This test must be deterministic even when the environment injects
+    # credentials (e.g. `inf run pytest`). Patch module-level settings so
+    # the fallback-to-settings path cannot accidentally satisfy credentials.
+    with patch('storix.providers.azure.settings') as mock_settings:
+        mock_settings.ADLSG2_ACCOUNT_NAME = None
+        mock_settings.ADLSG2_TOKEN = None
+        mock_settings.ADLSG2_CONTAINER_NAME = 'test-container'
+        mock_settings.ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS = False
+        mock_settings.STORAGE_INITIAL_PATH_AZURE = '/'
+        mock_settings.STORAGE_INITIAL_PATH = '/'
 
-    with pytest.raises(
-        AssertionError,
-        match='ADLSg2 account name and authentication token are required',
-    ):
-        AzureDataLake(adlsg2_account_name='account', adlsg2_token=None)
+        with pytest.raises(
+            AssertionError,
+            match='ADLSg2 account name and authentication token are required',
+        ):
+            AzureDataLake(adlsg2_account_name=None, adlsg2_token='token')
+
+        with pytest.raises(
+            AssertionError,
+            match='ADLSg2 account name and authentication token are required',
+        ):
+            AzureDataLake(adlsg2_account_name='account', adlsg2_token=None)
 
 
 def test_azure_init_from_settings(mock_azure_clients: Any) -> None:
@@ -263,7 +274,7 @@ def test_ls_abs(azure_storage: Storage, mock_azure_clients: Any) -> None:
     # Test absolute paths
     result = azure_storage.ls('/test', abs=True)
     assert len(result) == 1
-    assert isinstance(result[0], Path | StorixPath)
+    assert isinstance(result[0], StorixPath)
 
 
 def test_ls_nonexistent_path(azure_storage: Storage, mock_azure_clients: Any) -> None:
@@ -892,7 +903,7 @@ class TestAzureIntegration:
         """Test real connection to Azure."""
         # Simple test to verify connection works
         current_path = real_azure_storage.pwd()
-        assert isinstance(current_path, Path)
+        assert isinstance(current_path, StorixPath)
 
     def test_real_file_operations(self, real_azure_storage: Storage) -> None:
         """Test real file operations on Azure."""
