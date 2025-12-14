@@ -2,6 +2,7 @@ import contextlib
 import datetime as dt
 
 from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from types import TracebackType
 from typing import Any, AnyStr, Literal, Self, overload, override
@@ -10,7 +11,6 @@ from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.core.tree import Tree
 from storix.errors import PathNotFoundError
 from storix.types import StorixPath
-from concurrent.futures import ThreadPoolExecutor
 
 
 try:
