@@ -7,7 +7,6 @@ from typing import (
     Self,
     TypedDict,
     Unpack,
-    assert_never,
     cast,
     final,
     overload,
