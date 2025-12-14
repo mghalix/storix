@@ -1,10 +1,6 @@
-[build-system]
-requires = ["uv_build>=0.8.13,<0.9.0"]
-build-backend = "uv_build"
-
 [project]
 name = "storix"
-version = "0.0.2"
+version = "0.0.3"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -23,47 +19,131 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 requires-python = ">=3.12"
+#<--- dependencies --->#
+#
 dependencies = [
-    "aiofiles",
-    "loguru",
-    "python-magic",
-    "pydantic",
-    "pydantic-settings",
+    "storix[core, local]",
 ]
 
 [project.optional-dependencies]
-all = [
-    "azure-storage-file-datalake", 
-    "rich", 
-    "rich-toolkit", 
-    "typer",
+core = [
+    "loguru>=0.7.3",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-magic>=0.4.27",
+    "wrapt>=2.0.1",
 ]
-azure = ["azure-storage-file-datalake"]
-cli = ["rich", "rich-toolkit", "typer"]
+local = [
+    "aiofiles>=25.1.0",
+]
+azure = [
+    "azure-storage-file-datalake>=12.22.0",
+    "aiohttp>=3.13.2",
+]
+cli = [
+    "rich>=14.2.0",
+    "rich-toolkit>=0.17.0",
+    "typer>=0.20.0",
+]
+all = [
+    "storix[local, azure, cli]",
+]
 
+[dependency-groups]
+dev = [
+    "storix[all]",
+    # --< tools >--
+    "pyright>=1.1.407",
+    "vulture>=2.14",
+    "mypy>=1.18.2",
+    "ruff>=0.14.6",
+    "pre-commit>=4.5.0",
+    # --< test >--
+    "coverage>=7.9.2",
+    "pytest>=9.0.1",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    # --< stubs >--
+    "types-aiofiles>=24.1.0.20250606",
+    # --< docs >--
+    "mkdocs>=1.6.1",
+]
+#<------------------------------------------------>#
+[build-system]
+requires = ["uv_build>=0.8.13,<0.9.0"]
+build-backend = "uv_build"
+#<------------------------------------------------>#
 [project.urls]
 Homepage = "https://github.com/mghalix/storix"
 Documentation = "https://github.com/mghalix/storix#readme"
 Repository = "https://github.com/mghalix/storix"
 Issues = "https://github.com/mghalix/storix/issues"
 Changelog = "https://github.com/mghalix/storix/blob/main/release-notes.md"
-
 [project.scripts]
 sx = "storix.cli.app:main"
+#<------------------------------------------------>#
 
-# [tool.mypy]
-# strict = true
+#<--- tools --->#
+#
+[tool.pyright]
+include = ["src"]
+exclude = [
+    "**/__pycache__",
+    "**/dist",
+    "**/build",
+    "**/node_modules",
+    "**/venv",
+    "**/.venv",
+    "**/playground",
+]
+
+[tool.mypy]
+plugins = [
+    "pydantic.mypy",
+]
+exclude = []
+disable_error_code = []
+cache_dir = ".cache/mypy"
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = "samples.*"
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+pythonpath = ["src/storix"]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+cache_dir = ".cache/pytest"
 
 [tool.ruff]
 line-length = 88
 target-version = "py312"
 include = ["*.py", "*.pyi", "**/pyproject.toml", "*.ipynb"]
+cache-dir = ".cache/ruff"
+output-format = "grouped"
 
 [tool.ruff.format]
 docstring-code-format = true
+docstring-code-line-length = "dynamic"
+quote-style = "single"
+indent-style = "space"
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+ignore-decorators = ["typing.overload", "abc.abstractmethod"]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-first-party = ["storix"]
+known-local-folder = ["src"]
+known-third-party = ["pydantic", "loguru"]
+case-sensitive = true
+lines-after-imports = 2
+lines-between-types = 1
+
 
 [tool.ruff.lint]
 select = [
@@ -86,35 +166,36 @@ select = [
     "SIM", # flake8-simplify check
     "TD",  # todos
     "FIX", # fixme
+    "EM",    # flake8-errmsg
+    "FURB",  # refurb
+    "PGH003",  # blanket type ignore
+    "PGH004",  # blanket noqa
 ]
 ignore = [
-    "E501",   # line too long, handled by black
-    "B008",   # do not perform function calls in argument defaults
-    "C901",   # too complex
-    "W191",   # indentation contains tabs
+    "B008",   # Do not perform function call in argument defaults
+    "D203",   # 1 blank line required before class docstring
+    "D212",   # Multi-line docstring summary should start at the first line
+    "D205",   # 1 blank line required between summary line and description
     "ANN401", # allow dynamically typed expressions (typing.Any)
-    "D100",   # allow missing docstring in public module
+    "D418",   # allow docstring on overloaded function
+    "D100",   # allow missing docstring for public functions
+    "D103",   # allow missing docstring for public modules
     "D104",   # allow missing docstring in public package
+    "D102",   # allow missing docstring in public method
+    "D101",   # allow missing docstring in public class
+    "D105",   # allow missing docstring in magic method
+    "D106",   # allow missing docstring in public nested class
+    "D107",   # allow missing docstring in __init__
+    "TD002",  # allow missing todo author
     "TD003",  # allow missing link to todo issue
     "FIX002", # allow todo
+    #-----------------------#
 ]
 
-[tool.ruff.lint.isort]
-known-third-party = ["pydantic", "httpx", "loguru"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D", "INP", "TD", "ERA001", "RUF", "ANN201"]
-"examples/**" = ["D", "INP", "ERA001", "RUF"]
-
-[tool.pytest.ini_options]
-pythonpath = ["src/storix"]
-testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-# asyncio_mode = "auto"
-filterwarnings = ["ignore::DeprecationWarning"]
-markers = [
-    "integration: marks tests as integration tests",
-]
+"samples/**" = ["D", "INP", "ERA001", "RUF"]
 
 [tool.coverage.html]
 show_contexts = true
@@ -144,15 +225,4 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
-
-[dependency-groups]
-dev = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
-    "mypy",
-    "ruff",
-    "pre-commit",
-    "types-aiofiles>=24.1.0.20250606", # stub files for mypy
-    "coverage>=7.9.2",
-]
+#<------------------------------------------------>#

@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+
 cli_main: Callable | None
 
 try:
@@ -12,8 +13,8 @@ def main() -> None:
     """Entry point for the storix CLI."""
     if not cli_main:
         message = (
-            "[red]Error: storix CLI is not installed.\n"
-            "Install with: pip install storix[cli]"
+            '[red]Error: storix CLI is not installed.\n'
+            'Install with: pip install storix[cli]'
         )
         print(message)
         return

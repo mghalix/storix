@@ -8,9 +8,9 @@ def test_repl_instantiation():
     assert shell is not None
 
 
-@patch("builtins.input", return_value="help")
+@patch('builtins.input', return_value='help')
 def test_repl_help_command(mock_input: Mock) -> None:
     shell = StorixShell()
     # Simulate running the help command
-    shell.execute_command("help", [])
+    shell.execute_command('help', [])
     # No exception means success

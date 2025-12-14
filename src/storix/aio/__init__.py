@@ -1,80 +1,56 @@
 """Async version of storix - identical API but with async/await."""
 
-from __future__ import annotations
-
 import importlib
+
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from ..typing import AvailableProviders, StrPathLike
-    from .providers import Storage
-    from .providers.azure import AzureDataLake
-    from .providers.local import LocalFilesystem
+from storix._internal._lazy import lazy_import as _limp
 
-__all__ = [
-    "AzureDataLake",
-    "LocalFilesystem",
-    "Storage",
-    "get_storage",
-]
+from ..types import AvailableProviders, StorixPath, StrPathLike
+from .providers._proto import Storage
+
+
+__all__ = (
+    'AvailableProviders',
+    'AzureDataLake',
+    'LocalFilesystem',
+    'Storage',
+    'StorixPath',
+    'StrPathLike',
+    'get_storage',
+)
+
+
+# <-- interface & factory --> #
+get_storage = _limp('.factory', 'get_storage')
+# Storage = _limp('.providers._proto', 'Storage')
+
+
+# <-- providers --> #
+# AzureDataLake = _limp('.providers.azure', 'AzureDataLake')
+# LocalFilesystem = _limp('.providers.local', 'LocalFilesystem')
 
 _module_lookup = {
-    "LocalFilesystem": "storix.aio.providers.local",
-    "AzureDataLake": "storix.aio.providers.azure",
-    "Storage": "storix.aio.providers",
+    'AzureDataLake': 'storix.aio.providers.azure',
+    'LocalFilesystem': 'storix.aio.providers.local',
 }
 
 
 def __getattr__(name: str) -> Any:
     if name in _module_lookup:
         module = importlib.import_module(_module_lookup[name])
-        return getattr(module, name)
-    raise AttributeError(f"module {__name__} has no attribute {name}")
+        attr = getattr(module, name)
+        globals()[name] = attr
+        return attr
+    msg = f'module {__name__} has no attribute {name!r}'
+    raise AttributeError(msg)
 
 
-def get_storage(
-    provider: AvailableProviders | str | None = None,
-    initialpath: StrPathLike | None = None,
-    sandboxed: bool | None = None,
-) -> Storage:
-    """Get a storage instance with optional runtime overrides.
+if TYPE_CHECKING:
+    from .factory import get_storage
+    from .providers.azure import AzureDataLake
+    from .providers.local import LocalFilesystem
 
-    Args:
-        provider: Override the provider from environment settings. If None, uses
-            STORAGE_PROVIDER from environment or settings.
-        initialpath: Override the initial path from environment settings. If None, uses
-            provider-specific default paths from environment or settings.
-        sandboxed: Override sandboxing from environment settings. If None, uses
-            default sandboxing behavior.
 
-    Returns:
-        Storage: A configured storage instance. Provider-specific settings (like
-            credentials) are automatically loaded from environment or .env files.
-
-    Raises:
-        ValueError: If STORAGE_PROVIDER is not supported.
-    """
-    import os
-
-    from ..settings import settings
-
-    provider = str(
-        provider or settings.STORAGE_PROVIDER or os.environ.get("STORAGE_PROVIDER")
-    ).lower()
-
-    params: dict[str, Any] = {}
-    if initialpath is not None:
-        params["initialpath"] = initialpath
-    if sandboxed is not None:
-        params["sandboxed"] = sandboxed
-
-    if provider == "local":
-        from .providers.local import LocalFilesystem
-
-        return LocalFilesystem(**params)
-    if provider == "azure":
-        from .providers.azure import AzureDataLake
-
-        return AzureDataLake(**params)
-
-    raise ValueError(f"Unsupported storage provider: {provider}")
+def __dir__() -> list[str]:
+    return list(__all__)

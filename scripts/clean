@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+set -e
+
+TARGET_DIR=${1:-.}
+
+declare -a FILE_PATTERNS=("*.pyc")
+declare -a DIR_PATTERNS=("__pycache__" "*.egg-info" ".pytest_cache" ".ruff_cache" ".mypy_cache")
+
+for pattern in "${FILE_PATTERNS[@]}"; do
+    find "$TARGET_DIR" -type f -name "$pattern" -delete
+done
+
+for pattern in "${DIR_PATTERNS[@]}"; do
+    find "$TARGET_DIR" -type d -name "$pattern" -exec rm -rf {} +
+done

@@ -1,11 +1,17 @@
+import contextlib
 import datetime as dt
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
-from pathlib import Path
-from types import TracebackType
-from typing import Any, Literal, Self, overload
 
-import magic
+from collections.abc import Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from types import TracebackType
+from typing import Any, AnyStr, Literal, Self, overload, override
+
+from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.core.tree import Tree
+from storix.errors import PathNotFoundError
+from storix.types import StorixPath
+
 
 try:
     from azure.storage.blob import ContentSettings
@@ -16,49 +22,56 @@ try:
         FileSystemClient,
     )
 except ImportError as err:
-    raise ImportError(
-        'azure backend not installed. Install it by running `"uv add storix[azure]"`.'
-    ) from err
+    msg = 'azure backend not installed. Install it by running `uv add storix[azure]`.'
+    raise ImportError(msg) from err
 
 from loguru import logger
 
-from storix.models import AzureFileProperties
+from storix.models import AzureFileProperties, FileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
-from storix.settings import settings
-from storix.typing import StrPathLike
+from storix.settings import get_settings
+from storix.types import DataBuffer, EchoMode, StrPathLike
 
 from ._base import BaseStorage
+
+
+# Expose a module-level settings object for tests that patch
+settings = get_settings()
 
 
 class AzureDataLake(BaseStorage):
     """Azure Data Lake Storage Gen2 implementation."""
 
     __slots__ = (
-        "_current_path",
-        "_filesystem",
-        "_home",
-        "_min_depth",
-        "_sandbox",
-        "_service_client",
+        '_current_path',
+        '_filesystem',
+        '_home',
+        '_min_depth',
+        '_sandbox',
+        '_service_client',
+        'account_name',
+        'container_name',
+        'initialpath',
     )
 
     _sandbox: PathSandboxer | None
     _service_client: DataLakeServiceClient
     _filesystem: FileSystemClient
-    _home: Path
-    _current_path: Path
-    _min_depth: Path
+    _home: StorixPath
+    _current_path: StorixPath
+    _min_depth: StorixPath
 
     def __init__(
         self,
         initialpath: StrPathLike | None = None,
-        container_name: str = str(settings.ADLSG2_CONTAINER_NAME),
-        adlsg2_account_name: str | None = settings.ADLSG2_ACCOUNT_NAME,
-        adlsg2_token: str | None = settings.ADLSG2_TOKEN,
+        container_name: str | None = None,
+        adlsg2_account_name: str | None = None,
+        adlsg2_token: str | None = None,
         *,
         sandboxed: bool = True,
         sandbox_handler: type[PathSandboxer] = SandboxedPathHandler,
+        allow_container_name_in_paths: bool = False,
     ) -> None:
         """Initialize Azure Data Lake Storage Gen2 client.
 
@@ -81,28 +94,35 @@ class AzureDataLake(BaseStorage):
                 root directory ("/").
             sandbox_handler: The implementation class for path sandboxing.
                 Only used when sandboxed=True.
+            allow_container_name_in_paths: Accept having the container name shown in
+                any input path to any file operation, e.g., /raw/... or /processed/... .
 
         Raises:
             AssertionError: If account name or SAS token are not provided.
 
         """
+        cfg = settings
+        self.container_name = container_name or str(cfg.ADLSG2_CONTAINER_NAME)
+        self.account_name = adlsg2_account_name or cfg.ADLSG2_ACCOUNT_NAME
+        adlsg2_token = adlsg2_token or cfg.ADLSG2_TOKEN
+        self._allow_container_name_in_paths = (
+            allow_container_name_in_paths or cfg.ADLSG2_ALLOW_CONTAINER_NAME_IN_PATHS
+        )
+
         if initialpath is None:
-            initialpath = (
-                settings.STORAGE_INITIAL_PATH_AZURE or settings.STORAGE_INITIAL_PATH
-            )
+            initialpath = cfg.STORAGE_INITIAL_PATH_AZURE or cfg.STORAGE_INITIAL_PATH
 
-        if initialpath == "~":
-            initialpath = "/"
+        if initialpath == '~':
+            initialpath = '/'
 
-        assert adlsg2_account_name and adlsg2_token, (
-            "ADLSg2 account name and authentication token are required"
+        self.initialpath = initialpath
+        assert self.account_name and adlsg2_token, (
+            'ADLSg2 account name and authentication token are required'
         )
 
-        self._service_client = self._get_service_client(
-            adlsg2_account_name, adlsg2_token
-        )
+        self._service_client = self._get_service_client(self.account_name, adlsg2_token)
         self._filesystem = self._init_filesystem(
-            self._service_client, str(container_name)
+            self._service_client, str(self.container_name)
         )
 
         super().__init__(
@@ -117,23 +137,54 @@ class AzureDataLake(BaseStorage):
     def _get_service_client(
         self, account_name: str, token: str
     ) -> DataLakeServiceClient:
-        account_url = f"https://{account_name}.dfs.core.windows.net"
+        account_url = f'https://{account_name}.dfs.core.windows.net'
         return DataLakeServiceClient(account_url, credential=token)
 
-    # TODO(@mghali): convert the return type to dict[str, str] or Tree DS
+    # TODO: convert the return type to dict[str, str] or Tree DS
     # so that its O(1) from the ui-side to access
-    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> list[Path]:
+    def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """Return a tree view of files and directories starting at path."""
         path = self._topath(path)
         self._ensure_exist(path)
 
         all = self._filesystem.get_paths(path=str(path), recursive=True)
-        paths: list[Path] = [self._topath(f.name) for f in all]
+        paths: list[StorixPath] = [self._topath(f.name) for f in all]
 
-        if self._sandbox:
-            return [self._sandbox.to_virtual(p) for p in paths]
+        if abs:
+            paths = [entry.relative_to(path) for entry in paths]
 
-        return paths
+        it = (
+            paths if not self._sandbox else (self._sandbox.to_virtual(p) for p in paths)
+        )
+        return Tree.from_iterable(it)
+
+    def iterdir(self, dir: StrPathLike | None = None) -> Iterator[StorixPath]:
+        dir = self._topath(dir) or self.pwd()
+        items = self.ls(dir, abs=True)
+
+        # if self._sandbox:
+        #     return (self._sandbox.to_virtual(p) for p in items)
+
+        return iter(items)
+
+    @override
+    def _topath(self, path: StrPathLike | None) -> StorixPath:
+        p = super()._topath(path)
+
+        if not self._allow_container_name_in_paths:
+            return p
+
+        container_idx = 1
+        parts = p.parts
+
+        with contextlib.suppress(IndexError):
+            container_part = parts[container_idx]
+
+            if container_part == self.container_name:
+                stripped_parts = parts[:container_idx] + parts[container_idx + 1 :]
+                return StorixPath(*stripped_parts)
+
+        return p
 
     @overload
     def ls(
@@ -146,7 +197,7 @@ class AzureDataLake(BaseStorage):
     @overload
     def ls(
         self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
-    ) -> list[Path]: ...
+    ) -> list[StorixPath]: ...
     def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
     ) -> Sequence[StrPathLike]:
@@ -168,34 +219,79 @@ class AzureDataLake(BaseStorage):
     def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
-        # TODO(mghalix): add parents logic
+        if not parents:
+            try:
+                self._ensure_exist(path.parent)
+            except PathNotFoundError:
+                msg = (
+                    f"mkdir: cannot create directory '{path}': "
+                    'No such file or directory'
+                )
+                raise PathNotFoundError(msg) from None
         self._filesystem.create_directory(str(path))
 
-    def isdir(self, path: StrPathLike) -> bool:
-        """Check if the given path is a directory."""
-        stats = self.stat(path)
-        return stats.hdi_isfolder
-
-    def stat(self, path: StrPathLike) -> AzureFileProperties:
+    def stat(self, path: StrPathLike) -> FileProperties:
         """Return stat information for the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
 
+        s = self._provider_stat(path)
+        return FileProperties(
+            name=s.name,
+            size=s.size,
+            create_time=s.creation_time,
+            modify_time=s.last_modified,
+            file_kind='directory' if s.hdi_isfolder else 'file',
+        )
+
+    def _provider_stat(self, path: StorixPath) -> AzureFileProperties:
         with self._get_file_client(path) as fc:
             # determining whether an item is a file or a dir is currently not in the
             # azure sdk, but we follow this workaround
             # https://github.com/Azure/azure-sdk-for-python/issues/24814#issuecomment-1159280840
             props = fc.get_file_properties()
-            metadata = props.get("metadata") or {}
+            metadata = props.get('metadata') or {}
 
             return AzureFileProperties.model_validate(dict(**props, **metadata))
 
+    def _file_size(self, file: StorixPath, *, no_check: bool = False) -> int:
+        check = not no_check
+        if check and not self.isfile(file):
+            return 0
+
+        props = self._provider_stat(file)
+        return int(getattr(props, 'size', 0))
+
+    def _dir_size(
+        self, root: StorixPath, *, executor: ThreadPoolExecutor | None = None
+    ) -> int:
+        # for very deep directory trees, not having a shared executor and recreating it
+        # every time can be resource-intensive.
+        #
+        # entry point: create the executor if one doesn't exist
+        if executor is None:
+            with ThreadPoolExecutor() as pool:
+                return self._dir_size(root=root, executor=pool)
+
+        files = self.tree(root, abs=True)
+
+        def _check_one(p: StorixPath) -> int:
+            if self.isdir(p):
+                return self._dir_size(p, executor=executor)  # pass the shared executor
+
+            return self._file_size(p, no_check=True)
+
+        # use the shared executor
+        results = executor.map(_check_one, files)
+        return sum(results)
+
     def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""
-        stats = self.stat(path)
+        path = self._topath(path)
+        self._ensure_exist(path)
+        stats = self._provider_stat(path)
         return not stats.hdi_isfolder
 
-    # TODO(@mghali): add a confirm override option
     def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Move a file or directory to a new location."""
         source = self._topath(source)
@@ -204,14 +300,16 @@ class AzureDataLake(BaseStorage):
         self._ensure_exist(source)
 
         if self.isdir(source):
-            raise NotImplementedError("mv is not yet supported for directories")
+            msg = 'mv is not yet supported for directories'
+            raise NotImplementedError(msg)
 
         data = self.cat(source)
-        dest: Path = destination
+        dest: StorixPath = destination
         if self.exists(dest) and self.isdir(dest):
             dest /= source.name
 
-        # TODO(@mghali): add fallback or error on touch fail (ensuring no data loss by rm)
+        # TODO: add fallback or error on touch fail
+        # (ensuring no data loss by rm)
         self.touch(dest, data)
         self.rm(source)
 
@@ -225,7 +323,8 @@ class AzureDataLake(BaseStorage):
         path = self._topath(path)
 
         if self.isfile(path):
-            raise ValueError(f"cd: not a directory: {path}")
+            msg = f'cd: not a directory: {path}'
+            raise ValueError(msg)
 
         if self._sandbox:
             self._current_path = self._sandbox.to_virtual(path)
@@ -260,13 +359,14 @@ class AzureDataLake(BaseStorage):
         path = self._topath(path)
 
         if self.isfile(path):
-            raise ValueError(f"rmdir: failed to remove '{path}': Not a directory")
+            msg = f"rmdir: failed to remove '{path}': Not a directory"
+            raise ValueError(msg)
 
         with self._get_dir_client(path) as d:
             if not recursive and self.ls(path):
                 logger.error(
-                    f"Error: {path} is a non-empty directory. Use recursive=True to "
-                    "force remove non-empty directories."
+                    f'Error: {path} is a non-empty directory. Use recursive=True to '
+                    'force remove non-empty directories.'
                 )
                 return False
 
@@ -274,8 +374,23 @@ class AzureDataLake(BaseStorage):
 
         return True
 
-    def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
-        """Create a file at the given path, optionally writing data."""
+    def touch(
+        self,
+        path: StrPathLike,
+        data: Any | None = None,
+        *,
+        content_type: str | None = None,
+    ) -> bool:
+        """Create a file at the given path, optionally writing data.
+
+        Args:
+            path: Target file path.
+            data: Optional data blob to write entirely in one go.
+            content_type: Explicit content type override. If omitted we try:
+                1) Guess from path extension
+                2) Sniff from the data buffer (libmagic)
+                3) Fallback to application/octet-stream
+        """
         path = self._topath(path)
 
         with self._get_file_client(path) as f:
@@ -283,12 +398,76 @@ class AzureDataLake(BaseStorage):
 
             if not data:
                 return True
+            from storix.utils import detect_mimetype
 
-            content_type = magic.from_buffer(data, mime=True)
+            inferred = content_type or detect_mimetype(buf=data, path=path)
             f.upload_data(
                 data,
                 overwrite=True,
-                content_settings=ContentSettings(content_type=content_type),
+                content_settings=ContentSettings(content_type=inferred),
+            )
+
+        return True
+
+    def echo(
+        self,
+        data: DataBuffer[AnyStr],
+        path: StrPathLike,
+        *,
+        mode: EchoMode = 'w',
+        chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+        content_type: str | None = None,
+    ) -> bool:
+        """Write (overwrite/append) data into a file.
+
+        Args:
+            data: Buffer / iterable of bytes-like chunks.
+            path: Destination file path.
+            mode: "w" to create/overwrite, "a" to append.
+            chunksize: Size of stream chunks for append logic.
+            content_type: Explicit content type override. If None and mode == "w" we
+                will:
+                1) Guess based on path extension
+                2) Peek first bytes and sniff
+                3) Fallback to application/octet-stream
+                For append mode we preserve existing content_type unless explicit
+                override is provided.
+        """
+        path = self._topath(path)
+
+        with self._get_file_client(path) as f:
+            from storix.constants import DEFAULT_MIMETYPE_DETECTION_PEEKSIZE
+            from storix.utils import detect_mimetype
+            from storix.utils.streaming import normalize_data
+
+            stream = normalize_data(data)
+
+            offset = 0
+
+            ct: str | None
+
+            if mode == 'w' or not self.exists(path):
+                f.create_file()
+                head = stream.read(DEFAULT_MIMETYPE_DETECTION_PEEKSIZE)
+                # Determine new content type unless explicitly overridden
+                ct = content_type or detect_mimetype(buf=head, path=path)
+                length = len(head)
+                f.append_data(head, offset=offset, length=length)
+                offset += length
+            else:
+                props = f.get_file_properties()
+                existing_ct = props.content_settings.content_type
+                ct = content_type or existing_ct
+                offset = props.size
+
+            while chunk := stream.read(chunksize):
+                length = len(chunk)
+                f.append_data(chunk, offset=offset, length=length)
+                offset += length
+
+            f.flush_data(
+                offset=offset,
+                content_settings=ContentSettings(content_type=ct),
             )
 
         return True
@@ -299,7 +478,8 @@ class AzureDataLake(BaseStorage):
         self._ensure_exist(path)
 
         if self.isdir(path):
-            raise ValueError(f"cat: {path}: Is a directory")
+            msg = f'cat: {path}: Is a directory'
+            raise ValueError(msg)
 
         blob: bytes
         with self._get_file_client(path) as f:
@@ -312,7 +492,7 @@ class AzureDataLake(BaseStorage):
         """Check if the given path exists."""
         path = self._topath(path)
 
-        if str(path) == "/":
+        if str(path) == '/':
             return True
 
         try:
@@ -335,14 +515,21 @@ class AzureDataLake(BaseStorage):
             self.touch(destination, data)
             return
 
-        # TODO(@mghali): copy tree
+        # TODO: copy tree
         raise NotImplementedError
 
-    def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any:
+    def du(self, path: StrPathLike | None = None) -> Any:
         """Return disk usage statistics for the given path."""
-        raise NotImplementedError
+        # Azure Data Lake doesn't provide direct disk usage stats
+        # This is a placeholder implementation
+        path = self._topath(path)
+        self._ensure_exist(path)
+
+        if self.isfile(path):
+            # already checked that its file
+            return self._file_size(path, no_check=True)
+
+        return self._dir_size(root=path)
 
     def close(self) -> None:
         """Close the Azure Data Lake storage client."""
@@ -364,10 +551,10 @@ class AzureDataLake(BaseStorage):
             yield client
 
     def make_url(
-        self, path: StrPathLike, *, astype: Literal["data_url", "sas"] = "sas"
+        self, path: StrPathLike, *, astype: Literal['data_url', 'sas'] = 'sas'
     ) -> str:
         """Generate a url for a path."""
-        if astype == "sas":
+        if astype == 'sas':
             return self._generate_sas_url(
                 path, expires_in=SAS_EXPIRY_SECONDS, permissions=SAS_PERMISSIONS
             )
@@ -388,7 +575,8 @@ class AzureDataLake(BaseStorage):
         self._ensure_exist(path)
 
         if self.isdir(path):
-            raise ValueError("cannot generate a sas token for a directory")
+            msg = 'cannot generate a sas token for a directory'
+            raise ValueError(msg)
 
         fs = self._filesystem
         account_name: str = str(fs.account_name)
@@ -400,7 +588,7 @@ class AzureDataLake(BaseStorage):
             **dict.fromkeys(map(str, permissions), True)
         )
 
-        directory: str = str(path.parent).lstrip("/")
+        directory: str = str(path.parent).lstrip('/')
         filename: str = path.parts[-1]
 
         # pure local crypto op no i/o

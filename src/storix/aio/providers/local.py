@@ -1,18 +1,26 @@
+from __future__ import annotations
+
 import asyncio
+import datetime as dt
 import os
 import shutil
+
 from collections.abc import Sequence
-from pathlib import Path
-from typing import Any, Literal, Self, overload
+from typing import Any, AnyStr, Literal, Self, cast, overload
 
 import aiofiles as aiof
 import aiofiles.os as aioos
+
 from loguru import logger
 
+from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.core import Tree
+from storix.models import FileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
-from storix.typing import StrPathLike
+from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
 from ._base import BaseStorage
+from ._types import OpenBinaryModeWriting  #  TODO: move to a shared typing module
 
 
 class LocalFilesystem(BaseStorage):
@@ -47,18 +55,25 @@ class LocalFilesystem(BaseStorage):
 
         """
         if initialpath is None:
-            from storix.settings import settings
+            from storix.settings import get_settings
+
+            settings = get_settings()
 
             initialpath = (
                 settings.STORAGE_INITIAL_PATH_LOCAL or settings.STORAGE_INITIAL_PATH
             )
 
-        initialpath = Path(str(initialpath).replace("~", str(Path.home()))).resolve()
+        from pathlib import Path
+
+        initialpath = StorixPath(
+            str(initialpath).replace('~', str(Path.home()))
+        ).resolve()
+        from pathlib import Path
 
         if not initialpath.is_absolute():
             initialpath = Path.home() / initialpath
 
-        if not Path.exists(initialpath):
+        if not Path(initialpath).exists():
             logger.info(f"Creating initial path: '{initialpath}'...")
             os.makedirs(initialpath)
 
@@ -79,7 +94,8 @@ class LocalFilesystem(BaseStorage):
             await self._ensure_exist(path)
         path = self._topath(path)
         if await self.isfile(path):
-            raise ValueError(f"cd: not a directory: {path}")
+            msg = f'cd: not a directory: {path}'
+            raise ValueError(msg)
         if self._sandbox:
             self._current_path = self._sandbox.to_virtual(path)
             return self
@@ -101,11 +117,14 @@ class LocalFilesystem(BaseStorage):
         *,
         abs: Literal[True] = True,
         all: bool = True,
-    ) -> list[Path]: ...
+    ) -> list[StorixPath]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[StrPathLike]:
-        """List all items at the given path."""
+    ) -> Sequence[StorixPath | str]:
+        """List all items at the given path.
+
+        When abs=True return concrete pathlib.Path objects for test compatibility.
+        """
         path = self._topath(path)
         entries = await aioos.listdir(path)
 
@@ -113,14 +132,9 @@ class LocalFilesystem(BaseStorage):
             entries = list(self._filter_hidden(entries))
 
         if abs:
-            return [Path(path) / entry for entry in entries]
+            return [StorixPath(path) / entry for entry in entries]
 
         return entries
-
-    async def isdir(self, path: StrPathLike) -> bool:
-        """Return True if the path is a directory."""
-        path = self._topath(path)
-        return await aioos.path.isdir(path)
 
     async def isfile(self, path: StrPathLike) -> bool:
         """Return True if the path is a file."""
@@ -133,7 +147,7 @@ class LocalFilesystem(BaseStorage):
         coro = aioos.makedirs(path, exist_ok=True) if parents else aioos.mkdir(path)
         await coro
 
-    async def touch(self, path: StrPathLike | None, data: Any | None = None) -> bool:
+    async def touch(self, path: StrPathLike, data: Any | None = None) -> bool:
         """Create a file at the given path with optional data."""
         path = self._topath(path)
 
@@ -144,8 +158,8 @@ class LocalFilesystem(BaseStorage):
         data_bytes: bytes | None = data.encode() if isinstance(data, str) else data
 
         try:
-            async with aiof.open(path, "wb") as f:
-                await f.write(data_bytes or b"")
+            async with aiof.open(path, 'wb') as f:
+                await f.write(data_bytes or b'')
             return True
         except Exception as err:
             logger.error(f"touch: failed to write file '{path!s}': {err}")
@@ -182,7 +196,7 @@ class LocalFilesystem(BaseStorage):
         path = self._topath(path)
         await self._ensure_exist(path)
 
-        async with aiof.open(path, "rb") as f:
+        async with aiof.open(path, 'rb') as f:
             return await f.read()
 
     async def rm(self, path: StrPathLike) -> bool:
@@ -200,13 +214,13 @@ class LocalFilesystem(BaseStorage):
             await aioos.remove(path)
             return True
         except FileNotFoundError:
-            logger.error(f"File not found: {path}")
+            logger.error(f'File not found: {path}')
             return False
         except PermissionError:
-            logger.error(f"Permission denied: {path}")
+            logger.error(f'Permission denied: {path}')
             return False
         except Exception as err:
-            logger.error(f"Failed to remove {path}: {err}")
+            logger.error(f'Failed to remove {path}: {err}')
             return False
 
     async def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
@@ -216,7 +230,7 @@ class LocalFilesystem(BaseStorage):
 
         destination = self._topath(destination)
 
-        # TODO(mghalix): test below or switch to above
+        # TODO: test below or switch to above
         await aioos.rename(source, destination)
 
     async def cp(self, source: StrPathLike, destination: StrPathLike) -> None:
@@ -229,41 +243,48 @@ class LocalFilesystem(BaseStorage):
         # else:
         #     await asyncio.to_thread(shutil.copy2, *(source, destination))
 
-        # TODO(mghalix): test below or switch to above
+        # TODO: test below or switch to above
         if await self.isdir(source):
             await asyncio.to_thread(shutil.copytree, str(source), str(destination))
         else:
             async with (
-                aiof.open(source, "rb") as src,
-                aiof.open(destination, "wb") as dst,
+                aiof.open(source, 'rb') as src,
+                aiof.open(destination, 'wb') as dst,
             ):
                 await dst.write(await src.read())
 
-    # TODO(mghalix): revise from here to bottom
-    async def tree(
-        self, path: StrPathLike | None = None, *, abs: bool = False
-    ) -> list[Path]:
+    # TODO: revise from here to bottom
+    async def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """List all items recursively at the given path."""
+        from pathlib import Path
+
         path = self._topath(path)
-        entries = []
+        all: list[Path] = []
         for root, _, files in await asyncio.to_thread(os.walk, path):
             for file in files:
-                entries.append(Path(root) / file)
-        if abs:
-            return entries
-        return [entry.relative_to(path) for entry in entries]
+                all.append(Path(root) / file)
 
-    async def stat(self, path: StrPathLike) -> Any:
+        if not abs:
+            all = [entry.relative_to(path) for entry in all]
+
+        return Tree.from_iterable(map(StorixPath, all))
+
+    async def stat(self, path: StrPathLike) -> FileProperties:
         """Get file/directory statistics using aiofiles."""
-        # path = self._topath(path)
-        # await self._ensure_exist(path)
-        #
-        # return await aioos.stat(path)
-        raise NotImplementedError
+        path = self._topath(path)
+        await self._ensure_exist(path)
 
-    async def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any:
+        s = await aioos.stat(path)
+        return FileProperties(
+            name=path.name,
+            size=s.st_size,
+            create_time=dt.datetime.fromtimestamp(s.st_ctime),
+            modify_time=dt.datetime.fromtimestamp(s.st_mtime),
+            access_time=dt.datetime.fromtimestamp(s.st_atime),
+            file_kind=path.kind,
+        )
+
+    async def du(self, path: StrPathLike | None = None) -> int:
         """Get disk usage for the given path."""
         path = self._topath(path)
         await self._ensure_exist(path)
@@ -275,7 +296,7 @@ class LocalFilesystem(BaseStorage):
             stat_result = await asyncio.to_thread(os.stat, path)
             size = stat_result.st_size
         else:
-            # For directories, sum up all file sizes
+            # for directories, sum up all file sizes
             size = 0
             for root, _dirs, files in await asyncio.to_thread(os.walk, path):
                 for file in files:
@@ -286,13 +307,44 @@ class LocalFilesystem(BaseStorage):
                     except OSError:
                         # Skip files we can't stat
                         continue
-
-        if human_readable:
-            # Simple human readable format
-            for unit in ["B", "KB", "MB", "GB", "TB"]:
-                if size < 1024.0:
-                    return f"{size:.1f}{unit}"
-                size /= 1024.0
-            return f"{size:.1f}PB"
-
         return size
+
+    async def echo(
+        self,
+        data: AsyncDataBuffer[AnyStr],
+        path: StrPathLike,
+        *,
+        mode: EchoMode = 'w',
+        chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+        content_type: str | None = None,
+    ) -> bool:
+        """Write (overwrite/append) data into a file."""
+        path = self._topath(path)
+
+        if not await self.exists(path.parent):
+            logger.error(
+                f"echo: cannot echo into '{path!s}': No such file or directory"
+            )
+            return False
+
+        from storix.utils.streaming import normalize_data
+
+        stream = normalize_data(data)
+        try:
+            async with aiof.open(path, cast(OpenBinaryModeWriting, mode + 'b')) as f:
+                while True:
+                    chunk = stream.read(chunksize)
+
+                    if asyncio.iscoroutine(chunk):
+                        chunk = await chunk
+
+                    if not chunk:
+                        break
+
+                    await f.write(chunk)
+
+        except Exception as err:
+            logger.error(f"echo: failed to write into file '{path!s}': {err}")
+            return False
+
+        return True

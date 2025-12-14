@@ -1,81 +1,78 @@
 """Sync version of storix."""
 
-from __future__ import annotations
-
-import importlib
+from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
-if TYPE_CHECKING:
-    from storix.typing import AvailableProviders, StrPathLike
+from storix._internal._lazy import _limp
 
-    from .providers import Storage
-    from .providers.azure import AzureDataLake
-    from .providers.local import LocalFilesystem
+from .providers._proto import Storage
+from .types import AvailableProviders, StorixPath, StrPathLike
 
-__all__ = [
-    "AzureDataLake",
-    "LocalFilesystem",
-    "Storage",
-    "get_storage",
-]
 
-_module_lookup = {
-    "LocalFilesystem": "storix.providers.local",
-    "AzureDataLake": "storix.providers.azure",
-    "Storage": "storix.providers",
+__all__ = (
+    'AvailableProviders',
+    'AzureDataLake',
+    'LocalFilesystem',
+    'PathNotFoundError',
+    'Storage',
+    'StorixError',
+    'StorixPath',
+    'StrPathLike',
+    'errors',
+    'get_storage',
+)
+
+
+# <-- errors --> #
+errors = _limp('.', 'errors')
+PathNotFoundError = _limp('.errors', 'PathNotFoundError')
+StorixError = _limp('.errors', 'StorixError')
+
+# <-- interface & factory --> #
+get_storage = _limp('.factory', 'get_storage')
+# Storage = _limp('.providers._proto', 'Storage')
+
+# <-- providers --> #
+# AzureDataLake = _limp('.providers.azure', 'AzureDataLake')
+# LocalFilesystem = _limp('.providers.local', 'LocalFilesystem')
+
+
+_dynamic_imports = {
+    'AzureDataLake': (__spec__.parent, '.providers.azure'),
+    'LocalFilesystem': (__spec__.parent, '.providers.local'),
 }
 
 
 def __getattr__(name: str) -> Any:
-    if name in _module_lookup:
-        module = importlib.import_module(_module_lookup[name])
-        return getattr(module, name)
-    raise AttributeError(f"module {__name__} has no attribute {name}")
+    _dynamic_attribute = _dynamic_imports.get(name)
+    if _dynamic_attribute is None:
+        msg = f'module {__name__} has no attribute {name!r}'
+        raise AttributeError(msg)
+
+    package, module_name = _dynamic_attribute
+
+    if module_name == '__module__':
+        result = import_module(f'.{name}', package=package)
+        globals()[name] = result
+        return result
+
+    module = import_module(module_name, package=package)
+    result = getattr(module, name)
+    g = globals()
+    for k, (_, v_mod_name) in _dynamic_imports.items():
+        if v_mod_name == module_name:
+            g[k] = getattr(module, k)
+    return result
 
 
-def get_storage(
-    provider: AvailableProviders | str | None = None,
-    initialpath: StrPathLike | None = None,
-    sandboxed: bool | None = None,
-) -> Storage:
-    """Get a storage instance with optional runtime overrides.
+if TYPE_CHECKING:
+    from . import errors
+    from .errors import PathNotFoundError, StorixError
+    from .factory import get_storage
+    from .providers.azure import AzureDataLake
+    from .providers.local import LocalFilesystem
+    from .types import AvailableProviders, StorixPath, StrPathLike
 
-    Args:
-        provider: Override the provider from environment settings. If None, uses
-            STORAGE_PROVIDER from environment or settings.
-        initialpath: Override the initial path from environment settings. If None, uses
-            provider-specific default paths from environment or settings.
-        sandboxed: Override sandboxing from environment settings. If None, uses
-            default sandboxing behavior.
 
-    Returns:
-        Storage: A configured storage instance. Provider-specific settings (like
-            credentials) are automatically loaded from environment or .env files.
-
-    Raises:
-        ValueError: If STORAGE_PROVIDER is not supported.
-    """
-    import os
-
-    from .settings import settings
-
-    provider = str(
-        provider or settings.STORAGE_PROVIDER or os.environ.get("STORAGE_PROVIDER")
-    ).lower()
-
-    params: dict[str, Any] = {}
-    if initialpath is not None:
-        params["initialpath"] = initialpath
-    if sandboxed is not None:
-        params["sandboxed"] = sandboxed
-
-    if provider == "local":
-        from .providers.local import LocalFilesystem
-
-        return LocalFilesystem(**params)
-    if provider == "azure":
-        from .providers.azure import AzureDataLake
-
-        return AzureDataLake(**params)
-
-    raise ValueError(f"Unsupported storage provider: {provider}")
+def __dir__() -> list[str]:
+    return list(__all__)
