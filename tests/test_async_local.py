@@ -106,9 +106,10 @@ class TestAsyncLocalFilesystem:
         await async_fs.touch('parent/file2.txt', 'content2')
 
         contents = await async_fs.ls('parent')
-        assert 'child' in contents
-        assert 'file1.txt' in contents
-        assert 'file2.txt' in contents
+        names = {p.name for p in contents}
+        assert 'child' in names
+        assert 'file1.txt' in names
+        assert 'file2.txt' in names
 
         # List with absolute paths
         abs_contents = await async_fs.ls('parent', abs=True)
@@ -268,4 +269,4 @@ class TestAsyncLocalFilesystem:
 
             # Verify files are correctly named
             expected_files = [f'perf_file_{i:03d}.txt' for i in range(100)]
-            assert sorted(files) == sorted(expected_files)
+            assert sorted(p.name for p in files) == sorted(expected_files)

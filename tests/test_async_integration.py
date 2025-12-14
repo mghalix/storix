@@ -123,13 +123,15 @@ class TestAsyncProviderIntegration:
             # Verify structure
             files = await fs.ls('.')  # Use current directory instead of absolute path
             expected_files = ['README.md', 'main.py', 'src', 'tests']
-            assert all(f in files for f in expected_files)
+            file_names = {f.name for f in files}
+            assert all(f in file_names for f in expected_files)
 
             # Test nested navigation
             await fs.cd('src')
             src_files = await fs.ls('.')
-            assert '__init__.py' in src_files
-            assert 'module.py' in src_files
+            src_names = {f.name for f in src_files}
+            assert '__init__.py' in src_names
+            assert 'module.py' in src_names
 
             # Read and verify file contents
             await fs.cd('/')  # Go to root instead of absolute project path

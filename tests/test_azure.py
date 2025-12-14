@@ -252,8 +252,8 @@ def test_ls(azure_storage: Storage, mock_azure_clients: Any) -> None:
 
     # Test relative names
     result = azure_storage.ls('/test')
-    assert 'file1.txt' in result
-    assert 'dir1' in result
+    assert StorixPath('file1.txt') in result
+    assert StorixPath('dir1') in result
 
 
 def test_ls_abs(azure_storage: Storage, mock_azure_clients: Any) -> None:

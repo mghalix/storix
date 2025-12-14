@@ -46,10 +46,12 @@ def test_ls(storage: Storage, tmp_path: Path):
     storage.cd(tmp_path)
 
     tmp_ls_abs = list(tmp_path.iterdir())
-    assert storage.ls(abs=True) == tmp_ls_abs
+    ls_abs = storage.ls(abs=True)
+    assert sorted(map(str, ls_abs)) == sorted(map(str, tmp_ls_abs))
 
     tmp_ls = [x.name for x in tmp_ls_abs]
-    assert storage.ls() == tmp_ls
+    ls_rel = storage.ls()
+    assert sorted(p.name for p in ls_rel) == sorted(tmp_ls)
 
 
 def test_ls_with_path(storage: Storage, tmp_path: Path):
@@ -65,7 +67,8 @@ def test_ls_with_path(storage: Storage, tmp_path: Path):
 
     # Test relative names
     rel_result = storage.ls(tmp_path, abs=False)
-    assert rel_result == ['test_file.txt']
+    assert len(rel_result) == 1
+    assert rel_result[0].name == 'test_file.txt'
 
 
 def test_ls_nonexistent_path(storage: Storage, tmp_path: Path):

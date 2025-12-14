@@ -72,18 +72,18 @@ def ls(
                 full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore[attr-defined]
                 if fs.isdir(full_path):
                     file_type = 'DIR'
-                    name = Text(file, style='bold blue') if colors else file
+                    name = Text(str(file), style='bold blue') if colors else str(file)
                     size = '-'
                 elif fs.isfile(full_path):
                     file_type = 'FILE'
-                    name = Text(file, style='white') if colors else file
+                    name = Text(str(file), style='white') if colors else str(file)
                     try:
                         size = str(Path(full_path).stat().st_size)
                     except Exception:
                         size = '?'
                 else:
                     file_type = '?'
-                    name = file
+                    name = str(file)
                     size = '?'
 
                 table.add_row(file_type, name, size)
@@ -95,13 +95,13 @@ def ls(
                 full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore[attr-defined]
                 if colors:
                     if fs.isdir(full_path):
-                        colored_files.append(Text(file, style='bold blue'))
+                        colored_files.append(Text(str(file), style='bold blue'))
                     elif fs.isfile(full_path):
-                        colored_files.append(Text(file, style='white'))
+                        colored_files.append(Text(str(file), style='white'))
                     else:
-                        colored_files.append(Text(file, style='dim'))
+                        colored_files.append(Text(str(file), style='dim'))
                 else:
-                    colored_files.append(Text(file))
+                    colored_files.append(Text(str(file)))
 
             console.print(*colored_files)
 
