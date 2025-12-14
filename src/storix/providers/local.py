@@ -99,26 +99,13 @@ class LocalFilesystem(BaseStorage):
         self._current_path = path
         return self
 
-    @overload
-    def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[False] = False,
-        all: bool = True,
-    ) -> Sequence[str]: ...
-    @overload
-    def ls(
-        self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
-    ) -> Sequence[StorixPath]: ...
-
     def ls(
         self,
         path: StrPathLike | None = None,
         *,
         abs: bool = False,
         all: bool = True,
-    ) -> Sequence[StorixPath | str]:
+    ) -> Sequence[StorixPath]:
         """List files and directories at the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
@@ -131,7 +118,7 @@ class LocalFilesystem(BaseStorage):
         if abs:
             return list(lst)
 
-        return [file.name for file in lst]
+        return [StorixPath(file.name) for file in lst]
 
     def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""

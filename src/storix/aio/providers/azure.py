@@ -2,9 +2,9 @@ import asyncio
 import contextlib
 import datetime as dt
 
-from collections.abc import AsyncIterator, Iterable, Sequence
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from typing import Any, AnyStr, Literal, Self, TypeVar, overload, override
+from typing import Any, AnyStr, Literal, Self, TypeVar, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.core import Tree
@@ -241,38 +241,21 @@ class AzureDataLake(BaseStorage):
         )
         return Tree.from_iterable(it)
 
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[False] = False,
-        all: bool = True,
-    ) -> list[str]: ...
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[True] = True,
-        all: bool = True,
-    ) -> list[StorixPath]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[StrPathLike]:
+    ) -> Sequence[StorixPath]:
         """List all items at the given path as Path or str objects."""
         path = self._topath(path)
         await self._ensure_exist(path)
 
         items = self._filesystem.get_paths(path=str(path), recursive=False)
-        paths: Iterable[StorixPath] = [self.home / f.name async for f in items]
+        paths: list[StorixPath] = [self.home / f.name async for f in items]
 
         if not all:
-            paths = self._filter_hidden(paths)
+            paths = list(self._filter_hidden(paths))
 
         if not abs:
-            # return [StorixPath(p.name) for p in paths]
-            return [p.name for p in paths]
+            return [StorixPath(p.name) for p in paths]
 
         return list(paths)
 
