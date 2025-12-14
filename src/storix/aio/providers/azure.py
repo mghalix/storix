@@ -267,7 +267,8 @@ class AzureDataLake(BaseStorage):
             paths = self._filter_hidden(paths)
 
         if not abs:
-            return [StorixPath(p.name) for p in paths]
+            # return [StorixPath(p.name) for p in paths]
+            return [p.name for p in paths]
 
         return list(paths)
 

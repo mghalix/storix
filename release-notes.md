@@ -1,6 +1,6 @@
 # Release Notes
 
-## [0.0.3] - TBD
+## [0.0.3] - 2025-12-14
 
 ### Features
 
@@ -12,6 +12,7 @@
 - Unified missing-path exception: `PathNotFoundError` (subclasses
   `FileNotFoundError` & `ValueError`) replacing previous raw `ValueError` while
   keeping backward compatibility.
+- Introduce `StorixPath` with additional utilities
 
 ### Fixes
 

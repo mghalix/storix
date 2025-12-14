@@ -118,13 +118,11 @@ class LocalFilesystem(BaseStorage):
     ) -> list[StorixPath]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[StrPathLike]:
+    ) -> Sequence[StorixPath | str]:
         """List all items at the given path.
 
         When abs=True return concrete pathlib.Path objects for test compatibility.
         """
-        from pathlib import Path
-
         path = self._topath(path)
         entries = await aioos.listdir(path)
 
@@ -132,7 +130,7 @@ class LocalFilesystem(BaseStorage):
             entries = list(self._filter_hidden(entries))
 
         if abs:
-            return [Path(path) / entry for entry in entries]
+            return [StorixPath(path) / entry for entry in entries]
 
         return entries
 
