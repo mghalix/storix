@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import os
 import shutil
 
@@ -14,6 +15,7 @@ from loguru import logger
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.core import Tree
+from storix.models import FileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.types import AsyncDataBuffer, EchoMode, StorixPath, StrPathLike
 
@@ -133,11 +135,6 @@ class LocalFilesystem(BaseStorage):
             return [StorixPath(path) / entry for entry in entries]
 
         return entries
-
-    async def isdir(self, path: StrPathLike) -> bool:
-        """Return True if the path is a directory."""
-        path = self._topath(path)
-        return await aioos.path.isdir(path)
 
     async def isfile(self, path: StrPathLike) -> bool:
         """Return True if the path is a file."""
@@ -259,26 +256,35 @@ class LocalFilesystem(BaseStorage):
     # TODO: revise from here to bottom
     async def tree(self, path: StrPathLike | None = None, *, abs: bool = False) -> Tree:
         """List all items recursively at the given path."""
+        from pathlib import Path
+
         path = self._topath(path)
-        entries = []
+        all: list[Path] = []
         for root, _, files in await asyncio.to_thread(os.walk, path):
             for file in files:
-                entries.append(StorixPath(root) / file)
-        if abs:
-            return entries
-        return [entry.relative_to(path) for entry in entries]
+                all.append(Path(root) / file)
 
-    async def stat(self, path: StrPathLike) -> Any:
+        if not abs:
+            all = [entry.relative_to(path) for entry in all]
+
+        return Tree.from_iterable(map(StorixPath, all))
+
+    async def stat(self, path: StrPathLike) -> FileProperties:
         """Get file/directory statistics using aiofiles."""
-        # path = self._topath(path)
-        # await self._ensure_exist(path)
-        #
-        # return await aioos.stat(path)
-        raise NotImplementedError
+        path = self._topath(path)
+        await self._ensure_exist(path)
 
-    async def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any:
+        s = await aioos.stat(path)
+        return FileProperties(
+            name=path.name,
+            size=s.st_size,
+            create_time=dt.datetime.fromtimestamp(s.st_ctime),
+            modify_time=dt.datetime.fromtimestamp(s.st_mtime),
+            access_time=dt.datetime.fromtimestamp(s.st_atime),
+            file_kind=path.kind,
+        )
+
+    async def du(self, path: StrPathLike | None = None) -> int:
         """Get disk usage for the given path."""
         path = self._topath(path)
         await self._ensure_exist(path)
@@ -290,7 +296,7 @@ class LocalFilesystem(BaseStorage):
             stat_result = await asyncio.to_thread(os.stat, path)
             size = stat_result.st_size
         else:
-            # For directories, sum up all file sizes
+            # for directories, sum up all file sizes
             size = 0
             for root, _dirs, files in await asyncio.to_thread(os.walk, path):
                 for file in files:
@@ -301,15 +307,6 @@ class LocalFilesystem(BaseStorage):
                     except OSError:
                         # Skip files we can't stat
                         continue
-
-        if human_readable:
-            # Simple human readable format
-            for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-                if size < 1024.0:
-                    return f'{size:.1f}{unit}'
-                size /= 1024.0
-            return f'{size:.1f}PB'
-
         return size
 
     async def echo(
@@ -319,6 +316,7 @@ class LocalFilesystem(BaseStorage):
         *,
         mode: EchoMode = 'w',
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+        content_type: str | None = None,
     ) -> bool:
         """Write (overwrite/append) data into a file."""
         path = self._topath(path)

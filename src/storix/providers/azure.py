@@ -8,7 +8,9 @@ from typing import Any, AnyStr, Literal, Self, overload, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.core.tree import Tree
+from storix.errors import PathNotFoundError
 from storix.types import StorixPath
+from concurrent.futures import ThreadPoolExecutor
 
 
 try:
@@ -25,7 +27,7 @@ except ImportError as err:
 
 from loguru import logger
 
-from storix.models import AzureFileProperties
+from storix.models import AzureFileProperties, FileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
 from storix.settings import get_settings
@@ -148,16 +150,13 @@ class AzureDataLake(BaseStorage):
         all = self._filesystem.get_paths(path=str(path), recursive=True)
         paths: list[StorixPath] = [self._topath(f.name) for f in all]
 
+        if abs:
+            paths = [entry.relative_to(path) for entry in paths]
+
         it = (
             paths if not self._sandbox else (self._sandbox.to_virtual(p) for p in paths)
         )
         return Tree.from_iterable(it)
-        # return Tree(
-        #     root=path,
-        #     dir_iterator=self.iterdir,
-        #     dir_checker=self.isdir,
-        #     file_checker=self.isfile,
-        # )
 
     def iterdir(self, dir: StrPathLike | None = None) -> Iterator[StorixPath]:
         dir = self._topath(dir) or self.pwd()
@@ -220,19 +219,32 @@ class AzureDataLake(BaseStorage):
     def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
-        # TODO: add parents logic
+        if not parents:
+            try:
+                self._ensure_exist(path.parent)
+            except PathNotFoundError:
+                msg = (
+                    f"mkdir: cannot create directory '{path}': "
+                    'No such file or directory'
+                )
+                raise PathNotFoundError(msg) from None
         self._filesystem.create_directory(str(path))
 
-    def isdir(self, path: StrPathLike) -> bool:
-        """Check if the given path is a directory."""
-        stats = self.stat(path)
-        return stats.hdi_isfolder
-
-    def stat(self, path: StrPathLike) -> AzureFileProperties:
+    def stat(self, path: StrPathLike) -> FileProperties:
         """Return stat information for the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
 
+        s = self._provider_stat(path)
+        return FileProperties(
+            name=s.name,
+            size=s.size,
+            create_time=s.creation_time,
+            modify_time=s.last_modified,
+            file_kind='directory' if s.hdi_isfolder else 'file',
+        )
+
+    def _provider_stat(self, path: StorixPath) -> AzureFileProperties:
         with self._get_file_client(path) as fc:
             # determining whether an item is a file or a dir is currently not in the
             # azure sdk, but we follow this workaround
@@ -242,12 +254,44 @@ class AzureDataLake(BaseStorage):
 
             return AzureFileProperties.model_validate(dict(**props, **metadata))
 
+    def _file_size(self, file: StorixPath, *, no_check: bool = False) -> int:
+        check = not no_check
+        if check and not self.isfile(file):
+            return 0
+
+        props = self._provider_stat(file)
+        return int(getattr(props, 'size', 0))
+
+    def _dir_size(
+        self, root: StorixPath, *, executor: ThreadPoolExecutor | None = None
+    ) -> int:
+        # for very deep directory trees, not having a shared executor and recreating it
+        # every time can be resource-intensive.
+        #
+        # entry point: create the executor if one doesn't exist
+        if executor is None:
+            with ThreadPoolExecutor() as pool:
+                return self._dir_size(root=root, executor=pool)
+
+        files = self.tree(root, abs=True)
+
+        def _check_one(p: StorixPath) -> int:
+            if self.isdir(p):
+                return self._dir_size(p, executor=executor)  # pass the shared executor
+
+            return self._file_size(p, no_check=True)
+
+        # use the shared executor
+        results = executor.map(_check_one, files)
+        return sum(results)
+
     def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""
-        stats = self.stat(path)
+        path = self._topath(path)
+        self._ensure_exist(path)
+        stats = self._provider_stat(path)
         return not stats.hdi_isfolder
 
-    # TODO: add a confirm override option
     def mv(self, source: StrPathLike, destination: StrPathLike) -> None:
         """Move a file or directory to a new location."""
         source = self._topath(source)
@@ -474,11 +518,18 @@ class AzureDataLake(BaseStorage):
         # TODO: copy tree
         raise NotImplementedError
 
-    def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any:
+    def du(self, path: StrPathLike | None = None) -> Any:
         """Return disk usage statistics for the given path."""
-        raise NotImplementedError
+        # Azure Data Lake doesn't provide direct disk usage stats
+        # This is a placeholder implementation
+        path = self._topath(path)
+        self._ensure_exist(path)
+
+        if self.isfile(path):
+            # already checked that its file
+            return self._file_size(path, no_check=True)
+
+        return self._dir_size(root=path)
 
     def close(self) -> None:
         """Close the Azure Data Lake storage client."""

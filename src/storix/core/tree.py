@@ -13,9 +13,11 @@ if TYPE_CHECKING:
 class Tree(Sized):
     __slots__ = (
         '_built',
+        'abs',
         'dir_checker',
         'dir_iter',
         'file_checker',
+        'rel',
         'root',
     )
 
@@ -26,12 +28,16 @@ class Tree(Sized):
         dir_iterator: Callable[[StorixPath], Iterator[StorixPath]],
         dir_checker: Callable[[StrPathLike], bool],
         file_checker: Callable[[StrPathLike], bool],
+        absolute: bool = True,
+        relative_to: StorixPath | None = None,
     ) -> None:
         self.root = root
         self.dir_iter = dir_iterator
         self.dir_checker = dir_checker
         self.file_checker = file_checker
         self._built: Sequence[StorixPath] | None = None
+        self.abs = absolute
+        self.rel = relative_to or self.root
 
     def build(self) -> Sequence[StorixPath]:
         if not self._built:
@@ -58,18 +64,22 @@ class Tree(Sized):
 
     def __iter__(self) -> Iterator[StorixPath]:
         it = self._built or self.dir_iter(self.root)
+
         for p in it:
+            to_yield = p if self.abs else p.relative_to(self.rel)
             if self.file_checker(p):
-                yield p
+                yield to_yield
                 continue
 
             if self.dir_checker(p):
-                yield p
+                yield to_yield
                 yield from Tree(
                     root=p,
                     dir_iterator=self.dir_iter,
                     dir_checker=self.dir_checker,
                     file_checker=self.file_checker,
+                    absolute=self.abs,
+                    relative_to=self.root,
                 )
 
     def __len__(self) -> int:
@@ -92,7 +102,7 @@ class Tree(Sized):
 
         res: list[str] = []
 
-        res.append(dir(self.root))
+        res.append(dir(self.root if self.abs else self.root.relative_to(self.rel)))
 
         for p in self.build():
             view = dir if self.dir_checker(p) else file

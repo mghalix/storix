@@ -38,6 +38,10 @@ class StorixPath(PurePath, abc.ABC):
 
         return guess_mimetype_from_path(self)
 
+    @property
+    def kind(self) -> Literal['file', 'directory']:
+        return 'file' if self.maybe_file() else 'directory'
+
     # TODO: Implement this per sync/async
     # @abc.abstractmethod
     # def open(self) -> IO[Any]: ...

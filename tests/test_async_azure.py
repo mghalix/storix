@@ -52,6 +52,7 @@ class TestAsyncAzureDataLake:
                     'hdi_isfolder': False,
                     'last_modified': datetime.now(tz=UTC),
                     'creation_time': datetime.now(tz=UTC),
+                    'size': 123,
                     'metadata': {},
                 }
             )

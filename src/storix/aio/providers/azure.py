@@ -8,6 +8,7 @@ from typing import Any, AnyStr, Literal, Self, TypeVar, overload, override
 
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.core import Tree
+from storix.errors import PathNotFoundError
 
 
 try:
@@ -23,7 +24,7 @@ except ImportError as err:
     raise ImportError(msg) from err
 from loguru import logger
 
-from storix.models import AzureFileProperties
+from storix.models import AzureFileProperties, FileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.security import SAS_EXPIRY_SECONDS, SAS_PERMISSIONS, Permissions
 from storix.settings import get_settings
@@ -232,6 +233,9 @@ class AzureDataLake(BaseStorage):
         all = self._filesystem.get_paths(path=str(path), recursive=True)
         paths: list[StorixPath] = [self._topath(f.name) async for f in all]
 
+        if abs:
+            paths = [entry.relative_to(path) for entry in paths]
+
         it = (
             paths if not self._sandbox else (self._sandbox.to_virtual(p) for p in paths)
         )
@@ -275,31 +279,41 @@ class AzureDataLake(BaseStorage):
     async def mkdir(self, path: StrPathLike, *, parents: bool = False) -> None:
         """Create a directory at the given path."""
         path = self._topath(path)
-        # TODO: add parents logic
+        if not parents:
+            try:
+                await self._ensure_exist(path.parent)
+            except PathNotFoundError:
+                msg = (
+                    f"mkdir: cannot create directory '{path}': "
+                    'No such file or directory'
+                )
+                raise PathNotFoundError(msg) from None
         await self._filesystem.create_directory(str(path))
 
-    async def isdir(self, path: StrPathLike) -> bool:
-        """Check if the given path is a directory."""
-        stats = await self.stat(path)
-        return stats.hdi_isfolder
-
-    async def stat(self, path: StrPathLike) -> AzureFileProperties:
+    async def stat(self, path: StrPathLike) -> FileProperties:
         """Return stat information for the given path."""
         path = self._topath(path)
         await self._ensure_exist(path)
 
-        async with self._get_file_client(path) as fc:
-            # determining whether an item is a file or a dir is currently not in the
-            # azure sdk, but we follow this workaround
-            # https://github.com/Azure/azure-sdk-for-python/issues/24814#issuecomment-1159280840
-            props = await fc.get_file_properties()
-            metadata = props.get('metadata') or {}
+        async with asyncio.TaskGroup() as tg:
+            stat_task = tg.create_task(self._provider_stat(path))
+            size_task = tg.create_task(self.du(path))
 
-            return AzureFileProperties.model_validate(dict(**props, **metadata))
+        stat = stat_task.result()
+        stat.size = size_task.result()
+        return FileProperties(
+            name=stat.name,
+            size=stat.size,
+            create_time=stat.creation_time,
+            modify_time=stat.last_modified,
+            file_kind='directory' if stat.hdi_isfolder else 'file',
+        )
 
     async def isfile(self, path: StrPathLike) -> bool:
         """Return True if the path is a file."""
-        stats = await self.stat(path)
+        path = self._topath(path)
+        await self._ensure_exist(path)
+        stats = await self._provider_stat(path)
         return not stats.hdi_isfolder
 
     # TODO: add a confirm override option
@@ -528,9 +542,7 @@ class AzureDataLake(BaseStorage):
         raise NotImplementedError
 
     # TODO: review / remove - mirror in sync provider
-    async def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = False
-    ) -> int:
+    async def du(self, path: StrPathLike | None = None) -> int:
         """Get disk usage for Azure storage - placeholder implementation."""
         # Azure Data Lake doesn't provide direct disk usage stats
         # This is a placeholder implementation
@@ -543,16 +555,26 @@ class AzureDataLake(BaseStorage):
 
         return await self._dir_size(root=path)
 
+    async def _provider_stat(self, path: StorixPath) -> AzureFileProperties:
+        async with self._get_file_client(path) as fc:
+            # determining whether an item is a file or a dir is currently not in the
+            # azure sdk, but we follow this workaround
+            # https://github.com/Azure/azure-sdk-for-python/issues/24814#issuecomment-1159280840
+            props = await fc.get_file_properties()
+            metadata = props.get('metadata') or {}
+
+            return AzureFileProperties.model_validate(dict(**props, **metadata))
+
     async def _file_size(self, file: StorixPath, *, no_check: bool = False) -> int:
         check = not no_check
         if check and not await self.isfile(file):
             return 0
 
-        props = await self.stat(file)
+        props = await self._provider_stat(file)
         return int(getattr(props, 'size', 0))
 
     async def _dir_size(self, root: StorixPath) -> int:
-        files = await self.tree(root)
+        files = await self.tree(root, abs=True)
 
         async def _check_one(p: StorixPath) -> int:
             if await self.isdir(p):

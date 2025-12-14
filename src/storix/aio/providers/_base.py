@@ -127,3 +127,7 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
         if path is None:
             return StorixPath('/')
         return StorixPath('/') / str(path).lstrip('/')
+
+    async def isdir(self, path: StrPathLike) -> bool:
+        """Check if the given path is a directory."""
+        return not await self.isfile(path)

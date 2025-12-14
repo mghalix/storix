@@ -22,6 +22,7 @@ def create_mock_properties(
         'hdi_isfolder': is_folder,
         'last_modified': dt.now(tz=UTC),
         'creation_time': dt.now(tz=UTC),
+        'size': 123,
         **extra_props,
     }
 
@@ -657,11 +658,12 @@ def test_isfile(azure_storage: Storage, mock_azure_clients: Any) -> None:
     assert result is True
 
 
-def test_stat(azure_storage: Storage, mock_azure_clients: Any) -> None:
+def test_provider_stat(azure_storage: Storage, mock_azure_clients: Any) -> None:
     """Test stat functionality."""
     # Mock file properties
     mock_props = {
         'name': 'test.txt',
+        'size': 123,
         'last_modified': '2023-01-01T00:00:00Z',
         'creation_time': '2023-01-01T00:00:00Z',
     }
@@ -687,7 +689,7 @@ def test_stat(azure_storage: Storage, mock_azure_clients: Any) -> None:
         mock_file_props = MagicMock()
         mock_validate.return_value = mock_file_props
 
-        result = azure_storage.stat('/test.txt')
+        result = azure_storage._provider_stat('/test.txt')  # type: ignore[attr-defined]
         assert result == mock_file_props
 
 

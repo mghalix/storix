@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import os
 import shutil
 
@@ -18,6 +19,7 @@ from loguru import logger
 from storix.constants import DEFAULT_WRITE_CHUNKSIZE
 from storix.core import Finder
 from storix.core.tree import Tree
+from storix.models import FileProperties
 from storix.sandbox import PathSandboxer, SandboxedPathHandler
 from storix.settings import get_settings
 from storix.types import DataBuffer, EchoMode, StorixPath, StrPathLike
@@ -104,11 +106,11 @@ class LocalFilesystem(BaseStorage):
         *,
         abs: Literal[False] = False,
         all: bool = True,
-    ) -> list[str]: ...
+    ) -> Sequence[str]: ...
     @overload
     def ls(
         self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
-    ) -> list[StorixPath]: ...
+    ) -> Sequence[StorixPath]: ...
 
     def ls(
         self,
@@ -116,12 +118,12 @@ class LocalFilesystem(BaseStorage):
         *,
         abs: bool = False,
         all: bool = True,
-    ) -> Sequence[StrPathLike] | Iterator[StrPathLike]:
+    ) -> Sequence[StorixPath | str]:
         """List files and directories at the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
 
-        lst: Iterable[Path] = Path(path).iterdir()
+        lst: Iterable[StorixPath] = map(StorixPath, Path(path).iterdir())
 
         if not all:
             lst = self._filter_hidden(lst)
@@ -130,10 +132,6 @@ class LocalFilesystem(BaseStorage):
             return list(lst)
 
         return [file.name for file in lst]
-
-    def isdir(self, path: StrPathLike) -> bool:
-        """Check if the given path is a directory."""
-        return Path(self._topath(path)).is_dir()
 
     def isfile(self, path: StrPathLike) -> bool:
         """Check if the given path is a file."""
@@ -252,27 +250,33 @@ class LocalFilesystem(BaseStorage):
             dir_iterator=self.iterdir,
             dir_checker=self.isdir,
             file_checker=self.isfile,
+            absolute=abs,
         )
 
     def iterdir(self, path: StrPathLike | None = None) -> Iterator[StorixPath]:
         path = self._topath(path)
         return (StorixPath(p) for p in Path(path).iterdir())
 
-    def stat(self, path: StrPathLike) -> Any:
+    def stat(self, path: StrPathLike) -> FileProperties:
         """Return stat information for the given path."""
-        # path = self._topath(path)
-        # self._ensure_exist(path)
-        #
-        # return path.stat()
-        raise NotImplementedError
+        path = self._topath(path)
+        self._ensure_exist(path)
 
-    def du(
-        self, path: StrPathLike | None = None, *, human_readable: bool = True
-    ) -> Any:
+        s = os.stat(path)
+        return FileProperties(
+            name=path.name,
+            size=s.st_size,
+            create_time=dt.datetime.fromtimestamp(s.st_ctime),
+            modify_time=dt.datetime.fromtimestamp(s.st_mtime),
+            access_time=dt.datetime.fromtimestamp(s.st_atime),
+            file_kind=path.kind,
+        )
+
+    def du(self, path: StrPathLike | None = None) -> int:
         """Return disk usage statistics for the given path."""
         path = self._topath(path)
         self._ensure_exist(path)
-        raise NotImplementedError
+        return Path(path).stat().st_size
 
     def echo(
         self,
@@ -281,6 +285,7 @@ class LocalFilesystem(BaseStorage):
         *,
         mode: EchoMode = 'w',
         chunksize: int = DEFAULT_WRITE_CHUNKSIZE,
+        content_type: str | None = None,
     ) -> bool:
         """Write (overwrite/append) data into a file."""
         path = self._topath(path)

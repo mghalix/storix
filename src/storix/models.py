@@ -1,6 +1,6 @@
 import datetime as dt
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
@@ -21,7 +21,21 @@ class StorixBaseModel(BaseModel):
     )
 
 
-class AzureFileProperties(StorixBaseModel):
+class FileProperties(StorixBaseModel):
+    name: str
+    size: int
+
+    create_time: dt.datetime
+    modify_time: dt.datetime
+    access_time: dt.datetime | None = None
+
+    file_kind: Literal['file', 'directory']
+
+    # last_modified: dt.datetime
+    # creation_time: dt.datetime
+
+
+class AzureFileProperties(BaseModel):
     """Properties for Azure Data Lake files and directories."""
 
     name: str

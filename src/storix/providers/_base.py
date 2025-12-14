@@ -134,3 +134,7 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
 
     def close(self) -> None:
         self.cd()
+
+    def isdir(self, path: StrPathLike) -> bool:
+        """Check if the given path is a directory."""
+        return not self.isfile(path)
