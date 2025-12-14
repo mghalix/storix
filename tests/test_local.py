@@ -1,3 +1,5 @@
+import datetime as dt
+
 from pathlib import Path
 
 import pytest
@@ -145,6 +147,58 @@ def test_isdir_isfile(storage: Storage, tmp_path: Path):
     assert not storage.isdir('test_file.txt')
     assert storage.isdir('subdir')
     assert not storage.isfile('subdir')
+
+
+def test_stat_file(storage: Storage, tmp_path: Path) -> None:
+    tmp_path.mkdir(exist_ok=True)
+    storage.cd(tmp_path)
+
+    p = tmp_path / 'a.txt'
+    data = b'abc123'
+    p.write_bytes(data)
+
+    props = storage.stat('a.txt')
+    assert props.name == 'a.txt'
+    assert props.size == len(data)
+    assert props.file_kind == 'file'
+    assert isinstance(props.create_time, dt.datetime)
+    assert isinstance(props.modify_time, dt.datetime)
+
+
+def test_stat_directory(storage: Storage, tmp_path: Path) -> None:
+    tmp_path.mkdir(exist_ok=True)
+    storage.cd(tmp_path)
+
+    d = tmp_path / 'adir'
+    d.mkdir()
+
+    props = storage.stat('adir')
+    assert props.name == 'adir'
+    assert props.file_kind == 'directory'
+    assert props.size == d.stat().st_size
+
+
+def test_du_file(storage: Storage, tmp_path: Path) -> None:
+    tmp_path.mkdir(exist_ok=True)
+    storage.cd(tmp_path)
+
+    p = tmp_path / 'b.bin'
+    data = b'\x00\x01\x02\x03\x04'
+    p.write_bytes(data)
+
+    assert storage.du('b.bin') == len(data)
+
+
+def test_du_directory_returns_entry_size(storage: Storage, tmp_path: Path) -> None:
+    """Sync local `du` currently reports the directory entry size (non-recursive)."""
+    tmp_path.mkdir(exist_ok=True)
+    storage.cd(tmp_path)
+
+    d = tmp_path / 'dudir'
+    d.mkdir()
+    (d / 'nested.txt').write_bytes(b'hello')
+
+    assert storage.du('dudir') == d.stat().st_size
 
 
 def test_mkdir(storage: Storage, tmp_path: Path):

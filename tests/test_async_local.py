@@ -89,6 +89,31 @@ class TestAsyncLocalFilesystem:
         assert await fs.isdir('testdir') is True
         assert await fs.isdir('test.txt') is False
 
+    async def test_async_stat_file_and_directory(self, async_fs_with_data: Any) -> None:
+        fs = async_fs_with_data['fs']
+        test_file: Path = async_fs_with_data['test_file']
+        test_dir: Path = async_fs_with_data['test_dir']
+
+        file_props = await fs.stat('test.txt')
+        assert file_props.name == 'test.txt'
+        assert file_props.size == test_file.stat().st_size
+        assert file_props.file_kind == 'file'
+
+        dir_props = await fs.stat('testdir')
+        assert dir_props.name == 'testdir'
+        assert dir_props.size == test_dir.stat().st_size
+        assert dir_props.file_kind == 'directory'
+
+    async def test_async_du_file_and_directory(self, async_fs_with_data: Any) -> None:
+        fs = async_fs_with_data['fs']
+        test_file: Path = async_fs_with_data['test_file']
+        test_dir: Path = async_fs_with_data['test_dir']
+
+        assert await fs.du('test.txt') == test_file.stat().st_size
+
+        expected = sum(p.stat().st_size for p in test_dir.rglob('*') if p.is_file())
+        assert await fs.du('testdir') == expected
+
     async def test_async_directory_operations(self, async_fs: Any) -> None:
         """Test async directory operations."""
         # Create directory

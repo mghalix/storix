@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from storix.aio import AzureDataLake as AsyncAzureDataLake
+from storix.models import AzureFileProperties
 
 
 # Type alias for mock clients
@@ -231,3 +232,70 @@ class TestAsyncAzureDataLake:
 
         with pytest.raises(ResourceNotFoundError, match='File not found'):
             await azure_fs.cat('nonexistent.txt')
+
+    async def test_async_azure_stat_maps_properties_and_uses_du_size(
+        self, mock_azure_client: Any
+    ) -> None:
+        azure_fs = AsyncAzureDataLake(
+            initialpath='/test',
+            container_name='testfs',
+            adlsg2_account_name='test',
+            adlsg2_token='test_key',
+        )
+
+        azure_fs.exists = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        azure_fs.du = AsyncMock(return_value=456)  # type: ignore[method-assign]
+        azure_fs._provider_stat = AsyncMock(  # type: ignore[attr-defined]
+            return_value=AzureFileProperties(
+                name='hello.txt',
+                size=1,
+                hdi_isfolder=False,
+                last_modified=datetime.now(tz=UTC),
+                creation_time=datetime.now(tz=UTC),
+            )
+        )
+
+        props = await azure_fs.stat('hello.txt')
+        assert props.name == 'hello.txt'
+        assert props.size == 456  # size is sourced from du() in async provider
+        assert props.file_kind == 'file'
+
+    async def test_async_azure_du_file_uses_file_size(
+        self, mock_azure_client: Any
+    ) -> None:
+        azure_fs = AsyncAzureDataLake(
+            initialpath='/test',
+            container_name='testfs',
+            adlsg2_account_name='test',
+            adlsg2_token='test_key',
+        )
+
+        azure_fs.exists = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        azure_fs.isfile = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+        azure_fs._file_size = AsyncMock(return_value=42)  # type: ignore[attr-defined]
+        azure_fs._dir_size = AsyncMock(return_value=999)  # type: ignore[attr-defined]
+
+        assert await azure_fs.du('a.txt') == 42
+        azure_fs._file_size.assert_awaited_once()
+        azure_fs._dir_size.assert_not_called()
+
+    async def test_async_azure_du_directory_uses_dir_size(
+        self, mock_azure_client: Any
+    ) -> None:
+        azure_fs = AsyncAzureDataLake(
+            initialpath='/test',
+            container_name='testfs',
+            adlsg2_account_name='test',
+            adlsg2_token='test_key',
+        )
+
+        azure_fs.exists = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        azure_fs.isfile = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        azure_fs._file_size = AsyncMock(return_value=42)  # type: ignore[attr-defined]
+        azure_fs._dir_size = AsyncMock(return_value=99)  # type: ignore[attr-defined]
+
+        assert await azure_fs.du('adir') == 99
+        azure_fs._dir_size.assert_awaited_once()
+        azure_fs._file_size.assert_not_called()

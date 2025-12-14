@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from storix import AzureDataLake, Storage
+from storix.models import AzureFileProperties
 from storix.types import StorixPath
 
 
@@ -381,6 +382,52 @@ def test_cat_nonexistent(azure_storage: Storage, mock_azure_clients: Any) -> Non
 
     with pytest.raises(ValueError, match='path .* does not exist'):
         azure_storage.cat('/nonexistent.txt')
+
+
+def test_stat_maps_provider_properties(azure_storage: Storage) -> None:
+    azure_storage.exists = lambda _p: True  # type: ignore[method-assign]
+
+    provider_props = AzureFileProperties(
+        name='hello.txt',
+        size=123,
+        hdi_isfolder=False,
+        last_modified=dt.now(tz=UTC),
+        creation_time=dt.now(tz=UTC),
+    )
+    azure_storage._provider_stat = lambda _p: provider_props  # type: ignore[attr-defined]
+
+    props = azure_storage.stat('/hello.txt')
+    assert props.name == 'hello.txt'
+    assert props.size == 123
+    assert props.file_kind == 'file'
+
+
+def test_du_file_uses_file_size(azure_storage: Storage) -> None:
+    azure_storage.exists = lambda _p: True  # type: ignore[method-assign]
+    azure_storage.isfile = lambda _p: True  # type: ignore[method-assign]
+
+    file_size = MagicMock(return_value=42)
+    dir_size = MagicMock(return_value=999)
+    azure_storage._file_size = file_size  # type: ignore[attr-defined]
+    azure_storage._dir_size = dir_size  # type: ignore[attr-defined]
+
+    assert azure_storage.du('/a.txt') == 42
+    file_size.assert_called_once()
+    dir_size.assert_not_called()
+
+
+def test_du_directory_uses_dir_size(azure_storage: Storage) -> None:
+    azure_storage.exists = lambda _p: True  # type: ignore[method-assign]
+    azure_storage.isfile = lambda _p: False  # type: ignore[method-assign]
+
+    file_size = MagicMock(return_value=42)
+    dir_size = MagicMock(return_value=99)
+    azure_storage._file_size = file_size  # type: ignore[attr-defined]
+    azure_storage._dir_size = dir_size  # type: ignore[attr-defined]
+
+    assert azure_storage.du('/adir') == 99
+    dir_size.assert_called_once()
+    file_size.assert_not_called()
 
 
 def test_rm(azure_storage: Storage, mock_azure_clients: Any) -> None:
