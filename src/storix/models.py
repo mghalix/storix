@@ -31,9 +31,6 @@ class FileProperties(StorixBaseModel):
 
     file_kind: Literal['file', 'directory']
 
-    # last_modified: dt.datetime
-    # creation_time: dt.datetime
-
 
 class AzureFileProperties(BaseModel):
     """Properties for Azure Data Lake files and directories."""
