@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # TODO: implement Storage Pool
     # STORAGE_POOL_MAX_CONNECTIONS: int = 10
 
+    # TODO: separate into modular settings for each provider
+    # or prefix with STORAGE like above for consistent environment
+
     # Azure Data Lake Gen2
     ADLSG2_CONTAINER_NAME: str | None = None
     ADLSG2_ACCOUNT_NAME: str | None = None
