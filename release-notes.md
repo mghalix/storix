@@ -1,5 +1,28 @@
 # Release Notes
 
+## [0.1.0] - 2025-12-14
+
+### Highlights
+
+- Add test coverage for `du()` / `stat()` and `StorixPath` helpers across providers.
+
+### BREAKING CHANGES
+
+- `ls()` now always returns `StorixPath` items (never `str`).
+
+  Migration:
+  - If you previously relied on strings, convert explicitly:
+
+    ```python
+    files = fs.ls("/")
+    names = [p.name for p in files]
+    paths_as_str = [str(p) for p in files]
+    ```
+
+### Internal
+
+- Added test coverage for `du`/`stat` and `StorixPath` helpers across providers.
+
 ## [0.0.3] - 2025-12-14
 
 ### Features
@@ -12,7 +35,10 @@
 - Unified missing-path exception: `PathNotFoundError` (subclasses
   `FileNotFoundError` & `ValueError`) replacing previous raw `ValueError` while
   keeping backward compatibility.
-- Introduce `StorixPath` with additional utilities
+- Introduce StorixPath as the standardized return for logical path operations + bonus
+  defined operations such as mimetype detection and file type guess
+- Introduce new function `echo` for efficient streaming writes
+- Introduce simple implementation of `tree` and extras such as `wc` and `find`
 
 ### Fixes
 
@@ -120,6 +146,19 @@ ADLSG2_TOKEN=your-sas-token-or-account-key
 ---
 
 ## Version History
+
+### <0.1.0> – 2025-12-14
+
+- Breaking: `ls()` now always returns `StorixPath` items (never `str`).
+- Added test coverage for `du()` / `stat()` and `StorixPath` helpers across providers.
+
+### <0.0.3> – 2025-12-14
+
+- Smart MIME type inference for sync/async Azure `touch()` and `echo()` (with explicit
+  `content_type` override).
+- Added `storix.utils.detect_mimetype()` and `storix.utils.guess_mimetype_from_path()`.
+- Unified missing-path exception as `PathNotFoundError` (subclasses `FileNotFoundError`
+  & `ValueError`).
 
 ### <0.0.2> – 2025‑10‑16
 
