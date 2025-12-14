@@ -1,6 +1,6 @@
 [project]
 name = "storix"
-version = "0.0.3"
+version = "0.1.0"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
