@@ -43,25 +43,9 @@ class Storage(Protocol):
     async def cp(self, source: StrPathLike, destination: StrPathLike) -> None: ...
     async def rm(self, path: StrPathLike) -> bool: ...
     async def rmdir(self, path: StrPathLike, recursive: bool = False) -> bool: ...
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[False] = False,
-        all: bool = True,
-    ) -> list[str]: ...
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[True] = True,
-        all: bool = True,
-    ) -> list[StorixPath]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[StorixPath | str]: ...
+    ) -> Sequence[StorixPath]: ...
     async def tree(
         self, path: StrPathLike | None = None, *, abs: bool = False
     ) -> Tree: ...

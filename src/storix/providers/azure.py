@@ -186,21 +186,9 @@ class AzureDataLake(BaseStorage):
 
         return p
 
-    @overload
-    def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[False] = False,
-        all: bool = True,
-    ) -> list[str]: ...
-    @overload
-    def ls(
-        self, path: StrPathLike | None = None, *, abs: Literal[True], all: bool = True
-    ) -> list[StorixPath]: ...
     def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[StrPathLike]:
+    ) -> Sequence[StorixPath]:
         """List all items at the given path as Path or str objects."""
         path = self._topath(path)
         self._ensure_exist(path)
@@ -212,7 +200,7 @@ class AzureDataLake(BaseStorage):
             paths = list(self._filter_hidden(paths))
 
         if not abs:
-            return [p.name for p in paths]
+            return [StorixPath(p.name) for p in paths]
 
         return paths
 

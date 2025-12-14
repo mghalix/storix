@@ -73,7 +73,7 @@ print(content)  # Hello, World!
 
 # List files
 files = fs.ls("/")
-print(files)  # ['hello.txt']
+print(files)  # [StorixPath('hello.txt')]
 
 # Create directories
 fs.mkdir("mydata", parents=True)
@@ -82,6 +82,8 @@ fs.touch("mydata/config.json", '{"key": "value"}')
 
 ```python
 # Async operations
+import asyncio
+
 from storix.aio import get_storage
 
 async def main():
@@ -89,6 +91,29 @@ async def main():
     await fs.touch("async.txt", "Async is easy!")
     content = await fs.cat("async.txt")
     print(content.decode())  # Async is easy!
+
+asyncio.run(main())
+```
+
+### More operations
+
+```python
+from storix import get_storage
+
+fs = get_storage()
+fs.mkdir("logs", parents=True)
+
+# Stream writes: pass any iterable/generator of chunks
+fs.echo((f"line {i}\n" for i in range(3)), "logs/app.log")
+fs.echo("another line\n", "logs/app.log", mode="a")
+
+# Metadata and sizes
+info = fs.stat("logs/app.log")
+print(info.file_kind, info.size)  # file  ...
+print(fs.du("logs/app.log"))      # bytes
+
+# Tree view
+print(fs.tree("/", abs=False))
 ```
 
 ---
@@ -208,7 +233,7 @@ from storix import LocalFilesystem
 
 fs = LocalFilesystem("/tmp/sandbox", sandboxed=True)
 fs.touch("/secret.txt", "sandboxed!")
-print(fs.ls("/"))  # ['secret.txt']
+print(fs.ls("/"))  # [StorixPath('secret.txt')]
 ```
 
 ### Async Usage

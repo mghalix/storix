@@ -244,7 +244,7 @@ class TestSyncSandboxedFileSystem:
 
         # List contents
         files = fs.ls('/subdir')
-        assert 'nested.txt' in files
+        assert any(p.name == 'nested.txt' for p in files)
 
     def test_path_traversal_attacks_blocked(self, sandboxed_fs: Any) -> None:
         """Test that path traversal attacks are blocked."""
@@ -376,7 +376,7 @@ class TestAsyncSandboxedFileSystem:
 
         # List contents
         files = await fs.ls('/subdir')
-        assert 'nested.txt' in files
+        assert any(p.name == 'nested.txt' for p in files)
 
     async def test_async_path_traversal_attacks_blocked(
         self, async_sandboxed_fs: Any
@@ -555,8 +555,9 @@ class TestSandboxIntegration:
 
             # List project contents
             contents = fs.ls('/project', abs=False)
-            assert 'main.py' in contents
-            assert 'src' in contents
+            names = {p.name for p in contents}
+            assert 'main.py' in names
+            assert 'src' in names
 
             # Read file content
             content = fs.cat('/project/main.py').decode()
@@ -591,8 +592,9 @@ class TestSandboxIntegration:
 
             # List project contents
             contents = await fs.ls('/project', abs=False)
-            assert 'main.py' in contents
-            assert 'src' in contents
+            names = {p.name for p in contents}
+            assert 'main.py' in names
+            assert 'src' in names
 
             # Read file content
             content = (await fs.cat('/project/main.py')).decode()

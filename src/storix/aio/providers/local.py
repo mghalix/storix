@@ -6,7 +6,7 @@ import os
 import shutil
 
 from collections.abc import Sequence
-from typing import Any, AnyStr, Literal, Self, cast, overload
+from typing import Any, AnyStr, Self, cast
 
 import aiofiles as aiof
 import aiofiles.os as aioos
@@ -102,31 +102,15 @@ class LocalFilesystem(BaseStorage):
         self._current_path = path
         return self
 
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[False] = False,
-        all: bool = True,
-    ) -> list[str]: ...
-    @overload
-    async def ls(
-        self,
-        path: StrPathLike | None = None,
-        *,
-        abs: Literal[True] = True,
-        all: bool = True,
-    ) -> list[StorixPath]: ...
     async def ls(
         self, path: StrPathLike | None = None, *, abs: bool = False, all: bool = True
-    ) -> Sequence[StorixPath | str]:
+    ) -> Sequence[StorixPath]:
         """List all items at the given path.
 
         When abs=True return concrete pathlib.Path objects for test compatibility.
         """
         path = self._topath(path)
-        entries = await aioos.listdir(path)
+        entries = list(map(StorixPath, await aioos.listdir(path)))
 
         if not all:
             entries = list(self._filter_hidden(entries))
