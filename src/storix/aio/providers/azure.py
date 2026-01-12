@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import datetime as dt
+import json
 
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -601,6 +602,62 @@ class AzureDataLake(BaseStorage):
             )
         return await super().make_url(path, astype=astype)
 
+    async def write_metadata(
+        self,
+        path: StrPathLike,
+        metadata: dict[str, Any],
+        *,
+        merge: bool = False,
+    ) -> None:
+        """
+        Write user-defined metadata to a file.
+
+        Args:
+            path: Target file path
+            metadata: Arbitrary metadata (will be normalized to str:str)
+            merge: If False, replace entirely (default).
+                If True, merge with existing metadata.
+        """
+        path = self._topath(path)
+        await self._ensure_exist(path)
+
+        if await self.isdir(path):
+            msg = f'{path}: Is a directory'
+            raise ValueError(msg)
+
+        new_metadata = self._normalize_metadata(metadata)
+
+        async with self._get_file_client(path) as f:
+            if merge:
+                props = await f.get_file_properties()
+                existing = props.metadata or {}
+                existing.update(new_metadata)
+                await f.set_metadata(existing)
+            else:
+                await f.set_metadata(new_metadata)
+
+    async def read_metadata(self, path: StrPathLike) -> dict[str, str]:
+        """Read user-defined metadata from a file."""
+        path = self._topath(path)
+        await self._ensure_exist(path)
+
+        if await self.isdir(path):
+            return {}
+
+        async with self._get_file_client(path) as f:
+            props = await f.get_file_properties()
+            raw = props.metadata or {}
+
+        return {k: self._decode_metadata_value(v) for k, v in raw.items()}
+
+    async def clear_metadata(self, path: StrPathLike) -> None:
+        """Remove all user-defined metadata from a file."""
+        path = self._topath(path)
+        await self._ensure_exist(path)
+
+        async with self._get_file_client(path) as f:
+            await f.set_metadata({})
+
     async def _generate_sas_url(
         self,
         path: StrPathLike,
@@ -650,3 +707,26 @@ class AzureDataLake(BaseStorage):
             filename=filename,
             sas_token=token,
         )
+
+    def _normalize_metadata(self, metadata: dict[str, Any]) -> dict[str, str]:
+        """Validate + normalize metadata."""
+        out: dict[str, str] = {}
+        for k, v in metadata.items():
+            key = str(k)
+            if v is None:
+                continue
+            out[key] = v if isinstance(v, str) else json.dumps(v)
+        return out
+
+    def _decode_metadata_value(self, value: str) -> Any:
+        v = value.strip()
+        if not v:
+            return value
+
+        if v[0] in ("{", "["):
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return value
+
+        return value
