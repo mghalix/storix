@@ -1,6 +1,6 @@
 from collections.abc import Iterable, Sequence
 from types import TracebackType
-from typing import IO, Any, AnyStr, Literal, Protocol, Self, overload, runtime_checkable
+from typing import IO, Any, AnyStr, Literal, Protocol, Self, runtime_checkable
 
 from storix.core import Tree
 from storix.models import FileProperties

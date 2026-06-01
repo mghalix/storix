@@ -11,7 +11,6 @@ from typing import (
     AnyStr,
     Literal,
     Self,
-    overload,
 )
 
 from loguru import logger

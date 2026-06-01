@@ -6,7 +6,6 @@ from typing import (
     Literal,
     Protocol,
     Self,
-    overload,
     runtime_checkable,
 )
 
