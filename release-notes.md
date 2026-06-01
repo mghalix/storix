@@ -1,6 +1,6 @@
 # Release Notes
 
-## [0.1.1] - 2026-06-02
+## [0.1.2] - 2026-06-02
 
 ### Improvements
 
@@ -161,10 +161,13 @@ ADLSG2_TOKEN=your-sas-token-or-account-key
 
 ## Version History
 
-### <0.1.1> – 2026-06-02
+### <0.1.2> – 2026-06-02
 
 - `StorixPath` is now always in posix path form - platform agnostic.
 - `StorixPath` is now recognized by pydantic.
+- `storix.errors` is now eagerly imported for reliable isinstance checks.
+
+### <0.1.1> – 2026-06-02 *(yanked — republished as 0.1.2)*
 
 ### <0.1.0> – 2025-12-14
 
