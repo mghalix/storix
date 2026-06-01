@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Any
 
 from storix._internal._lazy import _limp
 
+from . import errors
+from .errors import PathNotFoundError, StorixError
 from .providers._proto import Storage
 from .types import AvailableProviders, StorixPath, StrPathLike
 
@@ -24,9 +26,7 @@ __all__ = (
 
 
 # <-- errors --> #
-errors = _limp('.', 'errors')
-PathNotFoundError = _limp('.errors', 'PathNotFoundError')
-StorixError = _limp('.errors', 'StorixError')
+# errors = _limp('.', 'errors')
 
 # <-- interface & factory --> #
 get_storage = _limp('.factory', 'get_storage')
@@ -67,7 +67,6 @@ def __getattr__(name: str) -> Any:
 
 if TYPE_CHECKING:
     from . import errors
-    from .errors import PathNotFoundError, StorixError
     from .factory import get_storage
     from .providers.azure import AzureDataLake
     from .providers.local import LocalFilesystem
