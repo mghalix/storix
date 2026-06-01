@@ -1,5 +1,19 @@
 # Release Notes
 
+## [0.1.1] - 2026-06-02
+
+### Improvements
+
+- `StorixPath` is now always in POSIX path form, making it platform-agnostic across
+  Windows and Unix systems.
+- `StorixPath` is now recognized by Pydantic as a valid type for model fields and
+  validation.
+
+### Internal
+
+- `storix.errors` is now eagerly imported (no longer lazy-loaded), since the module
+  is lightweight and needed at import time for isinstance checks.
+
 ## [0.1.0] - 2025-12-14
 
 ### Highlights
@@ -10,14 +24,14 @@
 
 - `ls()` now always returns `StorixPath` items (never `str`).
 
-  Migration:
-  - If you previously relied on strings, convert explicitly:
+    Migration:
+    - If you previously relied on strings, convert explicitly:
 
-    ```python
-    files = fs.ls("/")
-    names = [p.name for p in files]
-    paths_as_str = [str(p) for p in files]
-    ```
+        ```python
+        files = fs.ls("/")
+        names = [p.name for p in files]
+        paths_as_str = [str(p) for p in files]
+        ```
 
 ### Internal
 
@@ -146,6 +160,11 @@ ADLSG2_TOKEN=your-sas-token-or-account-key
 ---
 
 ## Version History
+
+### <0.1.1> – 2026-06-02
+
+- `StorixPath` is now always in posix path form - platform agnostic.
+- `StorixPath` is now recognized by pydantic.
 
 ### <0.1.0> – 2025-12-14
 
