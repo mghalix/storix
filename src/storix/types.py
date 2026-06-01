@@ -1,12 +1,18 @@
-import abc
+from __future__ import annotations
+
 import os
 
 from collections.abc import AsyncIterable, Buffer, Iterable
-from pathlib import PurePath
-from typing import IO, Literal, Self
+from pathlib import PurePosixPath
+from typing import IO, TYPE_CHECKING, Literal, Self
 
 
-class StorixPath(PurePath, abc.ABC):
+if TYPE_CHECKING:
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core import core_schema
+
+
+class StorixPath(PurePosixPath):
     """Base path used accross all storix filesystems."""
 
     # TODO: override in cloud-based filesystems
@@ -45,6 +51,14 @@ class StorixPath(PurePath, abc.ABC):
     # TODO: Implement this per sync/async
     # @abc.abstractmethod
     # def open(self) -> IO[Any]: ...
+
+    # allow pydantic to understand StorixPath useful for cases where you are returning
+    # StorixPath as a response model in FastAPI as an example
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: type, handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return handler(PurePosixPath)  # delegate entirely to parent's schema
 
 
 os.PathLike.register(StorixPath)
