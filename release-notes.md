@@ -1,5 +1,16 @@
 # Release Notes
 
+## [0.1.3] - 2026-07-05
+
+### Fixed
+
+- Loosened dependency lower bounds to their tested minimums so `storix` no longer
+  conflicts with packages that pin older versions (e.g. `pyrit`'s `aiofiles>=24,<25`):
+  `aiofiles>=24.1.0`, `rich>=13.0.0`, `typer>=0.13.0`, `loguru>=0.7.2`,
+  `azure-storage-file-datalake>=12.14.0`, `aiohttp>=3.9.0`. No code changes;
+  functionality is identical to 0.1.2.
+- Removed the unused `rich-toolkit` dependency from the `cli` extra.
+
 ## [0.1.2] - 2026-06-02
 
 ### Improvements
