@@ -70,8 +70,7 @@ class BaseStorage(PathLogicMixin, Storage, ABC):
             return
         from storix.errors import PathNotFoundError
 
-        msg = f"path '{path}' does not exist"
-        raise PathNotFoundError(msg)
+        raise PathNotFoundError(path)
 
     async def open(self) -> Self:
         return self

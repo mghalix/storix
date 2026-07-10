@@ -215,7 +215,7 @@ class AzureDataLake(BaseStorage):
                     f"mkdir: cannot create directory '{path}': "
                     'No such file or directory'
                 )
-                raise PathNotFoundError(msg) from None
+                raise PathNotFoundError(path, msg) from None
         self._filesystem.create_directory(str(path))
 
     def stat(self, path: StrPathLike) -> FileProperties:

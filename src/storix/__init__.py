@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 from storix._internal._lazy import _limp
 
 from . import errors
-from .errors import PathNotFoundError, StorixError
+from .errors import PathNotFoundError, StorageError
 from .providers._proto import Storage
 from .types import AvailableProviders, StorixPath, StrPathLike
 
@@ -17,7 +17,7 @@ __all__ = (
     'LocalFilesystem',
     'PathNotFoundError',
     'Storage',
-    'StorixError',
+    'StorageError',
     'StorixPath',
     'StrPathLike',
     'errors',
