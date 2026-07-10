@@ -7,6 +7,7 @@ import pytest
 from pytest import MonkeyPatch
 
 from storix import LocalFilesystem, Storage
+from storix.errors import PathNotFoundError
 from storix.types import StorixPath
 
 
@@ -36,7 +37,7 @@ def test_cd_to_home(storage: Storage):
 def test_cd_nonexistent_path(storage: Storage, tmp_path: Path):
     """Test cd to nonexistent path raises error"""
     nonexistent = tmp_path / 'nonexistent'
-    with pytest.raises(ValueError, match='path .* does not exist'):
+    with pytest.raises(PathNotFoundError, match='path .* does not exist'):
         storage.cd(nonexistent)
 
 
@@ -76,7 +77,7 @@ def test_ls_with_path(storage: Storage, tmp_path: Path):
 def test_ls_nonexistent_path(storage: Storage, tmp_path: Path):
     """Test ls on nonexistent path raises error"""
     nonexistent = tmp_path / 'nonexistent'
-    with pytest.raises(ValueError, match='path .* does not exist'):
+    with pytest.raises(PathNotFoundError, match='path .* does not exist'):
         storage.ls(nonexistent)
 
 
@@ -238,7 +239,7 @@ def test_cat_nonexistent(storage: Storage, tmp_path: Path):
     tmp_path.mkdir(exist_ok=True)
     storage.cd(tmp_path)
 
-    with pytest.raises(ValueError, match='path .* does not exist'):
+    with pytest.raises(PathNotFoundError, match='path .* does not exist'):
         storage.cat('nonexistent.txt')
 
 
@@ -333,7 +334,7 @@ def test_mv_nonexistent_source(storage: Storage, tmp_path: Path):
     tmp_path.mkdir(exist_ok=True)
     storage.cd(tmp_path)
 
-    with pytest.raises(ValueError, match='path .* does not exist'):
+    with pytest.raises(PathNotFoundError, match='path .* does not exist'):
         storage.mv('nonexistent.txt', 'destination.txt')
 
 

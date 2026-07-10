@@ -9,6 +9,7 @@ import pytest
 
 from storix import StorixPath
 from storix.aio import LocalFilesystem as AsyncLocalFilesystem
+from storix.errors import PathNotFoundError
 from storix.sandbox import SandboxedPathHandler
 
 
@@ -200,11 +201,11 @@ class TestAsyncLocalFilesystem:
     async def test_async_error_handling(self, async_fs: Any) -> None:
         """Test async error handling."""
         # Try to read non-existent file
-        with pytest.raises(ValueError, match='does not exist'):
+        with pytest.raises(PathNotFoundError, match='does not exist'):
             await async_fs.cat('nonexistent.txt')
 
         # Try to change to non-existent directory
-        with pytest.raises(ValueError, match='does not exist'):
+        with pytest.raises(PathNotFoundError, match='does not exist'):
             await async_fs.cd('nonexistent_dir')
 
         # Try to remove non-existent file

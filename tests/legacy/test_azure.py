@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from storix import AzureDataLake, Storage
+from storix.errors import PathNotFoundError
 from storix.models import AzureFileProperties
 from storix.types import StorixPath
 
@@ -229,7 +230,7 @@ def test_cd_nonexistent_path(azure_storage: Storage, mock_azure_clients: Any) ->
         'filesystem'
     ].get_directory_client.return_value.__enter__.return_value = mock_dir_client
 
-    with pytest.raises(ValueError, match='path .* does not exist'):
+    with pytest.raises(PathNotFoundError, match='path .* does not exist'):
         azure_storage.cd('/nonexistent')
 
 
@@ -293,7 +294,7 @@ def test_ls_nonexistent_path(azure_storage: Storage, mock_azure_clients: Any) ->
         'filesystem'
     ].get_directory_client.return_value.__enter__.return_value = mock_dir_client
 
-    with pytest.raises(ValueError, match='path .* does not exist'):
+    with pytest.raises(PathNotFoundError, match='path .* does not exist'):
         azure_storage.ls('/nonexistent')
 
 
@@ -380,7 +381,7 @@ def test_cat_nonexistent(azure_storage: Storage, mock_azure_clients: Any) -> Non
         'filesystem'
     ].get_directory_client.return_value.__enter__.return_value = mock_dir_client
 
-    with pytest.raises(ValueError, match='path .* does not exist'):
+    with pytest.raises(PathNotFoundError, match='path .* does not exist'):
         azure_storage.cat('/nonexistent.txt')
 
 
