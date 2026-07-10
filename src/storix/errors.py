@@ -1,3 +1,4 @@
+# ruff: noqa: A001 - error classes intentionally shadow their stdlib namesakes
 import builtins
 import errno
 

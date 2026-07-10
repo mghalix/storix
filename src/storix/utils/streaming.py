@@ -58,7 +58,7 @@ def normalize_data[AnyStr: (str, bytes)](
         return _AsyncIterStreamer(data, encoding=encoding)
 
     if isinstance(data, Iterable):
-        return _IterStreamer(cast(Iterable[Chunk], data), encoding=encoding)
+        return _IterStreamer(cast('Iterable[Chunk]', data), encoding=encoding)
 
     msg = f'Unsupported data type: {type(data)}'
     raise TypeError(msg)

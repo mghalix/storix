@@ -23,13 +23,8 @@ __all__ = (
 
 # <-- interface & factory --> #
 get_storage = _limp('.factory', 'get_storage')
-# Storage = _limp('.providers._proto', 'Storage')
-
 
 # <-- providers --> #
-# AzureDataLake = _limp('.providers.azure', 'AzureDataLake')
-# LocalFilesystem = _limp('.providers.local', 'LocalFilesystem')
-
 _module_lookup = {
     'AzureDataLake': 'storix.aio.providers.azure',
     'LocalFilesystem': 'storix.aio.providers.local',

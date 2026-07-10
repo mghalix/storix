@@ -9,6 +9,7 @@ def to_sx_path(path: StrPathLike, /, *paths: StrPathLike) -> Generator[StorixPat
 
 
 def is_file_approx(p: StrPathLike) -> bool:
+    """Guess whether a path names a file, judging only by its shape."""
     p = StorixPath(p)
 
     # trailing separator usually means "this is a directory"
@@ -20,4 +21,5 @@ def is_file_approx(p: StrPathLike) -> bool:
 
 
 def is_dir_approx(p: StrPathLike) -> bool:
+    """Guess whether a path names a directory, judging only by its shape."""
     return is_file_approx(p) is False

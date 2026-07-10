@@ -7,7 +7,7 @@ from storix.enums import PathKind
 from storix.models import Capabilities, Entry, FileProperties, RawStat
 
 
-NOW = dt.datetime(2026, 7, 10, 12, 0, 0)
+NOW = dt.datetime(2026, 7, 10, 12, 0, 0, tzinfo=dt.UTC)
 
 
 def make_rawstat() -> RawStat:

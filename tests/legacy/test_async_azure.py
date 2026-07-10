@@ -197,7 +197,7 @@ class TestAsyncAzureDataLake:
         await azure_fs.mkdir('testdir')
 
         # Assert create_directory was called on the filesystem mock
-        # noqa: SLF001 (accessing protected member for test purposes)
+
         azure_fs._filesystem.create_directory.assert_called_once_with('/test/testdir')
 
     async def test_async_azure_exists_operation(self, mock_azure_client: Any) -> None:

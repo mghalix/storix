@@ -11,6 +11,8 @@ if TYPE_CHECKING:
 
 
 class Tree(Sized):
+    """Lazily-built recursive listing of a directory tree."""
+
     __slots__ = (
         '_built',
         'abs',
@@ -40,6 +42,7 @@ class Tree(Sized):
         self.rel = relative_to or self.root
 
     def build(self) -> Sequence[StorixPath]:
+        """Walk the tree once and cache the flattened path list."""
         if not self._built:
             self._built = list(iter(self))
 
@@ -47,10 +50,10 @@ class Tree(Sized):
 
     @classmethod
     def from_iterable(cls, it: Iterable[StorixPath]) -> Self:
-        # needed currently for backward compat with azure tree
+        """Build a tree over an existing iterable of paths.
 
-        # no need anymore as size wouldn't exhaust since build is cached
-        # paths = tuple(it)  # ensure never exhausted
+        Needed currently for backward compat with the azure tree.
+        """
         from collections.abc import Iterator
 
         from storix.utils.paths import is_dir_approx, is_file_approx
@@ -97,15 +100,15 @@ class Tree(Sized):
         def _decor(p: StorixPath, prefix: str) -> str:
             return f'{prefix} {p}'
 
-        dir = partial(_decor, prefix='📁')
-        file = partial(_decor, prefix='📄')
+        as_dir = partial(_decor, prefix='📁')
+        as_file = partial(_decor, prefix='📄')
 
         res: list[str] = []
 
-        res.append(dir(self.root if self.abs else self.root.relative_to(self.rel)))
+        res.append(as_dir(self.root if self.abs else self.root.relative_to(self.rel)))
 
         for p in self.build():
-            view = dir if self.dir_checker(p) else file
+            view = as_dir if self.dir_checker(p) else as_file
             res.append(view(p))
 
         return '\n'.join(res)

@@ -34,7 +34,6 @@ class Settings(BaseSettings):
     STORAGE_INITIAL_PATH_AZURE: str = STORAGE_INITIAL_PATH
 
     # TODO: implement Storage Pool
-    # STORAGE_POOL_MAX_CONNECTIONS: int = 10
 
     # TODO: separate into modular settings for each provider
     # or prefix with STORAGE like above for consistent environment

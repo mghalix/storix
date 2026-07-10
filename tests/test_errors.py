@@ -1,3 +1,4 @@
+# ruff: noqa: A004
 import builtins
 import errno
 

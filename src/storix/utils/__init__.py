@@ -13,7 +13,7 @@ from storix.types import StorixPath, StrPathLike
 # Will be used by get_mimetype; tests may monkeypatch storix.utils.magic.
 try:
     import magic as magic
-except Exception:
+except (ImportError, OSError):  # libmagic may be missing at either level
     magic = SimpleNamespace(  # type: ignore[assignment]
         from_buffer=lambda _buf, mime=True: 'application/octet-stream'
     )
@@ -55,7 +55,9 @@ class PathLogicMixin:
         bk_cnt: int = str(path).count('..')
         if bk_cnt:
             bk_cnt += 1
-        target_path = eval(f'path{".parent" * bk_cnt}')
+        target_path = path
+        for _ in range(bk_cnt):
+            target_path = target_path.parent
         # ignore[attr-defined] because 'home' is guaranteed by inheriting class
         if target_path >= StorixPath(self.home):  # type: ignore[attr-defined]
             return target_path
@@ -210,8 +212,7 @@ def detect_mimetype(
     if buf:
         try:
             return get_mimetype(buf=buf)
-        except Exception:
-            # Fall through to default on any sniffing error
+        except Exception:  # noqa: BLE001, S110 - best-effort sniff, fall to default
             pass
 
     return default
