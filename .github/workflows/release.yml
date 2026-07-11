@@ -16,6 +16,12 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Must match the "Environment name" on the PyPI trusted publisher.
+    # Add protection rules (required reviewer, etc.) under repo Settings
+    # -> Environments -> pypi to gate every release.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/storix
     steps:
       - uses: actions/checkout@v4
 

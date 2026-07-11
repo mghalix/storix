@@ -65,7 +65,9 @@ dance is never needed again - the flow mirrors pydantic/FastAPI:
 
 **One-time setup (do once on pypi.org):** project -> Settings ->
 Publishing -> add a *Trusted Publisher*: owner `mghalix`, repo `storix`,
-workflow `release.yml`. After that, tagging is the entire release.
+workflow `release.yml`, and set **Environment name** to `pypi` (it
+matches `environment: pypi` in the workflow). After that, tagging is
+the entire release.
 
 **Manual fallback** (first release, or if CI is down):
 `uv build` -> `uv publish` (needs `UV_PUBLISH_TOKEN` / a PyPI token) ->
