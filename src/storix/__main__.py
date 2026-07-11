@@ -1,4 +1,4 @@
-from .cli import main
+from storix.cli import main
 
 
 main()

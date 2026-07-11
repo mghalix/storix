@@ -1,6 +1,6 @@
 [project]
 name = "storix"
-version = "0.1.3"
+version = "0.2.0"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -12,9 +12,8 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Filesystems",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
@@ -83,27 +82,23 @@ sx = "storix.cli.app:main"
 #<------------------------------------------------>#
 
 #<--- tools --->#
-#
 [tool.pyright]
 include = ["src"]
 exclude = [
-    "**/__pycache__",
-    "**/dist",
-    "**/build",
-    "**/node_modules",
-    "**/venv",
-    "**/.venv",
-    "**/playground",
+  "**/__pycache__",
+  "**/dist",
+  "**/build",
+  "**/node_modules",
+  "**/venv",
+  "**/.venv",
+  "**/playground",
 ]
 
 [tool.mypy]
-plugins = [
-    "pydantic.mypy",
-]
+plugins = ["pydantic.mypy"]
 exclude = []
 disable_error_code = []
 cache_dir = ".cache/mypy"
-show_error_codes = true
 
 [[tool.mypy.overrides]]
 module = "samples.*"
@@ -112,116 +107,245 @@ follow_imports = "skip"
 [tool.pytest.ini_options]
 pythonpath = ["src/storix"]
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
+# importlib mode lets tests/_async and the generated tests/_sync share
+# module basenames without __init__.py files; integration tests (real
+# cloud accounts) are opt-in via `pytest -m integration`
+addopts = "--import-mode=importlib -m 'not integration'"
+python_files = "test_*.py"
+python_functions = "test_*"
 asyncio_mode = "auto"
 filterwarnings = ["ignore::DeprecationWarning"]
 cache_dir = ".cache/pytest"
+markers = [
+  "unit: marks tests as unit tests",
+  "integration: marks tests as integration tests",
+  "e2e: marks tests as end-to-end tests",
+]
+
+[tool.coverage.run]
+branch = true
+omit = ["*/tests/*", "*/site-packages/*", "*/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 60
+exclude_lines = [
+  "pragma: no cover",
+  "def __repr__",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING",
+  "@abstractmethod",
+  "^\\s*pass$",
+  "^\\s*\\.\\.\\.$",
+  "raise ImportError",
+]
 
 [tool.ruff]
 line-length = 88
 target-version = "py312"
 include = ["*.py", "*.pyi", "**/pyproject.toml", "*.ipynb"]
 cache-dir = ".cache/ruff"
-output-format = "grouped"
+# output-format = "grouped"                                   # full, concise, grouped, json
 
-[tool.ruff.format]
-docstring-code-format = true
-docstring-code-line-length = "dynamic"
-quote-style = "single"
-indent-style = "space"
+[tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
+# fixable = ["ALL"]
+# unfixable = []
+select = [
+  "E",      # pycodestyle errors "F" (PEP 8)
+  "W",      # pycodestyle warnings (PEP 8)
+  "F",      # Pyflakes (logical errors, unused imports/variables)
+  "I",      # isort
+  "D",      # pydocstyle
+  "N",      # pep8-naming
+  "UP",     # pyupgrade (use modern Python syntax)
+  "ANN",    # type annotations
+  "A",      # flake8-builtins (avoid shadowing builtins)
+  "B",      # flake8-bugbear (potential logic errors & style issues - incl. mutable defaults B006, B008)
+  "C4",     # flake8-comprehensions (unnecessary list/set/dict comprehensions)
+  "ISC",    # flake8-implicit-str-concat (disallow implicit string concatenation across lines)
+  "T20",    # flake8-print (discourage `print` - prefer logging)
+  "SIM",    # flake8-simplify (simplify code, e.g., `if cond: return True else: return False`)
+  "PTH",    # flake8-use-pathlib (use pathlib instead of os.path where possible)
+  "PL",     # Pylint rules ported to Ruff (PLC, PLE, PLR, PLW)  # NEW
+  "PIE",    # flake8-pie (misc code improvements, e.g., no-unnecessary-pass)
+  "RUF",    # Ruff-specific rules (e.g., RUF001-003 ambiguous unicode, RUF013 implicit optional)
+  "RET",    # flake8-return (consistency in return statements)
+  "SLF",    # flake8-self (check for private member access via `self`)  # NEW
+  "TID",    # flake8-tidy-imports (relative imports, banned imports - configure if needed)  # NEW
+  "YTT",    # flake8-2020 (sys.version misuse)  # NEW
+  "TD",     # flake8-todos (check TODO format)  # NEW
+  "TC",     # flake8-type-checking (helps manage TYPE_CHECKING blocks and imports) # NEW
+  "PYI",    # flake8-pyi (best practices for .pyi stub files, some rules are useful for .py too) # NEW
+  "S",      # flake8-bandit (security issues) # NEW
+  "DTZ",    # flake8-datetimez (timezone-aware datetimes) # NEW
+  "ERA",    # flake8-eradicate (commented-out code) # NEW
+  "Q",      # flake8-quotes (quote style consistency) # NEW
+  "RSE",    # flake8-raise (modern raise statements)
+  "TRY",    # tryceratops (exception handling best practices)
+  "PERF",   # perflint (performance anti-patterns)
+  "BLE",    # flake8-blind-except (do not catch blind exception)  # NEW
+  "T10",    # flake8-debugger
+  "ICN",    # flake8-import-conventions
+  "G",      # flake8-logging-format
+  "FIX",    # flake8-fixme
+  "ASYNC",  # flake8-async
+  "INP",    # implicit namespace package
+  "FAST",   # fastapi
+  "EM",     # flake8-errmsg (exceptions must not use string literals, assisgn to variable first)
+  "FURB",   # refurb
+  "PGH003", # blanket type ignore
+  "PGH004", # blanket noqa
+  "T201",   # `print` found
+  "FBT",    # flake8-boolean-trap (checks for boolean positional arguments, truthiness tests) # NEW
+]
+
+ignore = [
+  # "B008",   # Do not perform function call in argument defaults
+  # "D212",   # Multi-line docstring summary should start at the first line
+  # "D205",   # 1 blank line required between summary line and description
+  # "D418",   # allow docstring on overloaded function
+  # "D103",   # allow missing docstring for public functions
+  # "D102",   # allow missing docstring in public method
+  # "D105",   # allow missing docstring in magic method
+  # "D101",   # allow missing docstring in public class
+  #-----------------------#
+  "D203",   # 1 blank line required before class docstring
+  "D213",   # Multi-line docstring summary should start at the second line (start at first line)
+  "D100",   # Ignore Missing docstring in public module (often desired at top level __init__.py)
+  "D104",   # Ignore Missing docstring in public package (often desired at top level __init__.py)
+  "D107",   # Ignore Missing docstring in __init__ (use class docstring)
+  "TD002",  # Ignore Missing author in TODOs (often not required)
+  "TD003",  # Ignore Missing issue link in TODOs (often not required/available)
+  "RUF012", # Ignore Mutable class attributes should be annotated with `typing.ClassVar`
+  "ANN401", # allow dynamically typed expressions (typing.Any)
+  "TRY003", # Ignore raise vanilla args
+  "FIX002", # allow todo
+  # "E501",   # Ignore line length (handled by Ruff's dynamic line length)
+  # "ANN002", # Ignore missing type **args
+  # "ANN003", # Ignore missing type **kwargs
+  # "TRY201", # Ignore verbose raise
+  # "COM812", # Ignore Trailing comma missing.
+  # "FBT001", # Boolean positional arg in function definition
+  # "FBT002", # Boolean default value in function definition
+  # "T201",   # Ignore print presence
+  "PLC0415", # Ignore import outside top level (CR: we need a lot of lazy loading)
+
+  "A002", # Ignore builtin shadowing  (params named type, id, map)
+  "S101", # Ignore assert statements (CR: we use a lot of assert statements to enforce already type checked paths)
+  # "BLE001" # Ignore blind except
+
+  "TID252", # relative imports are a deliberate convention
+  "D105",   # magic methods rarely need docstrings
+
+  # "TC004",    # Ignore runtime import in type checking block (CR: for lazy loaded modules using _limp)
+]
+
+exclude = [
+  ".bzr",
+  ".direnv",
+  ".eggs",
+  ".git",
+  ".hg",
+  ".mypy_cache",
+  ".nox",
+  ".pants.d",
+  ".pytype",
+  ".ruff_cache",
+  ".svn",
+  ".tox",
+  ".venv",
+  "__pypackages__",
+  "_build",
+  "buck-out",
+  "build",
+  "dist",
+  "node_modules",
+  "venv",
+  "*/migrations/*",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"test_*.py" = [
+  "D",       # All pydocstyle rules
+  "ANN",     # Missing type annotation for function argument
+  "RUF013",  # Implicit optional type in test function signatures
+  "S101",    # Use of `assert` detected (expected in tests)
+  "PLR2004", # Magic value comparisons are the point of assertions
+  "SLF001",  # Tests may reach into private members
+  "INP001",  # Test dirs deliberately have no __init__.py (pytest rootdir style)
+  "FBT001",  # parametrize injects arguments positionally, bools included
+]
+
+"__init__.py" = [
+  "F401",
+  "D",
+  "ANN",
+  "TC004",
+] # Ignore unused imports in __init__.py
+"scripts/*.py" = ["INP001", "T201", "D", "ANN", "S"]
+"samples/**" = [
+  "D",
+  "INP",
+  "ERA",
+  "RUF",
+  "T20",
+  "ANN",
+  "A",
+  "S",
+  "BLE",
+  "FBT",
+  "DTZ",
+  "PTH",
+]
+
+[tool.ruff.lint.isort]
+case-sensitive = true
+lines-after-imports = 2
+lines-between-types = 1
+combine-as-imports = true
+# force-sort-within-sections = true
+known-first-party = ["storix"]
+known-local-folder = ["src"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 ignore-decorators = ["typing.overload", "abc.abstractmethod"]
 
-[tool.ruff.lint.isort]
-combine-as-imports = true
-known-first-party = ["storix"]
-known-local-folder = ["src"]
-known-third-party = ["pydantic", "loguru"]
-case-sensitive = true
-lines-after-imports = 2
-lines-between-types = 1
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true
+allow-star-arg-any = false
 
-
-[tool.ruff.lint]
-select = [
-    "E",   # pycodestyle errors
-    "F",   # pyflakes
-    "I",   # isort
-    "D",   # pydocstyle
-    "B",   # flake8-bugbear
-    "W",   # pycodestyle warnings
-    "C4",  # flake8-comprehensions
-    "PIE", # flake8-pie
-    "ANN", # type annotations
-    "UP",  # pyupgrade
-    "N",   # pep8-naming
-    "RUF", # ruff specific rules
-    "ISC", # implicit string concat
-    "INP", # implicit namespace package
-    "RSE", # raise exception parantheses check
-    "RET", # flake8-return check
-    "SIM", # flake8-simplify check
-    "TD",  # todos
-    "FIX", # fixme
-    "EM",    # flake8-errmsg
-    "FURB",  # refurb
-    "PGH003",  # blanket type ignore
-    "PGH004",  # blanket noqa
+[tool.ruff.lint.pep8-naming]
+ignore-names = ["test_*", "mock_*"]
+classmethod-decorators = [
+  "classmethod",
+  "pydantic.validator",
+  "pydantic.root_validator",
 ]
-ignore = [
-    "B008",   # Do not perform function call in argument defaults
-    "D203",   # 1 blank line required before class docstring
-    "D212",   # Multi-line docstring summary should start at the first line
-    "D205",   # 1 blank line required between summary line and description
-    "ANN401", # allow dynamically typed expressions (typing.Any)
-    "D418",   # allow docstring on overloaded function
-    "D100",   # allow missing docstring for public functions
-    "D103",   # allow missing docstring for public modules
-    "D104",   # allow missing docstring in public package
-    "D102",   # allow missing docstring in public method
-    "D101",   # allow missing docstring in public class
-    "D105",   # allow missing docstring in magic method
-    "D106",   # allow missing docstring in public nested class
-    "D107",   # allow missing docstring in __init__
-    "TD002",  # allow missing todo author
-    "TD003",  # allow missing link to todo issue
-    "FIX002", # allow todo
-    #-----------------------#
+staticmethod-decorators = ["staticmethod"]
+
+[tool.ruff.lint.pylint]
+max-args = 8
+
+[tool.ruff.lint.flake8-type-checking]
+runtime-evaluated-base-classes = [
+  "pydantic.BaseModel",
+  "pydantic_settings.BaseSettings",
+  # custom intermediate bases (ruff matches by qualified name, not MRO)
+  "storix.models.StorixBaseModel",
 ]
+runtime-evaluated-decorators = ["pydantic.dataclasses.dataclass"]
 
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "single"
 
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D", "INP", "TD", "ERA001", "RUF", "ANN201"]
-"samples/**" = ["D", "INP", "ERA001", "RUF"]
-
-[tool.coverage.html]
-show_contexts = true
-
-[tool.coverage.run]
-source = ["storix"]
-omit = [
-    "*/tests/*", 
-    "*/test_*", 
-    "*/__pycache__/*", 
-    "*/venv/*", 
-    "*/.venv/*",
-]
-
-[tool.coverage.report]
-show_missing = true
-fail_under = 95
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
-]
+[tool.ruff.format]
+exclude = []
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+quote-style = "single"
+indent-style = "space"
 #<------------------------------------------------>#

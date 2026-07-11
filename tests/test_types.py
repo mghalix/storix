@@ -2,8 +2,7 @@ import mimetypes
 
 import pytest
 
-import storix.utils as utils
-
+from storix import utils
 from storix.types import StorixPath
 
 

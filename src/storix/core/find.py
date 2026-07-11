@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from storix.types import StorixPath
-
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
+
+    from storix.types import StorixPath
 
 
 class Finder:

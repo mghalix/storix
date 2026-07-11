@@ -14,10 +14,12 @@ from typing import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, Mapping
+    from collections.abc import Callable, Iterator
 
 
 class DefaultWordCountResult(TypedDict, total=True):
+    """Counts returned by a full `wc` run."""
+
     words: int
     lines: int
     chars: int
@@ -27,21 +29,26 @@ Counts = Literal['words', 'lines', 'chars']
 
 
 class WordCountResult(Mapping[Counts, int]):
+    """Mapping view over the counts produced by `wc`."""
+
     __slots__ = ('_counts',)
 
     def __init__(self, **counts: Unpack[DefaultWordCountResult]) -> None:
-        self._counts = cast(Mapping[Counts, int], counts)
+        self._counts = cast('Mapping[Counts, int]', counts)
 
     @property
     def words(self) -> int:
+        """Word count."""
         return self._counts['words']
 
     @property
     def chars(self) -> int:
+        """Character count."""
         return self._counts['chars']
 
     @property
     def lines(self) -> int:
+        """Line count."""
         return self._counts['lines']
 
     def __repr__(self) -> str:
@@ -58,11 +65,12 @@ class WordCountResult(Mapping[Counts, int]):
         return len(self._counts)
 
 
-# Countable = Findable
 Countable = Sized
 
 
 class WordCountArg:
+    """A `wc` variant bound to a single counter (words, lines, or chars)."""
+
     __slots__ = ('_counter',)
 
     def __init__(self, counter: Callable[[Countable], int]) -> None:
@@ -94,6 +102,7 @@ class WordCount:
         l: bool = False,  # noqa: E741
         m: bool = False,
     ) -> Self | WordCountArg:
+        """Restrict the count to a single measure (w=words, l=lines, m=chars)."""
         counts: Mapping[Counts, bool] = {
             'words': w,
             'lines': l,

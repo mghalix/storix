@@ -1,0 +1,48 @@
+name: Release
+
+# Fires when you push a version tag (e.g. `git tag v0.2.0 && git push --tags`).
+# Builds, publishes to PyPI via Trusted Publishing (no stored token), and
+# creates the GitHub release. One-time setup: on pypi.org add a Trusted
+# Publisher for this repo -> workflow `release.yml` (see docs/roadmap.md).
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # create the GitHub release
+  id-token: write   # PyPI Trusted Publishing (OIDC)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Must match the "Environment name" on the PyPI trusted publisher.
+    # Add protection rules (required reviewer, etc.) under repo Settings
+    # -> Environments -> pypi to gate every release.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/storix
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Verify the tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(uv version --short)"
+          test "$tag" = "$pkg" || {
+            echo "tag $tag != pyproject version $pkg"; exit 1;
+          }
+
+      - run: uv build
+
+      - name: Publish to PyPI (Trusted Publishing)
+        run: uv publish
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*

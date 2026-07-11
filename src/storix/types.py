@@ -16,20 +16,21 @@ class StorixPath(PurePosixPath):
     """Base path used accross all storix filesystems."""
 
     # TODO: override in cloud-based filesystems
-    def resolve(self, strict: bool = False) -> Self:
-        """Make the path absolute, resolving all symlinks on the way and also
-        normalizing it.
-        """
+    # positional bool mirrors pathlib.Path.resolve for drop-in parity
+    def resolve(self, strict: bool = False) -> Self:  # noqa: FBT001, FBT002
+        """Make the path absolute and normalized, resolving any symlinks."""
         from pathlib import Path
 
         return self.__class__(Path(self).resolve(strict=strict))
 
     def maybe_file(self) -> bool:
+        """Guess whether the path points to a file, judging by its shape."""
         from storix.utils.paths import is_file_approx
 
         return is_file_approx(self)
 
     def maybe_dir(self) -> bool:
+        """Guess whether the path points to a directory, judging by its shape."""
         from storix.utils.paths import is_dir_approx
 
         return is_dir_approx(self)
@@ -46,11 +47,8 @@ class StorixPath(PurePosixPath):
 
     @property
     def kind(self) -> Literal['file', 'directory']:
+        """Guessed kind of the object at this path (file or directory)."""
         return 'file' if self.maybe_file() else 'directory'
-
-    # TODO: Implement this per sync/async
-    # @abc.abstractmethod
-    # def open(self) -> IO[Any]: ...
 
     # allow pydantic to understand StorixPath useful for cases where you are returning
     # StorixPath as a response model in FastAPI as an example
@@ -64,7 +62,7 @@ class StorixPath(PurePosixPath):
 os.PathLike.register(StorixPath)
 
 type StrPathLike = os.PathLike[str] | str
-type AvailableProviders = Literal['local', 'azure']
+type StorageProvider = Literal['local', 'azure']
 type EchoMode = Literal['w', 'a']
 
 type DataBuffer[AnyStr: (str, bytes)] = (
