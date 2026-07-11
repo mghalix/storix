@@ -99,7 +99,7 @@ class StorageBackend(Protocol):
     # ops with native fast paths - required, but `generic` fallbacks are
     # one import away for backends without one
     def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
-        """Move a single file (directory moves require native support)."""
+        """Move a file or a directory tree to ``dst``."""
         ...
 
     def copy(self, src: PurePosixPath, dst: PurePosixPath) -> None:

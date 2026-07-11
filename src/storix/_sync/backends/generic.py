@@ -30,7 +30,12 @@ def read(backend: StorageBackend, path: PurePosixPath) -> bytes:
 
 
 def move(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) -> None:
-    """Move a single file as copy-then-delete."""
+    """Move a file or a directory tree as copy-then-delete."""
+    props = backend.stat(src)
+    if props.kind is PathKind.DIRECTORY:
+        copy_tree(backend, src, dst)
+        backend.delete_tree(src)
+        return
     backend.copy(src, dst)
     backend.delete(src)
 
@@ -39,6 +44,27 @@ def copy(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) -> Non
     """Copy a single file by streaming its chunks into a truncating write."""
     data = backend.read_stream(src)
     backend.write(dst, data, mode='w', content_type=None)
+
+
+def copy_tree(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) -> None:
+    """Recursively copy a directory tree, fanning out per level.
+
+    Merge-friendly: existing destination directories are reused
+    (``mkdir -p`` semantics), so copying into a populated tree overlays
+    rather than fails; an existing *file* at a directory's destination
+    still raises ``AlreadyExistsError``.
+    """
+    backend.make_dir(dst, parents=True)
+
+    files: list[str] = []
+    subdirs: list[str] = []
+    for entry in backend.list_dir(src):
+        (subdirs if entry.is_dir else files).append(entry.name)
+
+    gather(
+        *(copy_tree(backend, src / subdir, dst / subdir) for subdir in subdirs),
+        *(backend.copy(src / file, dst / file) for file in files),
+    )
 
 
 def delete_tree(backend: StorageBackend, path: PurePosixPath) -> None:

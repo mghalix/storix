@@ -28,7 +28,12 @@ async def read(backend: StorageBackend, path: PurePosixPath) -> bytes:
 
 
 async def move(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) -> None:
-    """Move a single file as copy-then-delete."""
+    """Move a file or a directory tree as copy-then-delete."""
+    props = await backend.stat(src)
+    if props.kind is PathKind.DIRECTORY:
+        await copy_tree(backend, src, dst)
+        await backend.delete_tree(src)
+        return
     await backend.copy(src, dst)
     await backend.delete(src)
 
@@ -37,6 +42,29 @@ async def copy(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) 
     """Copy a single file by streaming its chunks into a truncating write."""
     data = backend.read_stream(src)
     await backend.write(dst, data, mode='w', content_type=None)
+
+
+async def copy_tree(
+    backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath
+) -> None:
+    """Recursively copy a directory tree, fanning out per level.
+
+    Merge-friendly: existing destination directories are reused
+    (``mkdir -p`` semantics), so copying into a populated tree overlays
+    rather than fails; an existing *file* at a directory's destination
+    still raises ``AlreadyExistsError``.
+    """
+    await backend.make_dir(dst, parents=True)
+
+    files: list[str] = []
+    subdirs: list[str] = []
+    async for entry in backend.list_dir(src):
+        (subdirs if entry.is_dir else files).append(entry.name)
+
+    await gather(
+        *(copy_tree(backend, src / subdir, dst / subdir) for subdir in subdirs),
+        *(backend.copy(src / file, dst / file) for file in files),
+    )
 
 
 async def delete_tree(backend: StorageBackend, path: PurePosixPath) -> None:

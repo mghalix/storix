@@ -68,7 +68,7 @@ class BackendBase(abc.ABC):
         return generic.read(self, path)
 
     def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
-        """Move a single file (generic fallback: copy then delete)."""
+        """Move a file or directory tree (fallback: copy then delete)."""
         generic.move(self, src, dst)
 
     def copy(self, src: PurePosixPath, dst: PurePosixPath) -> None:

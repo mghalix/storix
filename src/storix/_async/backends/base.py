@@ -66,7 +66,7 @@ class BackendBase(abc.ABC):
         return await generic.read(self, path)
 
     async def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
-        """Move a single file (generic fallback: copy then delete)."""
+        """Move a file or directory tree (fallback: copy then delete)."""
         await generic.move(self, src, dst)
 
     async def copy(self, src: PurePosixPath, dst: PurePosixPath) -> None:
