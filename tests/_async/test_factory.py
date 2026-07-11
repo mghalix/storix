@@ -61,3 +61,22 @@ def test_unknown_provider_raises():
 
 def test_configuration_error_is_a_storage_error():
     assert issubclass(ConfigurationError, StorageError)
+
+
+def test_register_backend_extends_the_factory():
+    from storix._async.backends.memory import MemoryBackend
+    from storix._async.factory import _BUILDERS, register_backend
+
+    received: dict[str, str] = {}
+
+    def build(**overrides: str) -> MemoryBackend:
+        received.update(overrides)
+        return MemoryBackend()
+
+    register_backend('unit-test', build)
+    try:
+        fs = get_storage('unit-test', flavor='x')
+        assert isinstance(fs.backend, MemoryBackend)
+        assert received == {'flavor': 'x'}
+    finally:
+        _BUILDERS.pop('unit-test')

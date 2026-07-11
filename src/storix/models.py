@@ -1,6 +1,7 @@
 import dataclasses
 import datetime as dt
 
+from collections.abc import Mapping
 from typing import ClassVar, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, SecretStr
@@ -50,6 +51,9 @@ class RawStat:
 
     accessed: dt.datetime | None = None
     """Last access time; None on backends without atime (most cloud stores)."""
+
+    metadata: Mapping[str, str] | None = None
+    """Custom key/value metadata when the backend supports it; else None."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -114,6 +118,9 @@ class FileProperties(StorixBaseModel):
     # constructing this model.
     file_kind: PathKind
     """Whether the path is a file or a directory."""
+
+    metadata: Mapping[str, str] | None = None
+    """Custom key/value metadata when the backend supports it; else None."""
 
 
 class AzureFileProperties(BaseModel):

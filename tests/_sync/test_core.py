@@ -177,6 +177,30 @@ def test_echo_content_type_requires_capability(fs: Storix):
     assert excinfo.value.operation == 'content_type'
 
 
+def test_echo_metadata_follows_capability(fs: Storix):
+    if fs.backend.capabilities.custom_metadata:
+        fs.echo(b'x', '/m.txt', metadata={'owner': 'tests'})
+        assert (fs.stat('/m.txt')).metadata == {'owner': 'tests'}
+    else:
+        with pytest.raises(UnsupportedOperationError) as excinfo:
+            fs.echo(b'x', '/m.txt', metadata={'owner': 'tests'})
+        assert excinfo.value.operation == 'custom_metadata'
+
+
+def test_url_requires_capability(fs: Storix):
+    fs.touch('/a.txt')
+    with pytest.raises(UnsupportedOperationError) as excinfo:
+        fs.url('/a.txt')
+    assert excinfo.value.operation == 'presigned_urls'
+
+
+def test_data_url_works_on_any_backend(fs: Storix):
+    fs.echo(b'hello', '/a.txt')
+    url = fs.data_url('/a.txt')
+    assert url.startswith('data:')
+    assert url.endswith('aGVsbG8=')  # base64('hello')
+
+
 def test_echo_missing_parent_raises(fs: Storix):
     with pytest.raises(PathNotFoundError):
         fs.echo(b'x', '/missing/a.txt')

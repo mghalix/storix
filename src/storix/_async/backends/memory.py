@@ -15,7 +15,7 @@ from storix.errors import (
     NotADirectoryError,
     PathNotFoundError,
 )
-from storix.models import Entry, RawStat
+from storix.models import Capabilities, Entry, RawStat
 from storix.utils.time import utcnow
 
 from .base import BackendBase
@@ -24,7 +24,7 @@ from .base import BackendBase
 if TYPE_CHECKING:
     import datetime as dt
 
-    from collections.abc import AsyncIterator, Iterator
+    from collections.abc import AsyncIterator, Iterator, Mapping
 
     from storix.types import EchoMode
 
@@ -36,6 +36,7 @@ class _Node:
     data: bytearray | None  # None => directory
     created: dt.datetime
     modified: dt.datetime
+    metadata: dict[str, str] | None = None
 
     @property
     def is_dir(self) -> bool:
@@ -53,7 +54,11 @@ class MemoryBackend(BackendBase):
     exercised through it - it is the reference for port semantics and the
     conformance suite's fastest vehicle. Directories are real nodes
     (``data=None``), the root is pre-seeded, timestamps are UTC-aware.
+    Supports custom metadata, making it the credential-free test vehicle
+    for the capability.
     """
+
+    capabilities: Capabilities = Capabilities(custom_metadata=True)
 
     _nodes: dict[PurePosixPath, _Node]
 
@@ -88,6 +93,7 @@ class MemoryBackend(BackendBase):
         *,
         mode: EchoMode,
         content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
         payload = await collect(data)
@@ -98,7 +104,10 @@ class MemoryBackend(BackendBase):
             if node is not None and node.data is None:
                 raise IsADirectoryError(path)
             self._nodes[path] = _Node(
-                data=bytearray(payload), created=now, modified=now
+                data=bytearray(payload),
+                created=now,
+                modified=now,
+                metadata=dict(metadata) if metadata else None,
             )
             return
 
@@ -107,6 +116,8 @@ class MemoryBackend(BackendBase):
 
         node.data.extend(payload)
         node.modified = now
+        if metadata is not None:
+            node.metadata = dict(metadata)
 
     @override
     async def delete(self, path: PurePosixPath) -> None:
@@ -141,6 +152,7 @@ class MemoryBackend(BackendBase):
             size=node.size,
             created=node.created,
             modified=node.modified,
+            metadata=dict(node.metadata) if node.metadata else None,
         )
 
     @override

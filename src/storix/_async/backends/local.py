@@ -31,7 +31,7 @@ from .base import BackendBase
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
     from pathlib import PurePosixPath
 
     from storix.types import EchoMode, StrPathLike
@@ -77,9 +77,10 @@ class LocalBackend(BackendBase):
         *,
         mode: EchoMode,
         content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
-        del content_type  # capability not advertised; the core never sends one
+        del content_type, metadata  # capabilities not advertised; never sent
         flags = 'wb' if mode == 'w' else 'ab'
         try:
             handle = await aiofiles.open(self._to_os(path), flags)

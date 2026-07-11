@@ -26,7 +26,7 @@ from .base import BackendBase
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from pathlib import PurePosixPath
 
     from storix.types import EchoMode, StrPathLike
@@ -72,9 +72,10 @@ class LocalBackend(BackendBase):
         *,
         mode: EchoMode,
         content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
-        del content_type  # capability not advertised; the core never sends one
+        del content_type, metadata  # capabilities not advertised; never sent
         try:
             handle = open(self._to_os(path), 'wb' if mode == 'w' else 'ab')  # noqa: SIM115, PTH123
         except OSError as exc:

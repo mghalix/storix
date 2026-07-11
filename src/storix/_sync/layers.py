@@ -18,7 +18,7 @@ from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from pathlib import PurePosixPath
 
     from storix.models import Capabilities, Entry, RawStat
@@ -89,11 +89,16 @@ class SandboxLayer:
         *,
         mode: EchoMode,
         content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write a file from a chunk stream."""
         try:
             self._inner.write(
-                self._to_real(path), data, mode=mode, content_type=content_type
+                self._to_real(path),
+                data,
+                mode=mode,
+                content_type=content_type,
+                metadata=metadata,
             )
         except PathError as exc:
             raise self._rescope(exc) from None
@@ -158,6 +163,13 @@ class SandboxLayer:
         """Total size in bytes of the tree rooted at ``path``."""
         try:
             return self._inner.du(self._to_real(path))
+        except PathError as exc:
+            raise self._rescope(exc) from None
+
+    def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
+        """Mint a time-limited shareable URL for a file."""
+        try:
+            return self._inner.make_url(self._to_real(path), expires_in=expires_in)
         except PathError as exc:
             raise self._rescope(exc) from None
 

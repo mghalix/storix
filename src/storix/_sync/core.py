@@ -11,6 +11,7 @@ from storix import pathops
 from storix._sync._compat import gather
 from storix._sync._stream import ensure_chunks
 from storix._sync.backends import generic
+from storix.constants import DEFAULT_URL_EXPIRY_SECONDS
 from storix.enums import PathKind
 from storix.errors import (
     IsADirectoryError,
@@ -23,6 +24,7 @@ from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from types import TracebackType
 
     from storix._sync.backends import StorageBackend
@@ -156,7 +158,29 @@ class Storix:
             modify_time=raw.modified,
             access_time=raw.accessed,
             file_kind=raw.kind,
+            metadata=raw.metadata,
         )
+
+    def url(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        expires_in: int = DEFAULT_URL_EXPIRY_SECONDS,
+    ) -> str:
+        """Mint a time-limited shareable URL for a file.
+
+        Requires ``capabilities.presigned_urls`` (Azure: a SAS URL).
+        """
+        if not self._backend.capabilities.presigned_urls:
+            operation = 'presigned_urls'
+            raise UnsupportedOperationError(operation)
+        return self._backend.make_url(self._resolve(path), expires_in=expires_in)
+
+    def data_url(self, path: StrPathLike | None = None) -> str:
+        """Return the file inlined as a base64 ``data:`` URL (any backend)."""
+        from storix.utils import to_data_url
+
+        return to_data_url(buf=self._backend.read(self._resolve(path)))
 
     def du(self, path: StrPathLike | None = None) -> int:
         """Total size in bytes of the tree rooted at ``path``."""
@@ -210,20 +234,29 @@ class Storix:
         *,
         mode: EchoMode = 'w',
         content_type: str | None = None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write data into a file, creating it if missing.
 
         ``mode='w'`` truncates, ``mode='a'`` appends. Accepts str/bytes,
         readable file-like objects, and (async) iterables of either.
-        ``content_type`` requires the backend capability.
+        ``content_type`` and ``metadata`` require the matching backend
+        capability.
         """
         if content_type is not None and not self._backend.capabilities.content_type:
             operation = 'content_type'
             raise UnsupportedOperationError(operation)
+        if metadata is not None and not self._backend.capabilities.custom_metadata:
+            operation = 'custom_metadata'
+            raise UnsupportedOperationError(operation)
         target = self._resolve(path)
         self._ensure_parent(target)
         self._backend.write(
-            target, ensure_chunks(data), mode=mode, content_type=content_type
+            target,
+            ensure_chunks(data),
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
         )
 
     def mkdir(

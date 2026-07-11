@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, overload
 
 from storix.config import AzureConfig, LocalConfig, StorixSettings
 from storix.errors import ConfigurationError
@@ -13,9 +13,19 @@ from .core import Storix
 
 
 if TYPE_CHECKING:
-    from storix.types import AvailableProviders
+    from collections.abc import Callable
 
     from .backends import StorageBackend
+
+
+class _LocalOverrides(TypedDict, total=False):
+    base: str
+
+
+class _AzureOverrides(TypedDict, total=False):
+    container: str
+    account_name: str
+    credential: str
 
 
 def _build_local(**overrides: Any) -> StorageBackend:
@@ -50,20 +60,42 @@ def _build_azure(**overrides: Any) -> StorageBackend:
     )
 
 
-_BUILDERS = {
+_BUILDERS: dict[str, Callable[..., StorageBackend]] = {
     'local': _build_local,
     'azure': _build_azure,
 }
 
 
+def register_backend(name: str, builder: Callable[..., StorageBackend]) -> None:
+    """Register a backend builder under a provider name.
+
+    The extension point for third-party backends: the builder receives
+    ``get_storage``'s keyword overrides and returns a constructed
+    ``StorageBackend``. The built-in providers are registered the same
+    way.
+    """
+    _BUILDERS[name] = builder
+
+
+@overload
 def get_storage(
-    provider: AvailableProviders | None = None, /, **overrides: Any
-) -> Storix:
+    provider: Literal['local'], /, **overrides: Unpack[_LocalOverrides]
+) -> Storix: ...
+@overload
+def get_storage(
+    provider: Literal['azure'], /, **overrides: Unpack[_AzureOverrides]
+) -> Storix: ...
+@overload
+def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix: ...
+
+
+def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
     """Build a Storix session from settings.
 
     ``provider`` overrides ``STORIX_PROVIDER`` (default: local at
     ``~/.storix``); keyword overrides beat the corresponding
-    ``STORIX_<PROVIDER>_*`` environment values.
+    ``STORIX_<PROVIDER>_*`` environment values. Passing a literal
+    provider name gets fully typed keyword completion.
     """
     name = provider or StorixSettings().provider
     builder = _BUILDERS.get(name)

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from pathlib import PurePosixPath
 
     from storix.models import Capabilities, Entry, RawStat
@@ -54,13 +54,15 @@ class StorageBackend(Protocol):
         *,
         mode: EchoMode,
         content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write a file from a chunk stream.
 
         Mode ``'w'`` creates or truncates; ``'a'`` appends, creating the
-        file if missing. ``content_type`` is only honored when
-        ``capabilities.content_type`` is set; the core never passes a value
-        to a backend without the capability, so others may ignore it.
+        file if missing. ``content_type`` and ``metadata`` are only
+        honored when the matching capability is set; the core never
+        passes values to a backend without the capability, so others may
+        ignore them.
         """
         ...
 
@@ -119,6 +121,14 @@ class StorageBackend(Protocol):
 
     def exists(self, path: PurePosixPath) -> bool:
         """Whether anything lives at ``path``."""
+        ...
+
+    def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
+        """Mint a time-limited shareable URL for a file.
+
+        Only meaningful when ``capabilities.presigned_urls`` is set; the
+        ``BackendBase`` default raises ``UnsupportedOperationError``.
+        """
         ...
 
     def close(self) -> None:

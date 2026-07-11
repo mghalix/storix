@@ -4,13 +4,14 @@ import abc
 
 from typing import TYPE_CHECKING
 
+from storix.errors import UnsupportedOperationError
 from storix.models import Capabilities
 
 from . import generic
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
     from pathlib import PurePosixPath
 
     from storix.models import Entry, RawStat
@@ -42,6 +43,7 @@ class BackendBase(abc.ABC):
         *,
         mode: EchoMode,
         content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
 
@@ -84,6 +86,12 @@ class BackendBase(abc.ABC):
     async def exists(self, path: PurePosixPath) -> bool:
         """Whether anything lives at ``path``."""
         return await generic.exists(self, path)
+
+    async def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
+        """Mint a presigned URL (default: unsupported)."""
+        del path, expires_in
+        operation = 'presigned_urls'
+        raise UnsupportedOperationError(operation)
 
     async def close(self) -> None:  # noqa: B027 - optional hook, deliberately concrete
         """Release backend resources; the default is a no-op."""

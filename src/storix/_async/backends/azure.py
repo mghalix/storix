@@ -48,7 +48,7 @@ except ImportError as err:  # pragma: no cover
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Mapping
 
     from storix.types import EchoMode
 
@@ -98,10 +98,14 @@ class AzureBackend(BackendBase):
     with ``PathNotFoundError``.
     """
 
-    capabilities: Capabilities = Capabilities(content_type=True)
+    capabilities: Capabilities = Capabilities(
+        content_type=True, custom_metadata=True, presigned_urls=True
+    )
 
     def __init__(self, container: str, *, account_name: str, credential: str) -> None:
         self.container = container
+        self._account_name = account_name
+        self._credential = credential
         self._service = DataLakeServiceClient(
             account_url=f'https://{account_name}.dfs.core.windows.net',
             credential=credential,
@@ -134,6 +138,7 @@ class AzureBackend(BackendBase):
         *,
         mode: EchoMode,
         content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
     ) -> None:
         """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
         offset = 0
@@ -160,6 +165,8 @@ class AzureBackend(BackendBase):
                 ContentSettings(content_type=content_type) if content_type else None
             )
             await client.flush_data(offset, content_settings=settings)
+            if metadata is not None:
+                await client.set_metadata(dict(metadata))
         except AzureError as exc:
             raise _translate(exc, path) from exc
 
@@ -219,13 +226,15 @@ class AzureBackend(BackendBase):
             ).get_file_properties()
         except AzureError as exc:
             raise _translate(exc, path) from exc
-        is_dir = bool((file_props.metadata or {}).get('hdi_isfolder'))
+        raw_metadata = dict(file_props.metadata or {})
+        is_dir = bool(raw_metadata.pop('hdi_isfolder', None))
         return RawStat(
             kind=PathKind.DIRECTORY if is_dir else PathKind.FILE,
             size=0 if is_dir else file_props.size,
             created=file_props.creation_time,
             modified=file_props.last_modified,
             accessed=None,
+            metadata=raw_metadata or None,
         )
 
     async def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
@@ -291,6 +300,41 @@ class AzureBackend(BackendBase):
             await self._filesystem.get_directory_client(key).delete_directory()
         except AzureError as exc:
             raise _translate(exc, path) from exc
+
+    async def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
+        """Mint a read-only SAS URL for a file.
+
+        SAS generation is local HMAC crypto (no request) and requires
+        the backend credential to be an account key.
+        """
+        raw = await self.stat(path)
+        if raw.kind is PathKind.DIRECTORY:
+            raise IsADirectoryError(path)
+
+        import datetime as dt
+
+        from azure.storage.filedatalake import FileSasPermissions, generate_file_sas
+
+        from storix.utils import craft_adlsg2_url_sas
+        from storix.utils.time import utcnow
+
+        directory = str(path.parent).lstrip('/')
+        token = generate_file_sas(
+            account_name=self._account_name,
+            file_system_name=self.container,
+            credential=self._credential,
+            directory_name=directory,
+            file_name=path.name,
+            permission=FileSasPermissions(read=True),
+            expiry=utcnow() + dt.timedelta(seconds=expires_in),
+        )
+        return craft_adlsg2_url_sas(
+            account_name=self._account_name,
+            container=self.container,
+            directory=directory,
+            filename=path.name,
+            sas_token=token,
+        )
 
     async def close(self) -> None:
         """Close the underlying service client (idempotent)."""

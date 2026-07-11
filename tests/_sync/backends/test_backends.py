@@ -26,6 +26,7 @@ from storix.errors import (
     IsADirectoryError,
     NotADirectoryError,
     PathNotFoundError,
+    UnsupportedOperationError,
 )
 from storix.types import EchoMode
 
@@ -191,6 +192,35 @@ def test_stat_directory_size_is_zero(backend: StorageBackend):
     props = backend.stat(P('/d'))
     assert props.kind == 'directory'
     assert props.size == 0
+
+
+def test_metadata_round_trip(backend: StorageBackend):
+    if not backend.capabilities.custom_metadata:
+        pytest.skip('backend does not advertise custom_metadata')
+    backend.write(
+        P('/m.txt'),
+        _astream(b'x'),
+        mode='w',
+        content_type=None,
+        metadata={'owner': 'tests'},
+    )
+    raw = backend.stat(P('/m.txt'))
+    assert raw.metadata == {'owner': 'tests'}
+
+
+def test_metadata_absent_by_default(backend: StorageBackend):
+    put(backend, '/plain.txt', b'x')
+    assert (backend.stat(P('/plain.txt'))).metadata is None
+
+
+def test_make_url_respects_capability(backend: StorageBackend):
+    put(backend, '/u.txt', b'x')
+    if backend.capabilities.presigned_urls:
+        url = backend.make_url(P('/u.txt'), expires_in=60)
+        assert url.startswith('https://')
+    else:
+        with pytest.raises(UnsupportedOperationError):
+            backend.make_url(P('/u.txt'), expires_in=60)
 
 
 def test_append_updates_modified(backend: StorageBackend):
