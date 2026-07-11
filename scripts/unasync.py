@@ -64,6 +64,7 @@ SUBSTITUTIONS = tuple(
         (r'\bAsyncIterable\b', 'Iterable'),
         (r'\bAsyncGenerator\b', 'Generator'),
         (r'\bAsyncDataBuffer\b', 'DataBuffer'),
+        (r'\bAbstractAsyncContextManager\b', 'AbstractContextManager'),
         (r'\baiter\(', 'iter('),
         (r'\banext\(', 'next('),
         (r'\b__aenter__\b', '__enter__'),

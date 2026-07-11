@@ -23,6 +23,7 @@ from storix.types import StorixPath
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from contextlib import AbstractAsyncContextManager
     from types import TracebackType
 
     from storix._async.backends import StorageBackend
@@ -87,6 +88,18 @@ class Storix:
         traceback: TracebackType | None,
     ) -> None:
         await self.close()
+
+    def scratch(
+        self, *, root: StrPathLike | None = None, prefix: str = 'scratch-'
+    ) -> AbstractAsyncContextManager[Storix]:
+        """Ephemeral (or pinned) workspace on this session's own backend.
+
+        Sugar for ``storix.scratch(fs.backend, ...)``; see it for the
+        pin-vs-dispose semantics.
+        """
+        from .temporary import scratch
+
+        return scratch(self._backend, root=root, prefix=prefix)
 
     # --- resolution ---
 
@@ -160,7 +173,7 @@ class Storix:
             create_time=raw.created,
             modify_time=raw.modified,
             access_time=raw.accessed,
-            file_kind=raw.kind,
+            kind=raw.kind,
             metadata=raw.metadata,
         )
 

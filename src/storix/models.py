@@ -118,29 +118,8 @@ class FileProperties(StorixBaseModel):
     access_time: dt.datetime | None = None
     """Last access time; None on backends without atime."""
 
-    # TODO(0.2.0): rename to `kind` once the legacy providers stop
-    # constructing this model.
-    file_kind: PathKind
+    kind: PathKind
     """Whether the path is a file or a directory."""
 
     metadata: Mapping[str, str] | None = None
     """Custom key/value metadata when the backend supports it; else None."""
-
-
-class AzureFileProperties(BaseModel):
-    """Raw path properties as reported by Azure Data Lake Storage Gen2."""
-
-    name: str
-    """Path name as reported by ADLS."""
-
-    size: int
-    """Size in bytes."""
-
-    hdi_isfolder: bool = False
-    """ADLS Gen2 directory marker: True when the path is a directory."""
-
-    last_modified: dt.datetime
-    """Last modification time."""
-
-    creation_time: dt.datetime
-    """Creation time."""

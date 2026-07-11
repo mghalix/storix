@@ -1,5 +1,54 @@
 # Release Notes
 
+## [0.2.0] - unreleased
+
+Ground-up hexagonal rework: one core engine (`Storix`) owns every unix
+semantic over a small backend port; the sync flavor is generated from
+the async source of truth. Breaking release.
+
+### Added
+
+- `MemoryBackend` (dict-backed reference backend) alongside `LocalBackend`
+  and the HNS-only `AzureBackend`.
+- Layers - backends that wrap backends: `SandboxLayer` (chroot as
+  middleware) ships; custom layers are a supported extension point
+  (see `samples/layers/`).
+- `temporary()` and `scratch(backend, root=...)` disposable/pinned
+  workspaces; `fs.scratch()` on any session.
+- Capabilities with typed gates: `content_type`, `custom_metadata`
+  (write-through + `fs.set_metadata(..., merge=)`), `presigned_urls`
+  (`fs.url()`, SAS on Azure) and the backend-agnostic `fs.data_url()`.
+- Typed factory: `get_storage('azure', container=...)` with full IDE
+  completion, `register_backend()` for third parties.
+- Typed, fact-carrying error taxonomy (`storix.errors`) with errno and
+  dual stdlib inheritance; every failure raises - no boolean returns.
+- `py.typed`: the package is now typed for downstream checkers.
+
+### Changed (breaking)
+
+| 0.1.x | 0.2.0 |
+|---|---|
+| `LocalFilesystem(...)` | `Storix(LocalBackend(base))` |
+| `AzureDataLake(...)` | `Storix(AzureBackend(container, account_name=..., credential=...))` |
+| `STORAGE_*` / `ADLSG2_*` env vars | `STORIX_PROVIDER`, `STORIX_LOCAL_*`, `STORIX_AZURE_*` (see env.example) |
+| `touch(path, data)` | `touch(*paths)` creates/refreshes only; data goes through `echo` |
+| `rm(path)` file-only + `rmdir(recursive=True)` | `rm(*paths, recursive=True)` is rm -r; `rmdir(*paths)` strictly empty dirs |
+| `mv(src, dst)` / `cp(src, dst)` | variadic, last argument is the destination (unix) |
+| `ls()` shows dotfiles | hidden by default; `ls(all=True)` shows them |
+| failed ops return `False` | typed exceptions, always |
+| `sandboxed=True` constructor flag | explicit `SandboxLayer(backend, root=...)` composition |
+| `FileProperties.file_kind` | `FileProperties.kind` |
+| `PathNotFoundError` subclasses `ValueError` | subclasses `FileNotFoundError` only |
+
+### Known gaps in this release
+
+- The `sx` CLI is temporarily broken pending its rewrite onto the new core.
+- `tree`/`find`/`wc` are not yet reimplemented on the new core.
+- Azure paths are verified by an opt-in integration suite
+  (`pytest -m integration`); run it against your account before relying
+  on Azure in production.
+
+
 ## [0.1.3] - 2026-07-05
 
 ### Fixed

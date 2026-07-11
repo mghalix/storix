@@ -50,13 +50,13 @@ def test_capabilities_frozen():
 
 
 def test_fileproperties_kind_coerces_from_plain_string():
-    """Legacy providers construct with file_kind='file'; pydantic must coerce
+    """Legacy providers construct with kind='file'; pydantic must coerce
     the plain string into the PathKind member.
     """
     props = FileProperties(
-        name='a', size=1, create_time=NOW, modify_time=NOW, file_kind='file'
+        name='a', size=1, create_time=NOW, modify_time=NOW, kind='file'
     )
-    assert props.file_kind is PathKind.FILE
+    assert props.kind is PathKind.FILE
 
 
 def test_fileproperties_kind_compares_equal_to_string():
@@ -65,6 +65,6 @@ def test_fileproperties_kind_compares_equal_to_string():
         size=1,
         create_time=NOW,
         modify_time=NOW,
-        file_kind=PathKind.DIRECTORY,
+        kind=PathKind.DIRECTORY,
     )
-    assert props.file_kind == 'directory'
+    assert props.kind == 'directory'

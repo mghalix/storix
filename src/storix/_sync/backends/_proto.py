@@ -143,6 +143,9 @@ class StorageBackend(Protocol):
 
         Only meaningful when ``capabilities.presigned_urls`` is set; the
         ``BackendBase`` default raises ``UnsupportedOperationError``.
+        ``expires_in`` is advisory: providers that cannot bound a URL's
+        lifetime (public-link services, CDNs) may ignore it rather than
+        refuse.
         """
         ...
 

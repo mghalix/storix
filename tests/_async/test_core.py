@@ -388,13 +388,13 @@ async def test_stat_shapes_file_properties(fs: Storix):
     assert isinstance(props, FileProperties)
     assert props.name == 'a.txt'
     assert props.size == 5
-    assert props.file_kind == 'file'
+    assert props.kind == 'file'
 
 
 async def test_stat_root_has_a_name(fs: Storix):
     props = await fs.stat('/')
     assert props.name == '/'
-    assert props.file_kind == 'directory'
+    assert props.kind == 'directory'
 
 
 async def test_du_sums_tree(fs: Storix):

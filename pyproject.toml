@@ -1,6 +1,6 @@
 [project]
 name = "storix"
-version = "0.1.3"
+version = "0.2.0"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -277,7 +277,6 @@ exclude = [
   "INP001",  # Test dirs deliberately have no __init__.py (pytest rootdir style)
   "FBT001",  # parametrize injects arguments positionally, bools included
 ]
-"src/storix/__init__.py" = ["I001"]
 
 "__init__.py" = [
   "F401",
@@ -301,30 +300,8 @@ exclude = [
   "PTH",
 ]
 
-# --- transition debt: legacy 0.1.x tree, exempt from rules adopted for 0.2.0.
-# --- Delete these entries together with the legacy code at the 0.2.0 teardown.
-"tests/legacy/**" = [
-  "S",
-  "RUF043",
-  "BLE",
-  "DTZ",
-  "ERA",
-  "A",
-  "PLR",
-  "FBT",
-  "TRY",
-  "PERF",
-  "T20",
-]
-"src/storix/providers/**" = ["D", "A", "BLE", "ERA", "S", "FBT", "DTZ", "T20", "TRY", "PERF", "SLF", "TC", "PYI", "PTH", "PL", "G", "ASYNC", "RUF100"]
-"src/storix/aio/providers/**" = ["D", "A", "BLE", "ERA", "S", "FBT", "DTZ", "T20", "TRY", "PERF", "SLF", "TC", "PYI", "PTH", "PL", "G", "ASYNC", "RUF100"]
+# --- transition debt: the CLI is rewritten last (see docs/design/0.2.0-handoff.md).
 "src/storix/cli/**" = ["D", "A", "BLE", "ERA", "S", "FBT", "DTZ", "T20", "TRY", "PERF", "SLF", "TC", "PYI", "PTH", "PL", "G", "ASYNC", "RUF100"]
-"src/storix/sandbox.py" = ["D", "A", "BLE", "ERA", "S", "FBT", "DTZ", "T20", "TRY", "PERF", "SLF", "TC", "PYI", "PTH", "PL"]
-"src/storix/factory.py" = ["D", "A", "BLE", "ERA", "S", "FBT", "DTZ", "T20", "TRY", "PERF", "SLF", "TC", "PYI", "PTH", "PL"]
-"src/storix/aio/factory.py" = ["D", "A", "BLE", "ERA", "S", "FBT", "DTZ", "T20", "TRY", "PERF", "SLF", "TC", "PYI", "PTH", "PL"]
-"src/storix/security.py" = ["S105", "S106"]
-"src/storix/_internal/**" = ["D", "A", "BLE", "ERA", "S", "TRY", "TC", "PL"]
-"src/storix/__main__.py" = ["D", "T20"]
 
 [tool.ruff.lint.isort]
 case-sensitive = true
