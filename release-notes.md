@@ -8,27 +8,39 @@ the async source of truth. Breaking release.
 
 ### Added
 
+- One `Storix` engine over a ~14-method backend port; the sync flavor is
+  generated from the async source of truth (`scripts/unasync.py`), so the
+  two never drift and one conformance suite proves both.
 - `MemoryBackend` (dict-backed reference backend) alongside `LocalBackend`
-  and the HNS-only `AzureBackend`.
+  and the HNS-only `AzureBackend`; bring your own via the port +
+  `register_backend()`.
 - Layers - backends that wrap backends: `SandboxLayer` (chroot as
-  middleware), `DataUrlLayer` and `MetadataLayer` (portable capabilities
-  - url() and custom metadata on backends that lack them natively), and
-  `LayerBase` for writing your own. `when_missing`/`with_layer(unless=)`
-  prefer native capabilities so one construction path spans providers.
+  middleware, with `to_real`/`to_virtual` for audit), `DataUrlLayer` and
+  `MetadataLayer` (portable capabilities - `url()` and custom metadata on
+  backends that lack them natively), and `LayerBase` for writing your
+  own. Compose with `Storix(be, layers=[...])`, `fs.with_layer()`
+  (ParamSpec-typed, Starlette-style kwarg forwarding), or
+  `fs.with_layer_missing()` (skips the layer when the backend is already
+  native - capability inferred from the layer's `provides`).
 - `temporary()` and `scratch(backend, root=...)` disposable/pinned
-  workspaces; `fs.scratch()` on any session.
-- Capabilities with typed gates: `content_type`, `custom_metadata`
-  (write-through + `fs.set_metadata(..., merge=)`), `presigned_urls`
-  (`fs.url()`, SAS on Azure) and the backend-agnostic `fs.data_url()`.
+  workspaces; `fs.scratch()` and `fs.chroot()` on any session.
+- Capabilities with typed gates (`UnsupportedOperationError` names the
+  missing one): `content_type`, `custom_metadata` (write-through +
+  `fs.set_metadata(..., merge=)`), `presigned_urls` (`fs.url()`, SAS on
+  Azure) and the backend-agnostic `fs.data_url()`.
+- `fs.stream()` (streaming `cat`), `fs.resolve()` (navigable/bookmarkable
+  port path) and `fs.locate()` (physical URI - file://, abfss:// - for
+  audit/cross-system reference, resolved through any sandbox).
 - Typed factory: `get_storage('azure', container=...)` with full IDE
   completion, `register_backend()` + `available_providers()` for third
-  parties.
-- `fs.locate()` returns a physical URI (file://, abfss://) for audit/
-  cross-system reference, resolved through any sandbox.
-- `MetadataLayer` takes a pluggable `serializer` (default stdlib json;
-  pass `orjson` or any bytes dumps/loads).
+  parties; namespaced `STORIX_*` configuration.
+- `MetadataLayer` takes pluggable `serialize`/`deserialize` callables
+  (default stdlib json; pass `orjson.dumps`/`orjson.loads` or any
+  object<->bytes pair).
 - Typed, fact-carrying error taxonomy (`storix.errors`) with errno and
   dual stdlib inheritance; every failure raises - no boolean returns.
+- Rewritten `sx` CLI + REPL on the new core (session cwd persists; the
+  shell reuses the Typer parser, so every flag matches the one-shot CLI).
 - `py.typed`: the package is now typed for downstream checkers.
 
 ### Changed (breaking)
@@ -47,11 +59,16 @@ the async source of truth. Breaking release.
 | `FileProperties.file_kind` | `FileProperties.kind` |
 | `PathNotFoundError` subclasses `ValueError` | subclasses `FileNotFoundError` only |
 
-### Known gaps in this release
+### Notes
 
-- `tree`/`find`/`wc` are not yet reimplemented on the new core.
 - Azure behavior is wire-verified: the full conformance suite (80
   integration params, both flavors) passes against a real HNS account.
+  Run yours with `pytest -m integration` (needs `ADLSG2_*` credentials).
+- `tree`/`find`/`wc` are not yet core methods (the CLI provides `tree`);
+  along with `MountLayer`, `CacheLayer`, range reads, `glob`, and a
+  pathlib-style adapter they are on the 0.2.x/0.3.x roadmap
+  (`docs/roadmap.md`).
+- Design rationale for the rework lives in `docs/adr/` (13 records).
 
 
 ## [0.1.3] - 2026-07-05
