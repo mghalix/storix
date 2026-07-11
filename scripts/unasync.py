@@ -29,9 +29,10 @@ MAPPINGS: tuple[tuple[Path, Path], ...] = (
 )
 
 # Hand-written twin pairs. _compat/test_compat: the audited concurrency
-# exception. local.py: primitives differ by flavor (aiofiles/to_thread vs
-# open/os/shutil). Never generated; the sync twin must exist.
-SKIP_NAMES = frozenset({'_compat.py', 'test_compat.py', 'local.py'})
+# exception. local.py/azure.py: primitives differ by flavor (aiofiles and
+# the .aio SDK vs their sync counterparts). Never generated; the sync
+# twin must exist.
+SKIP_NAMES = frozenset({'_compat.py', 'test_compat.py', 'local.py', 'azure.py'})
 
 # A line carrying this marker is exempt from the forbidden-token scan.
 ALLOW_MARKER = '# codegen: allow'

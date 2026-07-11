@@ -120,3 +120,7 @@ class StorageBackend(Protocol):
     def exists(self, path: PurePosixPath) -> bool:
         """Whether anything lives at ``path``."""
         ...
+
+    def close(self) -> None:
+        """Release backend resources (network clients); idempotent."""
+        ...

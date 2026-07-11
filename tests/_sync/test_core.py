@@ -368,6 +368,19 @@ def test_du_sums_tree(fs: Storix):
     assert fs.du('/d') == 5
 
 
+def test_context_manager_closes_backend():
+    class _ClosingBackend(MemoryBackend):
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    backend = _ClosingBackend()
+    with Storix(backend) as fs:
+        fs.touch('/a.txt')
+    assert backend.closed
+
+
 def test_predicates(fs: Storix):
     fs.touch('/a.txt')
     fs.mkdir('/d')

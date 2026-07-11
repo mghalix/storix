@@ -84,3 +84,6 @@ class BackendBase(abc.ABC):
     async def exists(self, path: PurePosixPath) -> bool:
         """Whether anything lives at ``path``."""
         return await generic.exists(self, path)
+
+    async def close(self) -> None:  # noqa: B027 - optional hook, deliberately concrete
+        """Release backend resources; the default is a no-op."""

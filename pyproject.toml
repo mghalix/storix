@@ -108,8 +108,9 @@ follow_imports = "skip"
 pythonpath = ["src/storix"]
 testpaths = ["tests"]
 # importlib mode lets tests/_async and the generated tests/_sync share
-# module basenames without __init__.py files
-addopts = "--import-mode=importlib"
+# module basenames without __init__.py files; integration tests (real
+# cloud accounts) are opt-in via `pytest -m integration`
+addopts = "--import-mode=importlib -m 'not integration'"
 python_files = "test_*.py"
 python_functions = "test_*"
 asyncio_mode = "auto"

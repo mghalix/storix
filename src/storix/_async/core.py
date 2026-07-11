@@ -21,6 +21,8 @@ from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
+    from types import TracebackType
+
     from storix._async.backends import StorageBackend
     from storix.types import AsyncDataBuffer, EchoMode, StrPathLike
 
@@ -66,6 +68,23 @@ class Storix:
     def pwd(self) -> StorixPath:
         """Return the current working directory."""
         return self._cwd
+
+    # --- lifecycle ---
+
+    async def close(self) -> None:
+        """Release the backend's resources (idempotent)."""
+        await self._backend.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        await self.close()
 
     # --- resolution ---
 

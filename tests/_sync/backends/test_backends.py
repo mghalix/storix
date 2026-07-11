@@ -8,6 +8,9 @@ the enforcement mechanism for 'one behavior everywhere'. Backend-specific
 quirks live in the per-backend test files.
 """
 
+import os
+import uuid
+
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath as P
 
@@ -26,11 +29,38 @@ from storix.errors import (
 from storix.types import EchoMode
 
 
-@pytest.fixture(params=['memory', 'local'])
-def backend(request: pytest.FixtureRequest, tmp_path: Path) -> BackendBase:
+@pytest.fixture(
+    params=[
+        'memory',
+        'local',
+        pytest.param('azure', marks=pytest.mark.integration),
+    ]
+)
+def backend(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[BackendBase]:
     if request.param == 'memory':
-        return MemoryBackend()
-    return LocalBackend(tmp_path)
+        yield MemoryBackend()
+        return
+    if request.param == 'local':
+        yield LocalBackend(tmp_path)
+        return
+
+    account = os.environ.get('ADLSG2_ACCOUNT_NAME')
+    token = os.environ.get('ADLSG2_TOKEN')
+    if not (account and token):
+        pytest.skip('azure integration credentials not configured')
+    from storix._sync.backends.azure import AzureBackend
+
+    azure = AzureBackend(
+        f'storix-conformance-{uuid.uuid4().hex[:12]}',
+        account_name=account,
+        credential=token,
+    )
+    azure._filesystem.create_file_system()
+    try:
+        yield azure
+    finally:
+        azure._filesystem.delete_file_system()
+        azure.close()
 
 
 def _astream(*chunks: bytes) -> Iterator[bytes]:
