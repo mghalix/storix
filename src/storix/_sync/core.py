@@ -156,22 +156,32 @@ class Storix:
         return pathops.resolve(path, cwd=self._cwd, home=self._home)
 
     def resolve(self, path: StrPathLike | None = None) -> StorixPath:
-        """Return the absolute session path for ``path`` (cwd/``~`` applied).
+        """Absolute session path for ``path`` (cwd/``~``/``..`` applied).
 
-        The stable *virtual* key: what this session calls the path,
-        independent of its cwd. For the *physical* locator (across
-        sandboxes and backends) use ``locate``.
+        This is the **navigable, bookmarkable** form - a plain port path
+        you can hand back to ``cd``/``cat``/anything::
+
+            here = fs.resolve()  # '/raw/videos'
+            fs.cd('/tmp')
+            fs.cd(here)  # back to the bookmark
+
+        Stable within a session (and across sessions built the same way).
+        For an *external* reference to the object, use ``locate``.
         """
         return self._resolve(path)
 
     def locate(self, path: StrPathLike | None = None) -> str:
         """Fully-qualified physical locator for a path - a URI.
 
-        The audit/reconstruction primitive: where the path *actually*
-        lives, resolved through any sandbox to the real backend location
-        (``file:///srv/data/x``, ``abfss://c@acct.dfs...net/x``). Store
-        this to reference the object from other systems or logs;
-        parsing it back into a session is the URI factory (0.3.0).
+        For *external* reference (audit records, logs, other tools):
+        where the path actually lives, resolved through any sandbox to
+        the real backend location (``file:///srv/data/x``,
+        ``abfss://c@acct.dfs...net/x``).
+
+        Not a port path - you cannot ``cd`` to it (and by design a
+        sandboxed session must not navigate to a real path above its
+        root). To navigate, use ``resolve``; to rebuild a session *from*
+        a locator, the URI factory (roadmap 0.3.0).
         """
         return self._backend.locate(self._resolve(path))
 

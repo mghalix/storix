@@ -188,6 +188,31 @@ def test_metadata_layer_move_rekeys_sidecar():
     assert not fs.exists('/a.txt')
 
 
+def test_metadata_layer_accepts_custom_serializer():
+    from storix._sync import Storix
+    from storix._sync.layers import MetadataLayer
+
+    calls: list[str] = []
+
+    class RecordingSerializer:
+        def dumps(self, obj: object) -> bytes:
+            calls.append('dumps')
+            import json
+
+            return json.dumps(obj).encode()
+
+        def loads(self, data: bytes) -> object:
+            calls.append('loads')
+            import json
+
+            return json.loads(data)
+
+    fs = Storix(MetadataLayer(MemoryBackend(), serializer=RecordingSerializer()))
+    fs.echo(b'x', '/a.txt', metadata={'k': 'v'})
+    assert (fs.stat('/a.txt')).metadata == {'k': 'v'}
+    assert 'dumps' in calls and 'loads' in calls  # the custom codec ran
+
+
 def test_metadata_layer_delete_drops_sidecar_entry():
     from storix._sync import Storix
     from storix._sync.layers import MetadataLayer

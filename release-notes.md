@@ -21,7 +21,12 @@ the async source of truth. Breaking release.
   (write-through + `fs.set_metadata(..., merge=)`), `presigned_urls`
   (`fs.url()`, SAS on Azure) and the backend-agnostic `fs.data_url()`.
 - Typed factory: `get_storage('azure', container=...)` with full IDE
-  completion, `register_backend()` for third parties.
+  completion, `register_backend()` + `available_providers()` for third
+  parties.
+- `fs.locate()` returns a physical URI (file://, abfss://) for audit/
+  cross-system reference, resolved through any sandbox.
+- `MetadataLayer` takes a pluggable `serializer` (default stdlib json;
+  pass `orjson` or any bytes dumps/loads).
 - Typed, fact-carrying error taxonomy (`storix.errors`) with errno and
   dual stdlib inheritance; every failure raises - no boolean returns.
 - `py.typed`: the package is now typed for downstream checkers.

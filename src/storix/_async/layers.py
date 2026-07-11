@@ -10,7 +10,6 @@ rather than inside the core or any backend.
 from __future__ import annotations
 
 import dataclasses
-import json
 
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ from storix.errors import (
     PathNotFoundError,
     PermissionDeniedError,
 )
+from storix.serialization import json_serializer
 from storix.types import StorixPath
 
 
@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from storix.enums import Capability
     from storix.models import Capabilities, Entry, RawStat
+    from storix.serialization import Serializer
     from storix.types import EchoMode, StrPathLike
 
     from .backends import StorageBackend
@@ -390,26 +391,32 @@ class MetadataLayer(LayerBase):
     the port contract. Prefer native metadata when available::
 
         fs.with_layer(MetadataLayer, unless=Capability.CUSTOM_METADATA)
+
+    ``serializer`` swaps the sidecar codec (default: stdlib json); pass
+    ``orjson`` or any bytes-based dumps/loads for speed or custom formats.
     """
 
     _SIDECAR = StorixPath('/.storix-meta.json')
 
-    def __init__(self, backend: StorageBackend) -> None:
+    def __init__(
+        self, backend: StorageBackend, *, serializer: Serializer | None = None
+    ) -> None:
         super().__init__(backend)
         self.capabilities = dataclasses.replace(
             backend.capabilities, custom_metadata=True
         )
+        self._serializer = serializer or json_serializer
 
     async def _load(self) -> dict[str, dict[str, str]]:
         try:
             raw = await self._inner.read(self._SIDECAR)
         except PathNotFoundError:
             return {}
-        return json.loads(raw) if raw else {}
+        return self._serializer.loads(raw) if raw else {}
 
     async def _save(self, table: dict[str, dict[str, str]]) -> None:
         if table:
-            payload = json.dumps(table).encode()
+            payload = self._serializer.dumps(table)
             await self._inner.write(
                 self._SIDECAR, ensure_chunks(payload), mode='w', content_type=None
             )
