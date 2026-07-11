@@ -115,7 +115,12 @@ class Storix:
         return type(self)(SandboxLayer(self._backend, root=self._resolve(path)))
 
     def with_layer(
-        self, layer: LayerFactory, /, *, unless: Capability | None = None
+        self,
+        layer: Callable[..., StorageBackend],
+        /,
+        *,
+        unless: Capability | None = None,
+        **layer_kwargs: object,
     ) -> Self:
         """Return a *new* session over this backend wrapped in ``layer``.
 
@@ -123,17 +128,27 @@ class Storix:
         home (a live cwd may not exist inside the new namespace). Post-
         construction counterpart of the ``layers=`` constructor argument.
 
+        ``**layer_kwargs`` configure the layer inline (the backend is
+        supplied for you)::
+
+            fs.with_layer(MetadataLayer, serializer=orjson)
+
         ``unless`` expresses native-preference: skip the layer when the
         backend already advertises that capability, so one construction
         path works across providers -
         ``fs.with_layer(DataUrlLayer, unless=Capability.PRESIGNED_URLS)``
         wraps a local backend but leaves Azure's native SAS untouched.
         """
+        from functools import partial
+
+        factory: LayerFactory = (
+            partial(layer, **layer_kwargs) if layer_kwargs else layer
+        )
         if unless is not None:
             from .layers import when_missing
 
-            layer = when_missing(unless, layer)
-        return type(self)(layer(self._backend), home=self._home)
+            factory = when_missing(unless, factory)
+        return type(self)(factory(self._backend), home=self._home)
 
     def scratch(
         self, *, root: StrPathLike | None = None, prefix: str = 'scratch-'

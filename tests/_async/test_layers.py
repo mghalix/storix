@@ -187,29 +187,44 @@ async def test_metadata_layer_move_rekeys_sidecar():
     assert not await fs.exists('/a.txt')
 
 
+class RecordingSerializer:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def dumps(self, obj: object) -> bytes:
+        import json
+
+        self.calls.append('dumps')
+        return json.dumps(obj).encode()
+
+    def loads(self, data: bytes) -> object:
+        import json
+
+        self.calls.append('loads')
+        return json.loads(data)
+
+
 async def test_metadata_layer_accepts_custom_serializer():
     from storix._async import Storix
     from storix._async.layers import MetadataLayer
 
-    calls: list[str] = []
-
-    class RecordingSerializer:
-        def dumps(self, obj: object) -> bytes:
-            calls.append('dumps')
-            import json
-
-            return json.dumps(obj).encode()
-
-        def loads(self, data: bytes) -> object:
-            calls.append('loads')
-            import json
-
-            return json.loads(data)
-
-    fs = Storix(MetadataLayer(MemoryBackend(), serializer=RecordingSerializer()))
+    serializer = RecordingSerializer()
+    fs = Storix(MetadataLayer(MemoryBackend(), serializer=serializer))
     await fs.echo(b'x', '/a.txt', metadata={'k': 'v'})
     assert (await fs.stat('/a.txt')).metadata == {'k': 'v'}
-    assert 'dumps' in calls and 'loads' in calls  # the custom codec ran
+    assert 'dumps' in serializer.calls and 'loads' in serializer.calls
+
+
+async def test_with_layer_forwards_kwargs_to_the_layer():
+    from storix._async import Storix
+    from storix._async.layers import MetadataLayer
+
+    serializer = RecordingSerializer()
+    # serializer= is passed straight through with_layer, no partial needed
+    fs = Storix(MemoryBackend()).with_layer(MetadataLayer, serializer=serializer)
+    await fs.echo(b'x', '/a.txt', metadata={'k': 'v'})
+    assert (await fs.stat('/a.txt')).metadata == {'k': 'v'}
+    assert serializer.calls  # the injected serializer was used
 
 
 async def test_metadata_layer_delete_drops_sidecar_entry():
