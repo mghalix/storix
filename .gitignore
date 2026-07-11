@@ -195,3 +195,7 @@ cython_debug/
 
 # secret management
 .infisical.json
+
+
+# agent-workflow scratch (brainstorming specs) - never track
+docs/superpowers/
