@@ -192,7 +192,14 @@ def cat(
     if b'\x00' in data:
         err.print(f'[yellow]cat: binary file ({len(data)} bytes); use -b[/yellow]')
         return
-    console.print(data.decode(errors='replace'), end='')
+
+    text = data.decode(errors='replace')
+    # exact bytes when piped; a trailing newline in a terminal so the
+    # shell prompt (and one-shot output) starts on a fresh line
+    if text and not text.endswith('\n') and sys.stdout.isatty():
+        text += '\n'
+    # no markup/highlight: file contents are data, not rich markup
+    console.print(text, end='', markup=False, highlight=False)
 
 
 @app.command()
