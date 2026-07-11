@@ -238,6 +238,31 @@ def test_metadata_replace_semantics(backend: StorageBackend):
     assert meta() is None
 
 
+def test_set_metadata_replaces_without_touching_content(
+    backend: StorageBackend,
+):
+    if not backend.capabilities.custom_metadata:
+        with pytest.raises(UnsupportedOperationError):
+            backend.set_metadata(P('/x'), {'a': '1'})
+        return
+
+    put(backend, '/m.txt', b'content')
+    backend.set_metadata(P('/m.txt'), {'a': '1'})
+    assert (backend.stat(P('/m.txt'))).metadata == {'a': '1'}
+    assert backend.read(P('/m.txt')) == b'content'
+
+    backend.set_metadata(P('/m.txt'), {})  # empty mapping clears
+    assert (backend.stat(P('/m.txt'))).metadata is None
+
+
+def test_set_metadata_on_directory_raises(backend: StorageBackend):
+    if not backend.capabilities.custom_metadata:
+        pytest.skip('backend does not advertise custom_metadata')
+    backend.make_dir(P('/d'), parents=False)
+    with pytest.raises(IsADirectoryError):
+        backend.set_metadata(P('/d'), {'a': '1'})
+
+
 def test_make_url_respects_capability(backend: StorageBackend):
     put(backend, '/u.txt', b'x')
     if backend.capabilities.presigned_urls:

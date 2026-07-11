@@ -30,6 +30,16 @@ async def test_scratch_works_on_any_backend_and_cleans_up():
     assert await backend.exists(P('/'))
 
 
+async def test_scratch_pinned_root_persists_and_is_reused():
+    backend = MemoryBackend()
+    async with scratch(backend, root='/pinned') as fs:
+        await fs.touch('/a.txt')
+    assert await backend.exists(P('/pinned/a.txt'))  # pinned => survives exit
+
+    async with scratch(backend, root='/pinned') as fs:
+        assert await fs.exists('/a.txt')  # same workspace, reattached
+
+
 async def test_scratch_sessions_are_isolated_on_one_backend():
     backend = MemoryBackend()
     async with scratch(backend) as one, scratch(backend) as two:

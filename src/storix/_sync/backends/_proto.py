@@ -128,6 +128,16 @@ class StorageBackend(Protocol):
         """Whether anything lives at ``path``."""
         ...
 
+    def set_metadata(self, path: PurePosixPath, metadata: Mapping[str, str]) -> None:
+        """Replace a file's custom metadata without touching its content.
+
+        Replace semantics like ``write``: the mapping replaces entirely,
+        ``{}`` clears. Files only (directory metadata is out of scope for
+        now). Requires ``capabilities.custom_metadata``; the
+        ``BackendBase`` default raises ``UnsupportedOperationError``.
+        """
+        ...
+
     def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
         """Mint a time-limited shareable URL for a file.
 

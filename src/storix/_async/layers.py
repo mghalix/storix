@@ -166,6 +166,15 @@ class SandboxLayer:
         except PathError as exc:
             raise self._rescope(exc) from None
 
+    async def set_metadata(
+        self, path: PurePosixPath, metadata: Mapping[str, str]
+    ) -> None:
+        """Replace a file's custom metadata."""
+        try:
+            await self._inner.set_metadata(self._to_real(path), metadata)
+        except PathError as exc:
+            raise self._rescope(exc) from None
+
     async def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
         """Mint a time-limited shareable URL for a file."""
         try:

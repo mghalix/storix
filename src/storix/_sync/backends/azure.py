@@ -150,9 +150,11 @@ class AzureBackend(BackendBase):
                 offset = raw.size
 
         client = self._filesystem.get_file_client(self._key(path))
+        creating = raw is None or mode == 'w'
         try:
-            if raw is None or mode == 'w':
-                client.create_file()
+            if creating:
+                # metadata rides along with creation - one request, not two
+                client.create_file(metadata=dict(metadata) if metadata else None)
             for chunk in data:
                 if not chunk:
                     continue
@@ -162,7 +164,7 @@ class AzureBackend(BackendBase):
                 ContentSettings(content_type=content_type) if content_type else None
             )
             client.flush_data(offset, content_settings=settings)
-            if metadata is not None:
+            if metadata is not None and not creating:
                 client.set_metadata(dict(metadata))
         except AzureError as exc:
             raise _translate(exc, path) from exc
@@ -291,6 +293,17 @@ class AzureBackend(BackendBase):
             raise NotADirectoryError(path)
         try:
             self._filesystem.get_directory_client(key).delete_directory()
+        except AzureError as exc:
+            raise _translate(exc, path) from exc
+
+    def set_metadata(self, path: PurePosixPath, metadata: Mapping[str, str]) -> None:
+        """Replace a file's custom metadata without touching its content."""
+        raw = self.stat(path)
+        if raw.kind is PathKind.DIRECTORY:
+            raise IsADirectoryError(path)
+        try:
+            client = self._filesystem.get_file_client(self._key(path))
+            client.set_metadata(dict(metadata))
         except AzureError as exc:
             raise _translate(exc, path) from exc
 

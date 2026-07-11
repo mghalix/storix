@@ -185,6 +185,20 @@ async def test_echo_metadata_follows_capability(fs: Storix):
         assert excinfo.value.operation == 'custom_metadata'
 
 
+async def test_set_metadata_merge(fs: Storix):
+    if not fs.backend.capabilities.custom_metadata:
+        with pytest.raises(UnsupportedOperationError):
+            await fs.set_metadata('/m.txt', {'a': '1'})
+        return
+
+    await fs.echo(b'x', '/m.txt', metadata={'a': '1', 'b': '2'})
+    await fs.set_metadata('/m.txt', {'b': '9', 'c': '3'}, merge=True)
+    assert (await fs.stat('/m.txt')).metadata == {'a': '1', 'b': '9', 'c': '3'}
+
+    await fs.set_metadata('/m.txt', {'only': 'this'})  # replace, not merge
+    assert (await fs.stat('/m.txt')).metadata == {'only': 'this'}
+
+
 async def test_url_requires_capability(fs: Storix):
     await fs.touch('/a.txt')
     with pytest.raises(UnsupportedOperationError) as excinfo:

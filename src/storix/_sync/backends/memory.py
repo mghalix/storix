@@ -184,6 +184,15 @@ class MemoryBackend(BackendBase):
         now = utcnow()
         self._nodes[path] = _Node(data=None, created=now, modified=now)
 
+    @override
+    def set_metadata(self, path: PurePosixPath, metadata: Mapping[str, str]) -> None:
+        """Replace a file's custom metadata without touching its content."""
+        node = self._get(path)
+        if node.data is None:
+            raise IsADirectoryError(path)
+        node.metadata = dict(metadata) if metadata else None
+        node.modified = utcnow()
+
     def _get(self, path: PurePosixPath) -> _Node:
         """Look up a node or raise ``PathNotFoundError``."""
         try:

@@ -90,6 +90,11 @@ class BackendBase(abc.ABC):
         """Whether anything lives at ``path``."""
         return generic.exists(self, path)
 
+    def set_metadata(self, path: PurePosixPath, metadata: Mapping[str, str]) -> None:
+        """Replace a file's custom metadata (default: unsupported)."""
+        del path, metadata
+        raise UnsupportedOperationError(Capability.CUSTOM_METADATA)
+
     def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
         """Mint a presigned URL (default: unsupported)."""
         del path, expires_in

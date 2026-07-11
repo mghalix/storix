@@ -9,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
 
+from storix import pathops
 from storix.types import StorixPath
 
 from .backends.local import LocalBackend
@@ -19,7 +20,12 @@ from .layers import SandboxLayer
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from storix.types import StrPathLike
+
     from .backends import StorageBackend
+
+
+_ROOT = StorixPath('/')
 
 
 @asynccontextmanager
@@ -39,17 +45,29 @@ async def temporary() -> AsyncGenerator[Storix]:
 
 @asynccontextmanager
 async def scratch(
-    backend: StorageBackend, *, prefix: str = 'scratch-'
+    backend: StorageBackend,
+    *,
+    root: StrPathLike | None = None,
+    prefix: str = 'scratch-',
 ) -> AsyncGenerator[Storix]:
-    """Yield an ephemeral workspace on *any* backend.
+    """Yield an ephemeral or pinned sandboxed workspace on *any* backend.
 
-    Pure composition: a uniquely-named subtree, sandboxed so the session
-    sees it as ``/``, deleted on exit. The backend is borrowed, not
+    Pure composition: a subtree, sandboxed so the session sees it as
+    ``/``. With no ``root`` the subtree is uniquely named and deleted on
+    exit; passing ``root`` pins the workspace - created if missing,
+    reused across sessions, and *persisted* on exit (remove it yourself
+    with ``rm(recursive=True)`` when done). The backend is borrowed, not
     owned - its lifecycle (``close``) stays with the caller.
     """
-    root = StorixPath(f'/{prefix}{uuid.uuid4().hex[:12]}')
-    await backend.make_dir(root, parents=True)
+    pinned = root is not None
+    workspace = (
+        pathops.resolve(root, cwd=_ROOT, home=_ROOT)
+        if root is not None
+        else StorixPath(f'/{prefix}{uuid.uuid4().hex[:12]}')
+    )
+    await backend.make_dir(workspace, parents=True)
     try:
-        yield Storix(SandboxLayer(backend, root=root))
+        yield Storix(SandboxLayer(backend, root=workspace))
     finally:
-        await backend.delete_tree(root)
+        if not pinned:
+            await backend.delete_tree(workspace)

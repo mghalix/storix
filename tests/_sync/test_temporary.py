@@ -32,6 +32,16 @@ def test_scratch_works_on_any_backend_and_cleans_up():
     assert backend.exists(P('/'))
 
 
+def test_scratch_pinned_root_persists_and_is_reused():
+    backend = MemoryBackend()
+    with scratch(backend, root='/pinned') as fs:
+        fs.touch('/a.txt')
+    assert backend.exists(P('/pinned/a.txt'))  # pinned => survives exit
+
+    with scratch(backend, root='/pinned') as fs:
+        assert fs.exists('/a.txt')  # same workspace, reattached
+
+
 def test_scratch_sessions_are_isolated_on_one_backend():
     backend = MemoryBackend()
     with scratch(backend) as one, scratch(backend) as two:

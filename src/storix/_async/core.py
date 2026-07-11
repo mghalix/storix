@@ -164,6 +164,28 @@ class Storix:
             metadata=raw.metadata,
         )
 
+    async def set_metadata(
+        self,
+        path: StrPathLike,
+        metadata: Mapping[str, str],
+        /,
+        *,
+        merge: bool = False,
+    ) -> None:
+        """Replace (default) or merge a file's custom metadata.
+
+        Replace costs one backend request; ``merge=True`` stats first
+        (read-merge-write - not atomic under concurrent writers).
+        Requires ``capabilities.custom_metadata``.
+        """
+        self._ensure_capability(Capability.CUSTOM_METADATA)
+        target = self._resolve(path)
+        payload = dict(metadata)
+        if merge:
+            existing = (await self._backend.stat(target)).metadata or {}
+            payload = {**existing, **payload}
+        await self._backend.set_metadata(target, payload)
+
     async def url(
         self,
         path: StrPathLike | None = None,
