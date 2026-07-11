@@ -185,8 +185,10 @@ class SandboxLayer:
         except PathError as exc:
             raise self._rescope(exc) from None
 
-    async def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
-        """Mint a time-limited shareable URL for a file."""
+    async def make_url(
+        self, path: PurePosixPath, *, expires_in: int | None = None
+    ) -> str:
+        """Mint a shareable URL for a file."""
         try:
             return await self._inner.make_url(self.to_real(path), expires_in=expires_in)
         except PathError as exc:

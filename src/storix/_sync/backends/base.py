@@ -95,7 +95,7 @@ class BackendBase(abc.ABC):
         del path, metadata
         raise UnsupportedOperationError(Capability.CUSTOM_METADATA)
 
-    def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
+    def make_url(self, path: PurePosixPath, *, expires_in: int | None = None) -> str:
         """Mint a presigned URL (default: unsupported)."""
         del path, expires_in
         raise UnsupportedOperationError(Capability.PRESIGNED_URLS)

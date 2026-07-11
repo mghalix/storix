@@ -11,7 +11,6 @@ from storix import pathops
 from storix._sync._compat import gather
 from storix._sync._stream import ensure_chunks
 from storix._sync.backends import generic
-from storix.constants import DEFAULT_URL_EXPIRY_SECONDS
 from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
@@ -108,6 +107,15 @@ class Storix:
     ) -> None:
         self.close()
 
+    def with_layer(self, layer: LayerFactory, /) -> Self:
+        """Return a *new* session over this backend wrapped in ``layer``.
+
+        The current session is untouched; the new one starts fresh at its
+        home (a live cwd may not exist inside the new namespace). Post-
+        construction counterpart of the ``layers=`` constructor argument.
+        """
+        return type(self)(layer(self._backend), home=self._home)
+
     def scratch(
         self, *, root: StrPathLike | None = None, prefix: str = 'scratch-'
     ) -> AbstractContextManager[Storix]:
@@ -196,15 +204,7 @@ class Storix:
         """Return the user-facing properties of a path."""
         target = self._resolve(path)
         raw = self._backend.stat(target)
-        return FileProperties(
-            name=target.name or '/',
-            size=raw.size,
-            created=raw.created,
-            modified=raw.modified,
-            accessed=raw.accessed,
-            kind=raw.kind,
-            metadata=raw.metadata,
-        )
+        return FileProperties.from_raw(target.name or '/', raw)
 
     def set_metadata(
         self,
@@ -232,11 +232,13 @@ class Storix:
         self,
         path: StrPathLike | None = None,
         *,
-        expires_in: int = DEFAULT_URL_EXPIRY_SECONDS,
+        expires_in: int | None = None,
     ) -> str:
-        """Mint a time-limited shareable URL for a file.
+        """Mint a shareable URL for a file (Azure: a SAS URL).
 
-        Requires ``capabilities.presigned_urls`` (Azure: a SAS URL).
+        Requires ``capabilities.presigned_urls``. ``expires_in`` is
+        advisory: ``None`` means the provider's default lifetime, and
+        providers without expiring links ignore it.
         """
         self._ensure_capability(Capability.PRESIGNED_URLS)
         return self._backend.make_url(self._resolve(path), expires_in=expires_in)

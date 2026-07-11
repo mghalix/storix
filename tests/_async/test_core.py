@@ -41,6 +41,22 @@ async def test_layers_kwarg_wraps_the_backend():
     assert await inner.exists(P('/jail/a.txt'))
 
 
+async def test_with_layer_returns_a_new_wrapped_session():
+    from functools import partial
+
+    from storix._async import SandboxLayer
+
+    inner = MemoryBackend()
+    await inner.make_dir(P('/jail'), parents=False)
+
+    fs = Storix(inner)
+    jailed = fs.with_layer(partial(SandboxLayer, root='/jail'))
+
+    await jailed.touch('/a.txt')
+    assert await inner.exists(P('/jail/a.txt'))
+    assert await fs.exists('/jail/a.txt')  # original session untouched
+
+
 async def test_resolve_returns_session_absolute_path(fs: Storix):
     await fs.mkdir('/docs')
     await fs.cd('/docs')

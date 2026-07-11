@@ -43,6 +43,22 @@ def test_layers_kwarg_wraps_the_backend():
     assert inner.exists(P('/jail/a.txt'))
 
 
+def test_with_layer_returns_a_new_wrapped_session():
+    from functools import partial
+
+    from storix._sync import SandboxLayer
+
+    inner = MemoryBackend()
+    inner.make_dir(P('/jail'), parents=False)
+
+    fs = Storix(inner)
+    jailed = fs.with_layer(partial(SandboxLayer, root='/jail'))
+
+    jailed.touch('/a.txt')
+    assert inner.exists(P('/jail/a.txt'))
+    assert fs.exists('/jail/a.txt')  # original session untouched
+
+
 def test_resolve_returns_session_absolute_path(fs: Storix):
     fs.mkdir('/docs')
     fs.cd('/docs')

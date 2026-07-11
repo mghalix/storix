@@ -2,7 +2,7 @@ import dataclasses
 import datetime as dt
 
 from collections.abc import Mapping
-from typing import ClassVar, NamedTuple
+from typing import ClassVar, NamedTuple, Self
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
@@ -127,6 +127,24 @@ class FileProperties(StorixBaseModel):
 
     metadata: Mapping[str, str] | None = None
     """Custom key/value metadata when the backend supports it; else None."""
+
+    @classmethod
+    def from_raw(cls, name: str, raw: RawStat) -> Self:
+        """Shape a port-level ``RawStat`` into the user-facing model.
+
+        The two models deliberately stay separate: ``RawStat`` is the
+        cheap trusted DTO crossing the port on every call; this is the
+        validated pydantic surface (serialization, FastAPI responses).
+        """
+        return cls(
+            name=name,
+            size=raw.size,
+            created=raw.created,
+            modified=raw.modified,
+            accessed=raw.accessed,
+            kind=raw.kind,
+            metadata=raw.metadata,
+        )
 
     def __str__(self) -> str:
         lines = [

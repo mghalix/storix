@@ -139,14 +139,15 @@ class StorageBackend(Protocol):
         """
         ...
 
-    def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
-        """Mint a time-limited shareable URL for a file.
+    def make_url(self, path: PurePosixPath, *, expires_in: int | None = None) -> str:
+        """Mint a shareable URL for a file.
 
         Only meaningful when ``capabilities.presigned_urls`` is set; the
         ``BackendBase`` default raises ``UnsupportedOperationError``.
-        ``expires_in`` is advisory: providers that cannot bound a URL's
-        lifetime (public-link services, CDNs) may ignore it rather than
-        refuse.
+        ``expires_in`` is advisory: ``None`` means the provider's own
+        default lifetime, and providers that cannot bound a URL's
+        lifetime at all (public-link services, CDNs) ignore it rather
+        than refuse.
         """
         ...
 

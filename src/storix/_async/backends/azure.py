@@ -316,12 +316,19 @@ class AzureBackend(BackendBase):
         except AzureError as exc:
             raise _translate(exc, path) from exc
 
-    async def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
+    async def make_url(
+        self, path: PurePosixPath, *, expires_in: int | None = None
+    ) -> str:
         """Mint a read-only SAS URL for a file.
 
-        SAS generation is local HMAC crypto (no request) and requires
-        the backend credential to be an account key.
+        ``None`` applies the storix default lifetime. SAS generation is
+        local HMAC crypto (no request) and requires the backend
+        credential to be an account key.
         """
+        if expires_in is None:
+            from storix.constants import DEFAULT_URL_EXPIRY_SECONDS
+
+            expires_in = DEFAULT_URL_EXPIRY_SECONDS
         raw = await self.stat(path)
         if raw.kind is PathKind.DIRECTORY:
             raise IsADirectoryError(path)
