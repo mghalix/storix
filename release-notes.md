@@ -44,9 +44,8 @@ the async source of truth. Breaking release.
 
 - The `sx` CLI is temporarily broken pending its rewrite onto the new core.
 - `tree`/`find`/`wc` are not yet reimplemented on the new core.
-- Azure paths are verified by an opt-in integration suite
-  (`pytest -m integration`); run it against your account before relying
-  on Azure in production.
+- Azure behavior is wire-verified: the full conformance suite (80
+  integration params, both flavors) passes against a real HNS account.
 
 
 ## [0.1.3] - 2026-07-05
