@@ -123,3 +123,28 @@ class UnsupportedOperationError(StorageError):
         super().__init__(
             msg or f"operation '{operation}' is not supported by this backend"
         )
+
+
+_OS_ERROR_MAP: tuple[tuple[type[OSError], type[_PathError]], ...] = (
+    (FileNotFoundError, PathNotFoundError),
+    (builtins.IsADirectoryError, IsADirectoryError),
+    (builtins.NotADirectoryError, NotADirectoryError),
+    (FileExistsError, AlreadyExistsError),
+    (builtins.PermissionError, PermissionDeniedError),
+)
+
+
+def from_os_error(exc: OSError, path: StrPathLike) -> StorageError:
+    """Translate a raw ``OSError`` into the storix taxonomy.
+
+    The boundary tool for filesystem-backed backends: catch ``OSError``,
+    raise ``from_os_error(exc, port_path) from exc``. ``path`` should be
+    the *port* path (virtual), never the native OS path, so errors speak
+    the caller's namespace.
+    """
+    for stdlib_cls, storix_cls in _OS_ERROR_MAP:
+        if isinstance(exc, stdlib_cls):
+            return storix_cls(path)
+    if exc.errno == errno.ENOTEMPTY:
+        return DirectoryNotEmptyError(path)
+    return StorageError(f"'{path}': {exc.strerror or exc}")

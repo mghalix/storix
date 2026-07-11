@@ -127,7 +127,11 @@ class MemoryBackend(BackendBase):
 
         for child in self._children(path):
             node = self._nodes[child]
-            yield Entry(name=child.name, is_dir=node.is_dir, size=node.size)
+            yield Entry(
+                name=child.name,
+                is_dir=node.is_dir,
+                size=None if node.is_dir else node.size,
+            )
 
     @override
     def stat(self, path: PurePosixPath) -> RawStat:
