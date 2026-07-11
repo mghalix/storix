@@ -101,21 +101,25 @@ class StorixBaseModel(BaseModel):
 
 
 class FileProperties(StorixBaseModel):
-    """User-facing stat result for a path."""
+    """User-facing stat result for a path.
+
+    Field names follow unix stat vocabulary (Birth/Modify/Access) and
+    mirror :class:`RawStat`; ``str()`` renders a stat(1)-style block.
+    """
 
     name: str
     """Path basename."""
 
     size: int
-    """Size in bytes."""
+    """Size in bytes (apparent content bytes, like ``du -sb``)."""
 
-    create_time: dt.datetime
-    """Creation time."""
+    created: dt.datetime
+    """Birth time."""
 
-    modify_time: dt.datetime
+    modified: dt.datetime
     """Last content-modification time."""
 
-    access_time: dt.datetime | None = None
+    accessed: dt.datetime | None = None
     """Last access time; None on backends without atime."""
 
     kind: PathKind
@@ -123,3 +127,16 @@ class FileProperties(StorixBaseModel):
 
     metadata: Mapping[str, str] | None = None
     """Custom key/value metadata when the backend supports it; else None."""
+
+    def __str__(self) -> str:
+        lines = [
+            f'  File: {self.name}',
+            f'  Size: {self.size}\t{self.kind}',
+            f'Access: {self.accessed or "-"}',
+            f'Modify: {self.modified}',
+            f' Birth: {self.created}',
+        ]
+        if self.metadata:
+            pairs = ', '.join(f'{k}={v}' for k, v in sorted(self.metadata.items()))
+            lines.append(f'  Meta: {pairs}')
+        return '\n'.join(lines)

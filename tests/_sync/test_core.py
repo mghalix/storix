@@ -27,6 +27,30 @@ def fs(request: pytest.FixtureRequest, tmp_path: Path) -> Storix:
     return Storix(LocalBackend(tmp_path))
 
 
+# --- construction ---
+
+
+def test_layers_kwarg_wraps_the_backend():
+    from functools import partial
+
+    from storix._sync import SandboxLayer
+
+    inner = MemoryBackend()
+    inner.make_dir(P('/jail'), parents=False)
+    fs = Storix(inner, layers=[partial(SandboxLayer, root='/jail')])
+
+    fs.touch('/a.txt')
+    assert inner.exists(P('/jail/a.txt'))
+
+
+def test_resolve_returns_session_absolute_path(fs: Storix):
+    fs.mkdir('/docs')
+    fs.cd('/docs')
+    assert str(fs.resolve('a.txt')) == '/docs/a.txt'
+    assert str(fs.resolve('~/b.txt')) == '/b.txt'
+    assert str(fs.resolve()) == '/docs'
+
+
 # --- identity & navigation ---
 
 
@@ -137,7 +161,7 @@ def test_touch_preserves_content_and_refreshes_mtime(fs: Storix):
     fs.touch('/a.txt')
     after = fs.stat('/a.txt')
     assert fs.cat('/a.txt') == b'content'
-    assert after.modify_time >= before.modify_time
+    assert after.modified >= before.modified
 
 
 def test_touch_missing_parent_raises(fs: Storix):

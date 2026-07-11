@@ -24,12 +24,14 @@ from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from contextlib import AbstractContextManager
     from types import TracebackType
 
     from storix._sync.backends import StorageBackend
     from storix.types import DataBuffer, EchoMode, StrPathLike
+
+    LayerFactory = Callable[[StorageBackend], StorageBackend]
 
 
 _ROOT = StorixPath('/')
@@ -48,7 +50,22 @@ class Storix:
     ``PathNotFoundError`` like any other path would.
     """
 
-    def __init__(self, backend: StorageBackend, *, home: StrPathLike = '/') -> None:
+    def __init__(
+        self,
+        backend: StorageBackend,
+        *,
+        home: StrPathLike = '/',
+        layers: Iterable[LayerFactory] = (),
+    ) -> None:
+        """Open a session over ``backend``, optionally stacking layers.
+
+        ``layers`` are factories taking a backend and returning a wrapped
+        one (a layer class taking only the backend, or a
+        ``functools.partial`` carrying its options). Applied in order:
+        each wraps the previous, so the *last* entry is outermost.
+        """
+        for build in layers:
+            backend = build(backend)
         self._backend = backend
         self._home = pathops.resolve(home, cwd=_ROOT, home=_ROOT)
         self._cwd = self._home
@@ -111,6 +128,16 @@ class Storix:
             return self._cwd
         return pathops.resolve(path, cwd=self._cwd, home=self._home)
 
+    def resolve(self, path: StrPathLike | None = None) -> StorixPath:
+        """Return the absolute session path for ``path`` (cwd/``~`` applied).
+
+        The stable key for auditing or indexing: what this session calls
+        the path, independent of its cwd at the time. When the backend is
+        sandboxed, pair with ``SandboxLayer.to_real`` to record the real
+        underlying path instead.
+        """
+        return self._resolve(path)
+
     def _ensure_parent(self, path: StorixPath) -> None:
         """Raise unless ``path``'s parent exists and is a directory."""
         parent = path.parent
@@ -172,9 +199,9 @@ class Storix:
         return FileProperties(
             name=target.name or '/',
             size=raw.size,
-            create_time=raw.created,
-            modify_time=raw.modified,
-            access_time=raw.accessed,
+            created=raw.created,
+            modified=raw.modified,
+            accessed=raw.accessed,
             kind=raw.kind,
             metadata=raw.metadata,
         )

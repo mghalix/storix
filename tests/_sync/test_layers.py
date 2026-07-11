@@ -73,6 +73,28 @@ def test_rescopes_parent_paths_from_inner_errors(
     assert str(excinfo.value.path) == '/missing'
 
 
+def test_translation_is_public_for_audit(
+    jailed: tuple[MemoryBackend, SandboxLayer],
+):
+    """The audit pattern: the layer owner records real paths; the
+    sandboxed session only ever sees virtual ones.
+    """
+    from storix._sync import Storix
+
+    inner, layer = jailed
+    fs = Storix(layer)
+    fs.mkdir('/videos')
+    fs.cd('/videos')
+    fs.echo(b'...', 'abc123.mp4')
+
+    audit_path = layer.to_real(fs.resolve('abc123.mp4'))
+    assert str(audit_path) == '/jail/videos/abc123.mp4'
+    assert inner.exists(audit_path)
+
+    # and back: reconstruct the virtual name from the audited real path
+    assert str(layer.to_virtual(audit_path)) == '/videos/abc123.mp4'
+
+
 def test_layers_compose(jailed: tuple[MemoryBackend, SandboxLayer]):
     inner, layer = jailed
     layer.make_dir(P('/deeper'), parents=False)

@@ -53,9 +53,7 @@ def test_fileproperties_kind_coerces_from_plain_string():
     """Legacy providers construct with kind='file'; pydantic must coerce
     the plain string into the PathKind member.
     """
-    props = FileProperties(
-        name='a', size=1, create_time=NOW, modify_time=NOW, kind='file'
-    )
+    props = FileProperties(name='a', size=1, created=NOW, modified=NOW, kind='file')
     assert props.kind is PathKind.FILE
 
 
@@ -63,8 +61,8 @@ def test_fileproperties_kind_compares_equal_to_string():
     props = FileProperties(
         name='a',
         size=1,
-        create_time=NOW,
-        modify_time=NOW,
+        created=NOW,
+        modified=NOW,
         kind=PathKind.DIRECTORY,
     )
     assert props.kind == 'directory'
