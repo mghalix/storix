@@ -70,6 +70,22 @@ def test_keyword_provider_is_rejected_not_swallowed():
         get_storage(provider='azure')  # type: ignore[call-overload]
 
 
+def test_available_providers_lists_builtins_and_plugins():
+    from storix._sync.factory import available_providers, register_backend
+
+    assert set(available_providers()) >= {'local', 'azure'}
+
+    from storix._sync.backends.memory import MemoryBackend
+
+    register_backend('unit-avail', lambda **_: MemoryBackend())
+    try:
+        assert 'unit-avail' in available_providers()
+    finally:
+        from storix._sync.factory import _BUILDERS
+
+        _BUILDERS.pop('unit-avail')
+
+
 def test_configuration_error_is_a_storage_error():
     assert issubclass(ConfigurationError, StorageError)
 

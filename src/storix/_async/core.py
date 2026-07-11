@@ -156,12 +156,22 @@ class Storix:
     def resolve(self, path: StrPathLike | None = None) -> StorixPath:
         """Return the absolute session path for ``path`` (cwd/``~`` applied).
 
-        The stable key for auditing or indexing: what this session calls
-        the path, independent of its cwd at the time. When the backend is
-        sandboxed, pair with ``SandboxLayer.to_real`` to record the real
-        underlying path instead.
+        The stable *virtual* key: what this session calls the path,
+        independent of its cwd. For the *physical* locator (across
+        sandboxes and backends) use ``locate``.
         """
         return self._resolve(path)
+
+    def locate(self, path: StrPathLike | None = None) -> str:
+        """Fully-qualified physical locator for a path - a URI.
+
+        The audit/reconstruction primitive: where the path *actually*
+        lives, resolved through any sandbox to the real backend location
+        (``file:///srv/data/x``, ``abfss://c@acct.dfs...net/x``). Store
+        this to reference the object from other systems or logs;
+        parsing it back into a session is the URI factory (0.3.0).
+        """
+        return self._backend.locate(self._resolve(path))
 
     async def _ensure_parent(self, path: StorixPath) -> None:
         """Raise unless ``path``'s parent exists and is a directory."""

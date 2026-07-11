@@ -64,6 +64,10 @@ class LocalBackend(BackendBase):
     def _to_os(self, path: PurePosixPath) -> Path:
         return self._base.joinpath(*path.parts[1:])
 
+    def locate(self, path: PurePosixPath) -> str:
+        """``file://`` URI of the real on-disk location."""
+        return self._to_os(path).as_uri()
+
     def read_stream(self, path: PurePosixPath) -> Iterator[bytes]:
         """Stream a file's contents in chunks."""
         try:

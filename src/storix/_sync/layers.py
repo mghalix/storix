@@ -204,6 +204,15 @@ class SandboxLayer:
         except PathError as exc:
             raise self._rescope(exc) from None
 
+    def locate(self, path: PurePosixPath) -> str:
+        """Locator of the *real* underlying path - the audit primitive.
+
+        A sandboxed session's ``fs.locate('/x')`` returns the physical
+        location (``file:///srv/data/tenant-42/x``), no privileged
+        ``to_real`` dance required.
+        """
+        return self._inner.locate(self.to_real(path))
+
     def close(self) -> None:
         """Release the inner backend's resources."""
         self._inner.close()
@@ -293,6 +302,10 @@ class LayerBase:
     def make_url(self, path: PurePosixPath, *, expires_in: int | None = None) -> str:
         """Mint a shareable URL for a file."""
         return self._inner.make_url(path, expires_in=expires_in)
+
+    def locate(self, path: PurePosixPath) -> str:
+        """Fully-qualified physical locator for a port path."""
+        return self._inner.locate(path)
 
     def close(self) -> None:
         """Release the inner backend's resources."""

@@ -78,6 +78,26 @@ async def test_resolve_returns_session_absolute_path(fs: Storix):
     assert str(fs.resolve()) == '/docs'
 
 
+async def test_locate_returns_physical_uri(fs: Storix):
+    await fs.echo(b'x', '/a.txt')
+    uri = fs.locate('/a.txt')
+    assert '://' in uri  # a scheme-qualified locator
+    if isinstance(fs.backend, LocalBackend):
+        assert uri.startswith('file://')
+        assert uri.endswith('/a.txt')
+
+
+async def test_locate_through_sandbox_gives_real_path():
+    from storix._async import SandboxLayer
+
+    inner = MemoryBackend()
+    await inner.make_dir(P('/jail'), parents=False)
+    fs = Storix(SandboxLayer(inner, root='/jail'))
+    await fs.echo(b'x', '/a.txt')
+    # the session sees '/a.txt'; locate resolves to the real inner path
+    assert fs.locate('/a.txt') == inner.locate(P('/jail/a.txt'))
+
+
 # --- identity & navigation ---
 
 

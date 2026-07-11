@@ -1,5 +1,5 @@
 from .core import Storix
-from .factory import get_storage, register_backend
+from .factory import available_providers, get_storage, register_backend
 from .layers import (
     DataUrlLayer,
     LayerBase,
@@ -16,6 +16,7 @@ __all__ = (
     'MetadataLayer',
     'SandboxLayer',
     'Storix',
+    'available_providers',
     'get_storage',
     'register_backend',
     'scratch',

@@ -153,6 +153,19 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def locate(self, path: PurePosixPath) -> str:
+        """Fully-qualified physical locator for a port path (a URI).
+
+        The audit/logging/cross-system primitive: where this port path
+        *actually* lives, independent of the session's virtual view -
+        ``file:///srv/data/x.mp4``, ``abfss://c@acct.dfs...net/x.mp4``.
+        Sync (pure string math, no I/O). The ``BackendBase`` default is
+        an opaque ``storix://`` form; backends with a real scheme
+        override. Parsing a locator back into a backend is the URI
+        factory (roadmap 0.3.0).
+        """
+        ...
+
     async def close(self) -> None:
         """Release backend resources (network clients); idempotent."""
         ...

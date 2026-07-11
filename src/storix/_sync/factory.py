@@ -79,6 +79,16 @@ def register_backend(name: str, builder: Callable[..., StorageBackend]) -> None:
     _BUILDERS[name] = builder
 
 
+def available_providers() -> tuple[str, ...]:
+    """Provider names ``get_storage`` accepts - built-ins plus plugins.
+
+    Runtime companion to the ``StorageProvider`` literal (which types the
+    built-ins for IDE completion): use this to enumerate everything
+    registered, including third-party backends.
+    """
+    return tuple(_BUILDERS)
+
+
 @overload
 def get_storage(
     provider: Literal['local'], /, **overrides: Unpack[_LocalOverrides]

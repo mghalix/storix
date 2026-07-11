@@ -100,5 +100,9 @@ class BackendBase(abc.ABC):
         del path, expires_in
         raise UnsupportedOperationError(Capability.PRESIGNED_URLS)
 
+    def locate(self, path: PurePosixPath) -> str:
+        """Opaque locator; override to expose a physical URI scheme."""
+        return f'storix://{path}'
+
     def close(self) -> None:  # noqa: B027 - optional hook, deliberately concrete
         """Release backend resources; the default is a no-op."""

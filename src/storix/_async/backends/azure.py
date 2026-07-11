@@ -117,6 +117,11 @@ class AzureBackend(BackendBase):
         """Container-relative key for a port path ('' for the root)."""
         return str(path).lstrip('/')
 
+    def locate(self, path: PurePosixPath) -> str:
+        """``abfss://`` URI (the standard ADLS Gen2 locator)."""
+        host = f'{self._account_name}.dfs.core.windows.net'
+        return f'abfss://{self.container}@{host}/{self._key(path)}'
+
     async def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
         """Stream a file's contents in chunks."""
         raw = await self.stat(path)
