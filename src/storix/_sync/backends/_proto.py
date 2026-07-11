@@ -118,9 +118,10 @@ class StorageBackend(Protocol):
         ...
 
     def du(self, path: PurePosixPath) -> int:
-        """Total size in bytes of the tree rooted at ``path``.
+        """Total content size in bytes of the tree rooted at ``path``.
 
-        For a file, its size.
+        Apparent bytes (sum of file sizes; a file reports its own size) -
+        never allocated blocks, which object stores do not have.
         """
         ...
 

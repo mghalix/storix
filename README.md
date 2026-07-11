@@ -83,17 +83,21 @@ middleware - escape-proof, with errors re-scoped so the real prefix never
 leaks to the sandboxed caller:
 
 ```python
-from storix import SandboxLayer, Storix, scratch, temporary
+from storix import SandboxLayer, Storix, temporary
 from storix.backends import LocalBackend
 
 backend = LocalBackend('/srv/data')
-jailed = Storix(SandboxLayer(backend, root='/tenant-42'))
+fs = Storix(SandboxLayer(backend, root='/tenant-42'))   # escape-proof jail
 
-with temporary() as fs:                         # self-destructing local workspace
-    fs.echo(b'scratch', '/tmp.txt')
+with fs.scratch() as tmp:               # ephemeral workspace on fs's OWN
+    tmp.echo(b'work', '/notes.txt')     # backend (any backend) - unique
+                                        # subtree, deleted on exit
 
-with scratch(backend, root='/agent-7') as fs:   # pinned workspace, any backend
-    ...
+with fs.scratch(root='/agent-7') as tmp:  # pinned: created if missing,
+    ...                                   # reused, PERSISTS on exit
+
+with temporary() as fs:                 # local-only convenience: zero-config
+    fs.echo(b'scratch', '/tmp.txt')     # mkdtemp on real disk, self-destructs
 ```
 
 Custom layers (e.g. minting public URLs for a backend that can't) are a

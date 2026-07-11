@@ -71,3 +71,20 @@ aware datetimes — an inconsistency the old providers ship today. The new port
 should standardize on UTC-aware datetimes in `RawStat`, enforced by ruff's
 `DTZ` rules. Decide when implementing the backends; legacy code is exempt
 (it is deleted, not fixed).
+
+## Layer composition DX (`layers=[...]` vs `.wrap()` chaining)
+
+**What:** nested layer construction (`Storix(CacheLayer(SandboxLayer(
+backend, root=...)))`) reads inside-out. Candidate ergonomics once
+multiple layers exist:
+
+- `Storix(backend, layers=[...])` taking layer *factories*
+  (`Callable[[StorageBackend], StorageBackend]`, e.g.
+  `partial(SandboxLayer, root='/x')`), applied left-to-right;
+- `.wrap()` chaining on `BackendBase`/layers:
+  `LocalBackend('x').wrap(SandboxLayer, root='/t').wrap(CacheLayer)`.
+
+**Trigger:** deliberately deferred until a second shipped layer exists
+(CacheLayer/MetadataLayer, 0.4.0). With one layer, nesting is shallow
+and choosing an API shape now would be guessing at usage patterns; the
+wrong convenience API is harder to remove than nesting is to read.

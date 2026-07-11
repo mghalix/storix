@@ -219,7 +219,13 @@ class Storix:
         return to_data_url(buf=await self._backend.read(self._resolve(path)))
 
     async def du(self, path: StrPathLike | None = None) -> int:
-        """Total size in bytes of the tree rooted at ``path``."""
+        """Total *content* size in bytes of the tree rooted at ``path``.
+
+        Apparent bytes, like ``du -sb`` on files: the sum of file sizes.
+        GNU du's default output differs by design - it counts allocated
+        filesystem blocks and directory entries, concepts that do not
+        exist on object stores.
+        """
         return await self._backend.du(self._resolve(path))
 
     async def exists(self, path: StrPathLike | None = None) -> bool:
@@ -296,7 +302,13 @@ class Storix:
     async def mkdir(
         self, path: StrPathLike, /, *paths: StrPathLike, parents: bool = False
     ) -> None:
-        """Create directories (``parents=True`` behaves like mkdir -p)."""
+        """Create directories.
+
+        ``parents=True`` is ``mkdir -p`` with both of its unix meanings:
+        missing ancestors are created *and* an already-existing directory
+        is a silent success (an existing file still raises). Plain mkdir
+        raises ``AlreadyExistsError`` on any existing target.
+        """
         targets = [self._resolve(p) for p in (path, *paths)]
         await gather(
             *(self._backend.make_dir(target, parents=parents) for target in targets)
