@@ -22,6 +22,9 @@ class Entry(NamedTuple):
     is_dir: bool
     """True when the entry is a directory."""
 
+    size: int | None = None
+    """Size in bytes when the listing provides it for free; else None."""
+
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class RawStat:

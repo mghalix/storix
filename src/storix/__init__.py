@@ -58,11 +58,9 @@ def __getattr__(name: str) -> Any:
 
 
 if TYPE_CHECKING:
-    from . import errors
     from .factory import get_storage
     from .providers.azure import AzureDataLake
     from .providers.local import LocalFilesystem
-    from .types import AvailableProviders, StorixPath, StrPathLike
 
 
 def __dir__() -> list[str]:

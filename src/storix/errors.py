@@ -96,6 +96,18 @@ class PermissionDeniedError(_PathError, builtins.PermissionError):
     _errno = errno.EACCES
 
 
+class DirectoryNotEmptyError(_PathError, OSError):
+    """A directory that was expected to be empty has children.
+
+    Raised by ``delete`` on a non-empty directory (``delete`` removes
+    leaves only - files or empty directories). Also caught by
+    ``except OSError``.
+    """
+
+    _template = "directory not empty: '{path}'"
+    _errno = errno.ENOTEMPTY
+
+
 class UnsupportedOperationError(StorageError):
     """The backend does not support the requested feature.
 
