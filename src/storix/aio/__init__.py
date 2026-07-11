@@ -5,33 +5,39 @@ Identical names to the sync package; every operation is awaitable.
 
 from storix import errors
 from storix._async import (
-    PassthroughLayer,
+    DataUrlLayer,
+    LayerBase,
+    MetadataLayer,
     SandboxLayer,
     Storix,
     get_storage,
+    register_backend,
     scratch,
     temporary,
+    when_missing,
 )
 from storix.enums import Capability, PathKind
 from storix.models import Capabilities, Entry, FileProperties, RawStat
-from storix.types import AvailableProviders, StorixPath, StrPathLike
+from storix.types import StorageProvider, StorixPath, StrPathLike
 
 
 __all__ = (
-    'AvailableProviders',
     'Capabilities',
     'Capability',
+    'DataUrlLayer',
     'Entry',
     'FileProperties',
-    'PassthroughLayer',
-    'PathKind',
-    'RawStat',
+    'LayerBase',
+    'MetadataLayer',
     'SandboxLayer',
+    'StorageProvider',
     'Storix',
     'StorixPath',
     'StrPathLike',
     'errors',
     'get_storage',
+    'register_backend',
     'scratch',
     'temporary',
+    'when_missing',
 )

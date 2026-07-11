@@ -60,6 +60,8 @@ def _build_azure(**overrides: Any) -> StorageBackend:
     )
 
 
+# keyed by str, not the built-in Literal: third-party providers register
+# arbitrary names (the whole point of register_backend)
 _BUILDERS: dict[str, Callable[..., StorageBackend]] = {
     'local': _build_local,
     'azure': _build_azure,

@@ -11,8 +11,10 @@ the async source of truth. Breaking release.
 - `MemoryBackend` (dict-backed reference backend) alongside `LocalBackend`
   and the HNS-only `AzureBackend`.
 - Layers - backends that wrap backends: `SandboxLayer` (chroot as
-  middleware) ships; custom layers are a supported extension point
-  (see `samples/layers/`).
+  middleware), `DataUrlLayer` and `MetadataLayer` (portable capabilities
+  - url() and custom metadata on backends that lack them natively), and
+  `LayerBase` for writing your own. `when_missing`/`with_layer(unless=)`
+  prefer native capabilities so one construction path spans providers.
 - `temporary()` and `scratch(backend, root=...)` disposable/pinned
   workspaces; `fs.scratch()` on any session.
 - Capabilities with typed gates: `content_type`, `custom_metadata`

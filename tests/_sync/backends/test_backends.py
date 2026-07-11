@@ -19,7 +19,7 @@ import pytest
 from storix._sync.backends import StorageBackend
 from storix._sync.backends.local import LocalBackend
 from storix._sync.backends.memory import MemoryBackend
-from storix._sync.layers import SandboxLayer
+from storix._sync.layers import DataUrlLayer, MetadataLayer, SandboxLayer
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -36,6 +36,8 @@ from storix.types import EchoMode
         'memory',
         'local',
         'sandbox',
+        'metadata',
+        'dataurl',
         pytest.param('azure', marks=pytest.mark.integration),
     ]
 )
@@ -51,6 +53,14 @@ def backend(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[StorageB
         inner = MemoryBackend()
         inner.make_dir(P('/jail'), parents=False)
         yield SandboxLayer(inner, root='/jail')
+        return
+    if request.param == 'metadata':
+        # sidecar metadata over a backend that lacks it natively; the
+        # hidden sidecar must not disturb any listing/du/stat contract
+        yield MetadataLayer(LocalBackend(tmp_path))
+        return
+    if request.param == 'dataurl':
+        yield DataUrlLayer(MemoryBackend())
         return
 
     account = os.environ.get('ADLSG2_ACCOUNT_NAME')
@@ -267,7 +277,9 @@ def test_make_url_respects_capability(backend: StorageBackend):
     put(backend, '/u.txt', b'x')
     if backend.capabilities.presigned_urls:
         url = backend.make_url(P('/u.txt'), expires_in=60)
-        assert url.startswith('https://')
+        # the contract is 'a URL string' - scheme is provider-specific
+        # (https for SAS, data: for the data-url layer)
+        assert ('://' in url) or url.startswith('data:')
     else:
         with pytest.raises(UnsupportedOperationError):
             backend.make_url(P('/u.txt'), expires_in=60)

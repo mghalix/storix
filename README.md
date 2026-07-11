@@ -100,8 +100,9 @@ with temporary() as fs:                 # local-only convenience: zero-config
     fs.echo(b'scratch', '/tmp.txt')     # mkdtemp on real disk, self-destructs
 ```
 
-Custom layers (e.g. minting public URLs for a backend that can't) are a
-supported pattern: see [samples/layers/](./samples/layers/).
+Write your own layers by subclassing `LayerBase` (override what you
+change, upgrade the capabilities you add) — see
+[samples/layers/](./samples/layers/).
 
 ## Capabilities
 
@@ -115,6 +116,25 @@ fs.url('/f.png', expires_in=600)                        # presigned (SAS)
 fs.data_url('/f.png')                                   # any backend
 # unsupported -> UnsupportedOperationError naming the missing capability
 ```
+
+**Portable capabilities via layers.** Bundled layers backfill missing
+capabilities so one construction path works across providers —
+`unless=` (or `when_missing`) skips the layer where the backend is
+already native:
+
+```python
+from storix import DataUrlLayer, MetadataLayer, Capability
+
+# url() everywhere: native SAS on azure, data: URLs on local
+fs = get_storage('local').with_layer(
+    DataUrlLayer, unless=Capability.PRESIGNED_URLS
+)
+# custom metadata everywhere: native on azure, JSON sidecar on local
+fs = fs.with_layer(MetadataLayer, unless=Capability.CUSTOM_METADATA)
+```
+
+Switching `'local'` to `'azure'` needs no code change — the native
+capability wins and the layer becomes a no-op.
 
 ## Backends
 

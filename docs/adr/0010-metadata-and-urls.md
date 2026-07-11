@@ -22,3 +22,11 @@ MetadataLayer (deferred-decisions.md).
 ## Consequences
 One semantics for every backend, conformance-tested (including on the
 Azure wire); requests are minimal by construction.
+
+## Update (0.2.0): set_metadata clears with {}, never None
+
+`set_metadata(path, metadata)` takes a required `Mapping` - `{}` clears.
+`None` is deliberately rejected (it is not in the type): across the API
+`None` means *preserve* (write/append leaves metadata untouched), so
+letting it also mean *clear* here would give one value two opposite
+meanings. `{}` is the single unambiguous clear signal everywhere.

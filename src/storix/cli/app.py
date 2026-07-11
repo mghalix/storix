@@ -9,7 +9,7 @@ from rich.text import Text
 
 import storix as sx
 
-from storix.types import AvailableProviders, StorixPath
+from storix.types import StorageProvider, StorixPath
 
 
 app = typer.Typer(
@@ -25,7 +25,7 @@ fs = sx.get_storage()
 
 
 def get_fs_with_provider(
-    provider: AvailableProviders | str | None = None,
+    provider: StorageProvider | str | None = None,
 ) -> sx.Storage:
     """Get filesystem instance with optional provider override."""
     if provider:

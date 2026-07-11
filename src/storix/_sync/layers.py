@@ -7,24 +7,38 @@ layers compose with backends and with each other. Cross-cutting concerns
 (sandboxing now; caching, metadata, observability later) live here
 rather than inside the core or any backend.
 """
+# ruff: noqa: A004 - storix error classes intentionally shadow stdlib names
 
 from __future__ import annotations
+
+import dataclasses
+import json
 
 from typing import TYPE_CHECKING
 
 from storix import pathops
-from storix.errors import PathError, PermissionDeniedError
+from storix._sync._stream import ensure_chunks
+from storix.enums import PathKind
+from storix.errors import (
+    IsADirectoryError,
+    PathError,
+    PathNotFoundError,
+    PermissionDeniedError,
+)
 from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from pathlib import PurePosixPath
 
+    from storix.enums import Capability
     from storix.models import Capabilities, Entry, RawStat
     from storix.types import EchoMode, StrPathLike
 
     from .backends import StorageBackend
+
+    LayerFactory = Callable[[StorageBackend], StorageBackend]
 
 
 _ROOT = StorixPath('/')
@@ -195,7 +209,7 @@ class SandboxLayer:
         self._inner.close()
 
 
-class PassthroughLayer:
+class LayerBase:
     """Base class for custom layers: full delegation, override what matters.
 
     Unlike ``__getattr__``-based delegation, every port method is written
@@ -203,6 +217,9 @@ class PassthroughLayer:
     *statically* - type checkers accept them anywhere a backend goes.
     Override the operations your layer changes, and reassign
     ``capabilities`` (e.g. via ``dataclasses.replace``) when it adds one.
+
+    Used unsubclassed it is a harmless pure passthrough - occasionally
+    useful for measuring layer overhead, never required.
     """
 
     capabilities: Capabilities
@@ -280,3 +297,200 @@ class PassthroughLayer:
     def close(self) -> None:
         """Release the inner backend's resources."""
         self._inner.close()
+
+
+def when_missing(capability: Capability, layer: LayerFactory) -> LayerFactory:
+    """Apply ``layer`` only when the backend lacks ``capability``.
+
+    The native-preference combinator: the same construction code works
+    across providers, wrapping capability-poor backends and
+    short-circuiting entirely (zero overhead, native behavior) on
+    backends that already advertise the capability::
+
+        Storix(backend, layers=[when_missing(Capability.PRESIGNED_URLS, DataUrlLayer)])
+
+    Prefer-the-layer is expressed by not using the combinator.
+    """
+
+    def build(backend: StorageBackend) -> StorageBackend:
+        if backend.capabilities.supports(capability):
+            return backend
+        return layer(backend)
+
+    return build
+
+
+class DataUrlLayer(LayerBase):
+    """``url()`` everywhere, via ``data:`` URLs.
+
+    Upgrades ``presigned_urls`` by inlining the entire file as base64
+    into the URL itself. Fine for small assets and HTML embedding;
+    *terrible* for LLM/agent contexts (a 1 MiB file becomes a ~1.4 M
+    character URL) and for anything large. Prefer native presigned URLs
+    when the backend has them::
+
+        fs.with_layer(DataUrlLayer, unless=Capability.PRESIGNED_URLS)
+
+    ``expires_in`` is ignored - data URLs cannot expire (the advisory
+    contract permits this).
+    """
+
+    def __init__(self, backend: StorageBackend) -> None:
+        super().__init__(backend)
+        self.capabilities = dataclasses.replace(
+            backend.capabilities, presigned_urls=True
+        )
+
+    def make_url(self, path: PurePosixPath, *, expires_in: int | None = None) -> str:
+        """Inline the file as a base64 ``data:`` URL."""
+        del expires_in  # data URLs cannot expire
+        from storix.utils import to_data_url
+
+        return to_data_url(buf=self._inner.read(path))
+
+
+class MetadataLayer(LayerBase):
+    """Custom metadata for backends without native support, via a sidecar.
+
+    Upgrades ``custom_metadata`` by keeping a hidden JSON table
+    (``/.storix-meta.json``) *inside the wrapped backend itself*, so it
+    works over any backend and travels with the data. Port semantics are
+    preserved exactly (replace; ``{}`` clears; ``None`` preserves on
+    append) - the conformance suite runs against this layer.
+
+    Honest limits: the sidecar is last-writer-wins under concurrent
+    writers; every stat/metadata operation costs one extra sidecar read;
+    external writes that bypass the layer leave stale entries (a delete
+    through the layer cleans up). ``copy`` does not carry metadata, per
+    the port contract. Prefer native metadata when available::
+
+        fs.with_layer(MetadataLayer, unless=Capability.CUSTOM_METADATA)
+    """
+
+    _SIDECAR = StorixPath('/.storix-meta.json')
+
+    def __init__(self, backend: StorageBackend) -> None:
+        super().__init__(backend)
+        self.capabilities = dataclasses.replace(
+            backend.capabilities, custom_metadata=True
+        )
+
+    def _load(self) -> dict[str, dict[str, str]]:
+        try:
+            raw = self._inner.read(self._SIDECAR)
+        except PathNotFoundError:
+            return {}
+        return json.loads(raw) if raw else {}
+
+    def _save(self, table: dict[str, dict[str, str]]) -> None:
+        if table:
+            payload = json.dumps(table).encode()
+            self._inner.write(
+                self._SIDECAR, ensure_chunks(payload), mode='w', content_type=None
+            )
+        elif self._inner.exists(self._SIDECAR):
+            self._inner.delete(self._SIDECAR)
+
+    def write(
+        self,
+        path: PurePosixPath,
+        data: Iterator[bytes],
+        *,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write content, then maintain the sidecar per port semantics."""
+        self._inner.write(path, data, mode=mode, content_type=content_type)
+        key = str(path)
+        if metadata is None and mode == 'a':
+            return  # None preserves on append
+        table = self._load()
+        if metadata:
+            table[key] = dict(metadata)
+        else:  # create/truncate without metadata, or explicit {} clear
+            table.pop(key, None)
+        self._save(table)
+
+    def stat(self, path: PurePosixPath) -> RawStat:
+        """Merge sidecar metadata into the inner stat."""
+        if path == self._SIDECAR:  # the sidecar is invisible to consumers
+            raise PathNotFoundError(path)
+        raw = self._inner.stat(path)
+        if raw.kind is not PathKind.FILE:
+            return raw
+        table = self._load()
+        stored = table.get(str(path))
+        return dataclasses.replace(raw, metadata=dict(stored) if stored else None)
+
+    def exists(self, path: PurePosixPath) -> bool:
+        """Whether anything lives at ``path`` (the sidecar reads absent)."""
+        if path == self._SIDECAR:
+            return False
+        return self._inner.exists(path)
+
+    def read_stream(self, path: PurePosixPath) -> Iterator[bytes]:
+        """Stream a file's contents (the sidecar is not readable)."""
+        if path == self._SIDECAR:
+            raise PathNotFoundError(path)
+        yield from self._inner.read_stream(path)
+
+    def list_dir(self, path: PurePosixPath) -> Iterator[Entry]:
+        """Yield children, hiding the sidecar from its parent directory."""
+        for entry in self._inner.list_dir(path):
+            if path / entry.name != self._SIDECAR:
+                yield entry
+
+    def du(self, path: PurePosixPath) -> int:
+        """Tree size excluding the sidecar (walks via this layer)."""
+        from .backends import generic
+
+        return generic.du(self, path)
+
+    def set_metadata(self, path: PurePosixPath, metadata: Mapping[str, str]) -> None:
+        """Replace a file's metadata in the sidecar."""
+        raw = self._inner.stat(path)  # raises for missing paths
+        if raw.kind is not PathKind.FILE:
+            raise IsADirectoryError(path)
+        table = self._load()
+        if metadata:
+            table[str(path)] = dict(metadata)
+        else:
+            table.pop(str(path), None)
+        self._save(table)
+
+    def delete(self, path: PurePosixPath) -> None:
+        """Delete the leaf and drop its sidecar entry."""
+        self._inner.delete(path)
+        table = self._load()
+        if table.pop(str(path), None) is not None:
+            self._save(table)
+
+    def delete_tree(self, path: PurePosixPath) -> None:
+        """Delete the tree and every sidecar entry beneath it."""
+        self._inner.delete_tree(path)
+        prefix = str(path).rstrip('/') + '/'
+        table = self._load()
+        kept = {
+            key: value
+            for key, value in table.items()
+            if key != str(path) and not key.startswith(prefix)
+        }
+        if kept != table:
+            self._save(kept)
+
+    def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
+        """Move content and re-key sidecar entries (trees included)."""
+        self._inner.move(src, dst)
+        src_key, dst_key = str(src), str(dst)
+        src_prefix = src_key.rstrip('/') + '/'
+        table = self._load()
+        moved: dict[str, dict[str, str]] = {}
+        for key in list(table):
+            if key == src_key:
+                moved[dst_key] = table.pop(key)
+            elif key.startswith(src_prefix):
+                moved[dst_key + key.removeprefix(src_key)] = table.pop(key)
+        if moved:
+            table.update(moved)
+            self._save(table)

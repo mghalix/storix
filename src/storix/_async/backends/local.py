@@ -55,6 +55,17 @@ class LocalBackend(BackendBase):
         self._base = Path(base).expanduser().resolve()
         self._base.mkdir(parents=True, exist_ok=True)
 
+    @property
+    def base(self) -> Path:
+        """The real OS directory where port path ``/`` is anchored.
+
+        This is namespace configuration, not session state: the backend
+        stays stateless. A session's ``pwd``/``home`` (which start at the
+        virtual ``/``) live on ``Storix``, deliberately independent of
+        where that ``/`` physically resolves.
+        """
+        return self._base
+
     def _to_os(self, path: PurePosixPath) -> Path:
         return self._base.joinpath(*path.parts[1:])
 

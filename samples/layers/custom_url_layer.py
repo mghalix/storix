@@ -3,7 +3,7 @@
 A layer is a backend that wraps a backend - it implements the same
 StorageBackend protocol it consumes, so it composes with any backend
 and with other layers (SandboxLayer included). Subclass
-``PassthroughLayer``, which delegates every port method explicitly so
+``LayerBase``, which delegates every port method explicitly so
 your class satisfies the protocol *statically* (type checkers accept it
 anywhere a backend goes), then:
 
@@ -26,20 +26,18 @@ import hashlib
 
 from pathlib import PurePosixPath
 
-from storix.aio import PassthroughLayer, Storix
+from storix.aio import LayerBase, Storix
 from storix.aio.backends import MemoryBackend, StorageBackend
 
 
-class PublicUrlLayer(PassthroughLayer):
+class PublicUrlLayer(LayerBase):
     """Give any backend presigned-URL powers via an external service."""
 
     def __init__(self, inner: StorageBackend) -> None:
         super().__init__(inner)
         # the crucial move: advertise what the wrapper adds, so
         # Storix.url() opens its capability gate
-        self.capabilities = dataclasses.replace(
-            inner.capabilities, presigned_urls=True
-        )
+        self.capabilities = dataclasses.replace(inner.capabilities, presigned_urls=True)
 
     async def make_url(
         self, path: PurePosixPath, *, expires_in: int | None = None

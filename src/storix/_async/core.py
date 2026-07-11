@@ -23,7 +23,6 @@ from storix.types import StorixPath
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Mapping
     from contextlib import AbstractAsyncContextManager
-    from types import TracebackType
 
     from storix._async.backends import StorageBackend
     from storix.types import AsyncDataBuffer, EchoMode, StrPathLike
@@ -97,12 +96,7 @@ class Storix:
     async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
+    async def __aexit__(self, *_: object) -> None:
         await self.close()
 
     def chroot(self, path: StrPathLike, /) -> Self:
@@ -118,13 +112,25 @@ class Storix:
 
         return type(self)(SandboxLayer(self._backend, root=self._resolve(path)))
 
-    def with_layer(self, layer: LayerFactory, /) -> Self:
+    def with_layer(
+        self, layer: LayerFactory, /, *, unless: Capability | None = None
+    ) -> Self:
         """Return a *new* session over this backend wrapped in ``layer``.
 
         The current session is untouched; the new one starts fresh at its
         home (a live cwd may not exist inside the new namespace). Post-
         construction counterpart of the ``layers=`` constructor argument.
+
+        ``unless`` expresses native-preference: skip the layer when the
+        backend already advertises that capability, so one construction
+        path works across providers -
+        ``fs.with_layer(DataUrlLayer, unless=Capability.PRESIGNED_URLS)``
+        wraps a local backend but leaves Azure's native SAS untouched.
         """
+        if unless is not None:
+            from .layers import when_missing
+
+            layer = when_missing(unless, layer)
         return type(self)(layer(self._backend), home=self._home)
 
     def scratch(

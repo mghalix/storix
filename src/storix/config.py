@@ -10,7 +10,7 @@ from typing import ClassVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from storix.types import AvailableProviders
+from storix.types import StorageProvider
 
 
 class StorixSettings(BaseSettings):
@@ -20,7 +20,7 @@ class StorixSettings(BaseSettings):
         env_prefix='STORIX_', env_file='.env', extra='ignore'
     )
 
-    provider: AvailableProviders = 'local'
+    provider: StorageProvider = 'local'
 
 
 class LocalConfig(BaseSettings):

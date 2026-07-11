@@ -9,7 +9,8 @@ and for individual decisions: `docs/adr/`.
 - [ ] CLI rewrite onto the sync core (`sx`, REPL) - the last item
 - [x] everything else: hexagonal core, codegen, backends
       (memory/local/azure wire-verified), layers, capabilities,
-      metadata/URLs, config/factory, workspaces, teardown
+      metadata/URLs, config/factory, workspaces, teardown,
+      DataUrlLayer + MetadataLayer (portable capabilities via layers)
 
 ## 0.2.x - polish
 
@@ -37,8 +38,7 @@ and for individual decisions: `docs/adr/`.
 - Agent story: capability-stripped sessions (a sandboxed session whose
   backend handle cannot unmask paths), audit/ObservabilityLayer,
   possible MCP server
-- `MetadataLayer` (sidecar metadata for capability-poor backends),
-  `CacheLayer`
+- `CacheLayer`
 - Staged-write transactions (`with fs.transaction():` - all-or-nothing
   for new writes, honestly scoped)
 

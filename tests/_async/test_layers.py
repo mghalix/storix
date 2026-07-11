@@ -5,7 +5,7 @@ import pytest
 
 from storix._async.backends import StorageBackend
 from storix._async.backends.memory import MemoryBackend
-from storix._async.layers import PassthroughLayer, SandboxLayer
+from storix._async.layers import LayerBase, SandboxLayer
 from storix.errors import PathNotFoundError
 from storix.types import EchoMode
 
@@ -35,7 +35,7 @@ def test_satisfies_protocol():
 
 
 async def test_passthrough_layer_satisfies_protocol_and_delegates():
-    base: StorageBackend = PassthroughLayer(MemoryBackend())  # static conformance
+    base: StorageBackend = LayerBase(MemoryBackend())  # static conformance
     await put(base, '/a.txt', b'through')
     assert await base.read(P('/a.txt')) == b'through'
     assert base.capabilities.custom_metadata is True  # inherited from memory
@@ -107,3 +107,95 @@ async def test_layers_compose(jailed: tuple[MemoryBackend, SandboxLayer]):
     nested = SandboxLayer(layer, root='/deeper')
     await put(nested, '/a.txt', b'twice jailed')
     assert await inner.read(P('/jail/deeper/a.txt')) == b'twice jailed'
+
+
+# --- native-preference combinator ---
+
+
+def test_when_missing_wraps_only_capability_poor_backends():
+    from storix._async.layers import DataUrlLayer, when_missing
+    from storix.enums import Capability
+
+    build = when_missing(Capability.PRESIGNED_URLS, DataUrlLayer)
+
+    # memory lacks presigned_urls -> wrapped and upgraded
+    wrapped = build(MemoryBackend())
+    assert isinstance(wrapped, DataUrlLayer)
+    assert wrapped.capabilities.presigned_urls is True
+
+    # a backend that already has it -> returned untouched (zero overhead)
+    native = DataUrlLayer(MemoryBackend())  # now advertises presigned_urls
+    assert build(native) is native
+
+
+async def test_with_layer_unless_prefers_native():
+    from storix._async import Storix
+    from storix._async.layers import DataUrlLayer
+    from storix.enums import Capability
+
+    inner = MemoryBackend()  # no presigned_urls
+    fs = Storix(inner).with_layer(DataUrlLayer, unless=Capability.PRESIGNED_URLS)
+    await fs.echo(b'x', '/a.txt')
+    assert (await fs.url('/a.txt')).startswith('data:')
+
+    # if the backend already had the capability, the layer is skipped:
+    native = DataUrlLayer(MemoryBackend())
+    fs2 = Storix(native).with_layer(DataUrlLayer, unless=Capability.PRESIGNED_URLS)
+    assert isinstance(fs2.backend, DataUrlLayer)  # only one layer, not two
+
+
+# --- DataUrlLayer ---
+
+
+async def test_dataurl_layer_makes_urls_on_any_backend():
+    from storix._async import Storix
+    from storix._async.layers import DataUrlLayer
+
+    fs = Storix(DataUrlLayer(MemoryBackend()))
+    await fs.echo(b'hello', '/a.txt')
+    url = await fs.url('/a.txt')
+    assert url.startswith('data:')
+    assert url.endswith('aGVsbG8=')  # base64('hello')
+
+
+# --- MetadataLayer sidecar ---
+
+
+async def test_metadata_layer_sidecar_is_invisible():
+    from storix._async import Storix
+    from storix._async.layers import MetadataLayer
+
+    fs = Storix(MetadataLayer(MemoryBackend()))
+    await fs.echo(b'x', '/a.txt', metadata={'owner': 'me'})
+
+    # metadata round-trips, but the sidecar never surfaces
+    assert (await fs.stat('/a.txt')).metadata == {'owner': 'me'}
+    assert await fs.ls('/', all=True) == [P('a.txt')]
+    assert not await fs.exists('/.storix-meta.json')
+    assert await fs.du('/') == 1  # sidecar bytes excluded
+
+
+async def test_metadata_layer_move_rekeys_sidecar():
+    from storix._async import Storix
+    from storix._async.layers import MetadataLayer
+
+    fs = Storix(MetadataLayer(MemoryBackend()))
+    await fs.echo(b'x', '/a.txt', metadata={'k': 'v'})
+    await fs.mv('/a.txt', '/b.txt')
+
+    assert (await fs.stat('/b.txt')).metadata == {'k': 'v'}
+    assert not await fs.exists('/a.txt')
+
+
+async def test_metadata_layer_delete_drops_sidecar_entry():
+    from storix._async import Storix
+    from storix._async.layers import MetadataLayer
+
+    inner = MemoryBackend()
+    fs = Storix(MetadataLayer(inner))
+    await fs.echo(b'x', '/a.txt', metadata={'k': 'v'})
+    await fs.rm('/a.txt')
+
+    # recreating without metadata must not resurrect the old entry
+    await fs.echo(b'y', '/a.txt')
+    assert (await fs.stat('/a.txt')).metadata is None
