@@ -118,21 +118,21 @@ fs.data_url('/f.png')                                   # any backend
 ```
 
 **Portable capabilities via layers.** Bundled layers backfill missing
-capabilities so one construction path works across providers —
-`with_layer_unless` (or the `when_missing` combinator) skips the layer
+capabilities so one construction path works across providers.
+`with_layer_missing` infers the capability from the layer and skips it
 where the backend is already native:
 
 ```python
-from storix import DataUrlLayer, MetadataLayer, Capability
+from storix import DataUrlLayer, MetadataLayer
 
 # url() everywhere: native SAS on azure, data: URLs on local
-fs = get_storage('local').with_layer_unless(
-    Capability.PRESIGNED_URLS, DataUrlLayer
-)
+fs = get_storage('local').with_layer_missing(DataUrlLayer)
 # custom metadata everywhere: native on azure, JSON sidecar on local
-fs = fs.with_layer_unless(Capability.CUSTOM_METADATA, MetadataLayer)
-# with_layer forwards typed kwargs to the layer, Starlette-style:
-fs = fs.with_layer(MetadataLayer, dumps=orjson.dumps, loads=orjson.loads)
+fs = fs.with_layer_missing(MetadataLayer)
+# with_layer forwards typed kwargs to the layer, Starlette-style
+# (serialize/deserialize are object<->bytes; orjson works, json.dumps
+# does not - it returns str):
+fs = fs.with_layer(MetadataLayer, serialize=orjson.dumps, deserialize=orjson.loads)
 ```
 
 Switching `'local'` to `'azure'` needs no code change — the native

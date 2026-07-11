@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from storix import pathops
 from storix._sync._stream import ensure_chunks
-from storix.enums import PathKind
+from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
     PathError,
@@ -31,9 +31,8 @@ from storix.types import StorixPath
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping
     from pathlib import PurePosixPath
-    from typing import Any
+    from typing import Any, ClassVar
 
-    from storix.enums import Capability
     from storix.models import Capabilities, Entry, RawStat
     from storix.types import EchoMode, StrPathLike
 
@@ -230,7 +229,14 @@ class LayerBase:
 
     Used unsubclassed it is a harmless pure passthrough - occasionally
     useful for measuring layer overhead, never required.
+
+    Set ``provides`` on a layer that backfills a capability; then
+    ``fs.with_layer_missing(TheLayer)`` needs no capability argument - it
+    is inferred (see ``DataUrlLayer``/``MetadataLayer``).
     """
+
+    provides: ClassVar[Capability | None] = None
+    """The capability this layer backfills, if any (used by native-preference)."""
 
     capabilities: Capabilities
 
@@ -343,11 +349,13 @@ class DataUrlLayer(LayerBase):
     character URL) and for anything large. Prefer native presigned URLs
     when the backend has them::
 
-        fs.with_layer_unless(Capability.PRESIGNED_URLS, DataUrlLayer)
+        fs.with_layer_missing(DataUrlLayer)  # capability inferred
 
     ``expires_in`` is ignored - data URLs cannot expire (the advisory
     contract permits this).
     """
+
+    provides = Capability.PRESIGNED_URLS
 
     def __init__(self, backend: StorageBackend) -> None:
         super().__init__(backend)
@@ -378,39 +386,41 @@ class MetadataLayer(LayerBase):
     through the layer cleans up). ``copy`` does not carry metadata, per
     the port contract. Prefer native metadata when available::
 
-        fs.with_layer_unless(Capability.CUSTOM_METADATA, MetadataLayer)
+        fs.with_layer_missing(MetadataLayer)  # capability inferred
 
-    ``dumps``/``loads`` swap the sidecar codec (default: stdlib json) -
-    two callables, so any serializer plugs in: ``dumps=orjson.dumps``,
-    ``dumps=my_serializer.dumpb``, etc.
+    ``serialize``/``deserialize`` swap the sidecar codec (default: stdlib
+    json). They are object<->*bytes* callables (not str), so pass
+    ``orjson.dumps``/``orjson.loads`` or a custom ``.dumpb``/``.loads`` -
+    NOT ``json.dumps`` (which returns str).
     """
 
+    provides = Capability.CUSTOM_METADATA
     _SIDECAR = StorixPath('/.storix-meta.json')
 
     def __init__(
         self,
         backend: StorageBackend,
         *,
-        dumps: Callable[[Any], bytes] = json_dumpb,
-        loads: Callable[[bytes], Any] = json_loadb,
+        serialize: Callable[[Any], bytes] = json_dumpb,
+        deserialize: Callable[[bytes], Any] = json_loadb,
     ) -> None:
         super().__init__(backend)
         self.capabilities = dataclasses.replace(
             backend.capabilities, custom_metadata=True
         )
-        self._dumps = dumps
-        self._loads = loads
+        self._serialize = serialize
+        self._deserialize = deserialize
 
     def _load(self) -> dict[str, dict[str, str]]:
         try:
             raw = self._inner.read(self._SIDECAR)
         except PathNotFoundError:
             return {}
-        return self._loads(raw) if raw else {}
+        return self._deserialize(raw) if raw else {}
 
     def _save(self, table: dict[str, dict[str, str]]) -> None:
         if table:
-            payload = self._dumps(table)
+            payload = self._serialize(table)
             self._inner.write(
                 self._SIDECAR, ensure_chunks(payload), mode='w', content_type=None
             )

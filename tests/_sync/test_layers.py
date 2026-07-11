@@ -129,20 +129,27 @@ def test_when_missing_wraps_only_capability_poor_backends():
     assert build(native) is native
 
 
-def test_with_layer_unless_prefers_native():
+def test_with_layer_missing_infers_capability_and_prefers_native():
     from storix._sync import Storix
     from storix._sync.layers import DataUrlLayer
-    from storix.enums import Capability
 
     inner = MemoryBackend()  # no presigned_urls
-    fs = Storix(inner).with_layer_unless(Capability.PRESIGNED_URLS, DataUrlLayer)
+    fs = Storix(inner).with_layer_missing(DataUrlLayer)  # capability inferred
     fs.echo(b'x', '/a.txt')
     assert (fs.url('/a.txt')).startswith('data:')
 
     # if the backend already had the capability, the layer is skipped:
     native = DataUrlLayer(MemoryBackend())
-    fs2 = Storix(native).with_layer_unless(Capability.PRESIGNED_URLS, DataUrlLayer)
+    fs2 = Storix(native).with_layer_missing(DataUrlLayer)
     assert isinstance(fs2.backend, DataUrlLayer)  # only one layer, not two
+
+
+def test_with_layer_missing_rejects_layers_without_provides():
+    from storix._sync import Storix
+    from storix._sync.layers import LayerBase
+
+    with pytest.raises(ValueError, match='provides'):
+        Storix(MemoryBackend()).with_layer_missing(LayerBase)
 
 
 # --- DataUrlLayer ---
@@ -210,7 +217,9 @@ def test_metadata_layer_accepts_custom_codec():
     from storix._sync.layers import MetadataLayer
 
     rec = RecordingSerializer()
-    fs = Storix(MetadataLayer(MemoryBackend(), dumps=rec.dumps, loads=rec.loads))
+    fs = Storix(
+        MetadataLayer(MemoryBackend(), serialize=rec.dumps, deserialize=rec.loads)
+    )
     fs.echo(b'x', '/a.txt', metadata={'k': 'v'})
     assert (fs.stat('/a.txt')).metadata == {'k': 'v'}
     assert 'dumps' in rec.calls and 'loads' in rec.calls
@@ -221,9 +230,9 @@ def test_with_layer_forwards_typed_kwargs_to_the_layer():
     from storix._sync.layers import MetadataLayer
 
     rec = RecordingSerializer()
-    # dumps=/loads= are forwarded (and type-checked) straight through with_layer
+    # serialize=/deserialize= forward (and type-check) straight through with_layer
     fs = Storix(MemoryBackend()).with_layer(
-        MetadataLayer, dumps=rec.dumps, loads=rec.loads
+        MetadataLayer, serialize=rec.dumps, deserialize=rec.loads
     )
     fs.echo(b'x', '/a.txt', metadata={'k': 'v'})
     assert (fs.stat('/a.txt')).metadata == {'k': 'v'}

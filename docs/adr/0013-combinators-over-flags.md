@@ -19,7 +19,7 @@ place; combinators nest and compose.
 ## Decision
 Native-preference is a combinator, not a flag:
 `when_missing(Capability.PRESIGNED_URLS, DataUrlLayer)` for the `layers=`
-list, and `fs.with_layer_unless(capability, layer, *args, **kw)` post-construction (both ParamSpec-typed, Starlette add_middleware style).
+list, and `fs.with_layer_missing(layer, *args, **kw)` post-construction (capability inferred from the layer's `provides`; ParamSpec-typed, Starlette add_middleware style).
 Both short-circuit to the bare backend when the capability is already
 native (zero overhead), so `get_storage('local')` and
 `get_storage('azure')` take the identical construction line.

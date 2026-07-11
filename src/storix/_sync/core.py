@@ -134,32 +134,37 @@ class Storix:
         extra args/kwargs go to the layer's constructor and are checked
         against its signature::
 
-            fs.with_layer(MetadataLayer, dumps=orjson.dumps)
+            fs.with_layer(MetadataLayer, serialize=orjson.dumps)
 
         The current session is untouched; the new one starts at its home
         (a live cwd may not exist inside the new namespace). For
-        native-preference use ``with_layer_unless``.
+        native-preference use ``with_layer_missing``.
         """
         return type(self)(layer(self._backend, *args, **kwargs), home=self._home)
 
-    def with_layer_unless(
-        self,
-        capability: Capability,
-        layer: LayerFactory[P],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
+    def with_layer_missing(
+        self, layer: LayerFactory[P], /, *args: P.args, **kwargs: P.kwargs
     ) -> Self:
-        """Like ``with_layer``, but skip the layer when the backend is native.
+        """Like ``with_layer``, but skip it when the backend is already native.
 
-        Native-preference: apply ``layer`` only when the backend does
-        not already advertise ``capability``, so one construction path
-        spans providers (Azure's native SAS wins, the layer no-ops)::
+        Native-preference with the capability *inferred* from the layer's
+        ``provides`` - no redundant capability argument. One construction
+        path spans providers (Azure's native SAS wins, the layer no-ops)::
 
-            fs.with_layer_unless(Capability.PRESIGNED_URLS, DataUrlLayer)
+            fs.with_layer_missing(DataUrlLayer)  # provides PRESIGNED_URLS
+            fs.with_layer_missing(MetadataLayer)  # provides CUSTOM_METADATA
 
-        Returns the current session unchanged when the capability is native.
+        Returns the current session unchanged when the capability is
+        native. Raises ``ValueError`` if the layer declares no
+        ``provides`` (nothing to infer - use ``with_layer``).
         """
+        capability = getattr(layer, 'provides', None)
+        if capability is None:
+            msg = (
+                f'{getattr(layer, "__name__", layer)!r} declares no `provides` '
+                f'capability to infer; use with_layer() instead'
+            )
+            raise ValueError(msg)
         if self._backend.capabilities.supports(capability):
             return self
         return type(self)(layer(self._backend, *args, **kwargs), home=self._home)
