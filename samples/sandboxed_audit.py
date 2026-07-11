@@ -1,29 +1,34 @@
-"""Production pattern: sandboxed filesystems with real-path auditing.
+"""Production pattern: containers, sandboxes, and real-path auditing.
 
-The privilege split is the point:
+Three ideas, kept deliberately separate:
 
-- the *session* (handed to pipelines, agents, request handlers) sees
-  only virtual paths - its '/' IS the sandbox root;
-- the *provider* (the code that built the sandbox) keeps the layer
-  handle, and only it can translate virtual paths to real ones for
-  audit records, indexes, or cross-system references.
+- a *container* is backend configuration - ``AzureBackend('raw', ...)``
+  anchors '/' at the raw container. Three containers = three backends
+  = three independent filesystems (simulated here with MemoryBackends);
+- a *sandbox* confines a session to a directory INSIDE one filesystem -
+  it knows only its root ('/youtube'), never the container;
+- *audit records* are composed by the provider, who owns both facts:
+  the container name and the privileged path translation.
 
-Storix's core stays sandbox-unaware on purpose: give a worker `fs` and
-it cannot learn where in the wider store it lives from paths or errors.
+The privilege split: workers get sessions and see only virtual paths;
+the provider keeps the layer handle. ``fs.chroot(path)`` is the
+no-handle convenience when you just want the jail.
 
-In FastAPI the provider pair becomes a dependency:
+FastAPI wiring sketch:
 
-    def get_yt() -> tuple[Storix, SandboxLayer]:      # app.state-cached
-        backend = AzureBackend('raw', account_name=..., credential=...)
-        sandbox = SandboxLayer(backend, root='/raw/youtube')
+    @lru_cache
+    def get_yt() -> tuple[Storix, SandboxLayer]:
+        raw = AzureBackend('raw', account_name=..., credential=...)
+        sandbox = SandboxLayer(raw, root='/youtube')
         return Storix(sandbox), sandbox
 
     @app.post('/videos/{video_id}')
     async def upload(video_id: str, yt=Depends(get_yt)):
         fs, sandbox = yt
         await fs.echo(payload, f'/{video_id}.mp4')
-        await audit_store.insert(
-            path=str(sandbox.to_real(fs.resolve(f'/{video_id}.mp4')))
+        await audit.insert(
+            container='raw',                                  # provider fact
+            path=str(sandbox.to_real(fs.resolve(f'/{video_id}.mp4'))),
         )
 
 Run:  uv run python samples/sandboxed_audit.py
@@ -35,37 +40,37 @@ from storix.aio import SandboxLayer, Storix
 from storix.aio.backends import MemoryBackend, StorageBackend
 
 
-def get_youtube_fs(store: StorageBackend) -> tuple[Storix, SandboxLayer]:
-    """The provider: builds the jail, returns session + privileged handle."""
-    sandbox = SandboxLayer(store, root='/raw/youtube')
-    return Storix(sandbox), sandbox
-
-
-async def ingest_video(fs: Storix, video_id: str) -> str:
-    """A worker: sees only the virtual namespace, returns the virtual path."""
-    virtual = f'/{video_id}.mp4'
-    await fs.echo(b'...video bytes...', virtual)
-    return str(fs.resolve(virtual))
-
-
 async def main() -> None:
-    store = MemoryBackend()  # swap for AzureBackend(...) in production
-    await store.make_dir(Storix(store).resolve('/raw/youtube'), parents=True)
+    # three containers, three filesystems - in production:
+    #   {name: AzureBackend(name, account_name=..., credential=...) ...}
+    containers: dict[str, StorageBackend] = {
+        name: MemoryBackend() for name in ('raw', 'staging', 'processed')
+    }
+    raw_fs = Storix(containers['raw'])
+    staging_fs = Storix(containers['staging'])
 
-    fs, sandbox = get_youtube_fs(store)
+    # each is independent and fully usable at any time
+    await raw_fs.mkdir('/youtube')
+    await staging_fs.touch('/manifest.json')
 
-    virtual = await ingest_video(fs, 'dQw4w9WgXcQ')
-    real = sandbox.to_real(virtual)
+    # --- the audit-grade sandbox: provider keeps the handle ---
+    sandbox = SandboxLayer(containers['raw'], root='/youtube')
+    yt_fs = Storix(sandbox)
 
-    print(f'worker saw   : {virtual}')
-    print(f'audit records: {real}')
-    print(f'reconstructed: {sandbox.to_virtual(real)}')
+    await yt_fs.echo(b'...video bytes...', '/dQw4w9WgXcQ.mp4')
+    virtual = yt_fs.resolve('/dQw4w9WgXcQ.mp4')
+    print(f'worker saw    : {virtual}')
+    print(f'audit records : container=raw path={sandbox.to_real(virtual)}')
 
-    # errors are scoped too - the worker cannot learn the real prefix:
+    # --- the convenience jail: no handle, one line ---
+    yt = raw_fs.chroot('/youtube')
+    print(f'chroot ls     : {await yt.ls("/")}')
+
+    # sandboxes cannot see the wider filesystem, and errors leak nothing:
     try:
-        await fs.cat('/missing.mp4')
+        await yt.cat('/manifest.json')  # exists in staging, not in the jail
     except FileNotFoundError as err:
-        print(f'worker error : {err}')  # no '/raw/youtube' anywhere
+        print(f'jailed error  : {err}')
 
 
 if __name__ == '__main__':

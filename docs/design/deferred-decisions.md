@@ -88,3 +88,28 @@ multiple layers exist:
 (CacheLayer/MetadataLayer, 0.4.0). With one layer, nesting is shallow
 and choosing an API shape now would be guessing at usage patterns; the
 wrong convenience API is harder to remove than nesting is to read.
+
+## MountLayer: the filesystem compositor
+
+**What:** a mount-table backend routing the first path segment to child
+backends, unix-mount style:
+
+```python
+fs = Storix(MountLayer({
+    'raw': AzureBackend('raw', ...),
+    'staging': AzureBackend('staging', ...),
+    'processed': LocalBackend('~/cache'),
+}))
+await fs.cat('/raw/youtube/x.mp4')
+await fs.mv('/raw/x.mp4', '/processed/x.mp4')   # cross-backend
+```
+
+Design notes: `list_dir('/')` yields the mount names as directories;
+ops on '/' itself (delete, write) are refused; `mv`/`cp` crossing
+mounts fall back to stream-copy + delete since the generic helpers
+assume one backend; capabilities are the per-mount intersection (or
+per-path resolution - decide). ~150 lines plus conformance edge cases.
+
+**Trigger:** owner interest confirmed; sized as its own feature (0.2.x
+candidate, post CLI-rewrite) rather than a pre-release add-on. Until
+then a plain dict of sessions covers most multi-container work.

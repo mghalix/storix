@@ -107,6 +107,19 @@ class Storix:
     ) -> None:
         self.close()
 
+    def chroot(self, path: StrPathLike, /) -> Self:
+        """Return a *new* session whose root is ``path`` (resolved here).
+
+        Sugar for wrapping this session's backend in a ``SandboxLayer`` -
+        the new session cannot see or escape above ``path``, and errors
+        inside it are re-scoped to its namespace. The current session is
+        untouched. Keep an explicit ``SandboxLayer`` instead when you
+        need the privileged ``to_real``/``to_virtual`` handle (audit).
+        """
+        from .layers import SandboxLayer
+
+        return type(self)(SandboxLayer(self._backend, root=self._resolve(path)))
+
     def with_layer(self, layer: LayerFactory, /) -> Self:
         """Return a *new* session over this backend wrapped in ``layer``.
 

@@ -57,6 +57,19 @@ async def test_with_layer_returns_a_new_wrapped_session():
     assert await fs.exists('/jail/a.txt')  # original session untouched
 
 
+async def test_chroot_jails_a_new_session(fs: Storix):
+    await fs.mkdir('/jail')
+    await fs.echo(b'secret', '/top-secret.txt')
+
+    jailed = fs.chroot('/jail')
+    await jailed.touch('/inside.txt')
+
+    assert await fs.exists('/jail/inside.txt')  # same store underneath
+    assert not await jailed.exists('/top-secret.txt')  # cannot see above
+    assert not await jailed.exists('/../top-secret.txt')  # cannot escape
+    assert str(fs.pwd()) == '/'  # original untouched
+
+
 async def test_resolve_returns_session_absolute_path(fs: Storix):
     await fs.mkdir('/docs')
     await fs.cd('/docs')
