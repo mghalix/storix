@@ -37,3 +37,22 @@ Native-preference is a combinator, not a flag: `when_missing(capability,
 layer)` (for `layers=`) and `fs.with_layer_missing(layer)` (capability inferred)
 skip the layer when the backend is already native - one construction
 path works across providers, zero overhead where unneeded.
+
+## Update (0.2.0): layer construction ergonomics
+
+- `with_layer(layer, *args, **kwargs)` is a strongly-typed forwarder in
+  the Starlette `add_middleware` shape: a ParamSpec `LayerFactory[P]`
+  protocol ties the forwarded args/kwargs to the layer's constructor, so
+  a wrong kwarg is a *type error* (pyright-verified).
+- Native-preference is `with_layer_missing(layer, *args, **kwargs)`: the
+  capability is *inferred* from the layer's `provides` ClassVar
+  (DataUrlLayer -> PRESIGNED_URLS, MetadataLayer -> CUSTOM_METADATA), so
+  it is never restated at the call site. PEP 612 forbids an extra
+  keyword (`unless=`) alongside `**P.kwargs`, which is *why* the
+  capability moved onto the layer rather than the call. The
+  `when_missing(capability, factory)` combinator remains for `layers=`
+  and the rare gate-on-a-different-capability case.
+- `PassthroughLayer` -> `LayerBase` (subclassing base; a bare instance is
+  a harmless passthrough). `DataUrlLayer`, `MetadataLayer` ship as
+  concrete capability-backfilling layers; a bundled layer that adds a
+  capability sets `provides`.

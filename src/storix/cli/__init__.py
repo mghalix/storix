@@ -16,6 +16,6 @@ def main() -> None:
             '[red]Error: storix CLI is not installed.\n'
             'Install with: pip install storix[cli]'
         )
-        print(message)
+        print(message)  # noqa: T201 - CLI extra not installed; rich unavailable
         return
     cli_main()

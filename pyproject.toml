@@ -300,9 +300,6 @@ exclude = [
   "PTH",
 ]
 
-# --- transition debt: the CLI is rewritten last (see docs/design/0.2.0-handoff.md).
-"src/storix/cli/**" = ["D", "A", "BLE", "ERA", "S", "FBT", "DTZ", "T20", "TRY", "PERF", "SLF", "TC", "PYI", "PTH", "PL", "G", "ASYNC", "RUF100"]
-
 [tool.ruff.lint.isort]
 case-sensitive = true
 lines-after-imports = 2

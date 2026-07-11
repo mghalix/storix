@@ -23,3 +23,13 @@ must not import its adapters); URI-scheme factory deferred to 0.3.0.
 
 ## Consequences
 One rule derives every env var; DX is typed; plugins have a path.
+
+## Update (0.2.0): provider discovery
+
+`StorageProvider` (the Literal) types the built-ins for IDE completion;
+`available_providers()` enumerates everything registered at runtime,
+built-ins plus plugins. Two layers: closed set for typing, open set for
+discovery. The registry is str-keyed (per flavor) so third-party
+providers register arbitrary names; `get_storage(provider=...)` as a
+keyword is rejected (positional-only) so it never silently becomes a
+config override.

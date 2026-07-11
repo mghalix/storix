@@ -1,791 +1,383 @@
-from pathlib import Path
-from typing import Annotated
+"""Storix CLI: unix-like commands over any storix backend."""
+
+from __future__ import annotations
+
+import sys
+
+from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
 
 from rich.console import Console
 from rich.table import Table
-from rich.text import Text
 
-import storix as sx
+from storix import get_storage
+from storix.errors import StorageError
 
-from storix.types import StorageProvider, StorixPath
+
+if TYPE_CHECKING:
+    from storix import Storix
 
 
 app = typer.Typer(
     rich_markup_mode='rich',
-    help='Storix CLI - Unix-like filesystem commands',
+    help='Storix - unix-like filesystem commands over any backend.',
     no_args_is_help=False,
+    add_completion=False,
 )
 console = Console()
+err = Console(stderr=True)
 
 
-# Global fs instance - will be overridden by --provider flag if specified
-fs = sx.get_storage()
+class _Session:
+    """Holds the one live filesystem so state (cwd) persists across commands."""
+
+    fs: Storix | None = None
 
 
-def get_fs_with_provider(
-    provider: StorageProvider | str | None = None,
-) -> sx.Storage:
-    """Get filesystem instance with optional provider override."""
-    if provider:
-        return sx.get_storage(provider=provider)
-    return fs
+_session = _Session()
+
+
+def _fs() -> Storix:
+    if _session.fs is None:
+        _session.fs = get_storage()
+    return _session.fs
+
+
+def current_fs() -> Storix:
+    """The active session filesystem (public entry point for the shell)."""
+    return _fs()
+
+
+def use_fs(fs: Storix) -> None:
+    """Point the session at ``fs`` (public entry point for the shell)."""
+    _session.fs = fs
+
+
+def _die(cmd: str, exc: Exception) -> NoReturn:
+    err.print(f'[red]{cmd}: {exc}[/red]')
+    raise typer.Exit(1) from exc
+
+
+# --- listing / navigation ---
 
 
 @app.command()
 def ls(
-    path: Annotated[
-        Path | None,
-        typer.Argument(
-            help='A path to a directory. If not provided, lists current directory'
-        ),
-    ] = None,
+    path: Annotated[str | None, typer.Argument()] = None,
     *,
-    long: Annotated[
-        bool,
-        typer.Option('-l', '--long', help='Use long listing format'),
-    ] = False,
-    all: Annotated[
-        bool,
-        typer.Option('-a', '--all', help='Show hidden files'),
-    ] = False,
-    colors: Annotated[
-        bool,
-        typer.Option('--color/--no-color', help='Enable/disable colors'),
-    ] = True,
+    long: Annotated[bool, typer.Option('-l', '--long')] = False,
+    all_: Annotated[bool, typer.Option('-a', '--all')] = False,
 ) -> None:
-    """List directory contents."""
+    """List directory contents (hidden entries need -a)."""
+    fs = _fs()
     try:
-        files = fs.ls(path, all=all)
+        entries = fs.ls(path, all=all_, abs=True)
+    except StorageError as exc:
+        _die('ls', exc)
 
-        if not files:
-            return
+    if not long:
+        console.print(*(p.name for p in entries)) if entries else None
+        return
 
-        if long:
-            table = Table(show_header=True, header_style='bold blue')
-            table.add_column('Type')
-            table.add_column('Name')
-            table.add_column('Size')
-
-            for file in files:
-                full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore[attr-defined]
-                if fs.isdir(full_path):
-                    file_type = 'DIR'
-                    name = Text(str(file), style='bold blue') if colors else str(file)
-                    size = '-'
-                elif fs.isfile(full_path):
-                    file_type = 'FILE'
-                    name = Text(str(file), style='white') if colors else str(file)
-                    try:
-                        size = str(Path(full_path).stat().st_size)
-                    except Exception:
-                        size = '?'
-                else:
-                    file_type = '?'
-                    name = str(file)
-                    size = '?'
-
-                table.add_row(file_type, name, size)
-
-            console.print(table)
-        else:
-            colored_files = []
-            for file in files:
-                full_path = fs._topath(path) / file if path else fs.pwd() / file  # type: ignore[attr-defined]
-                if colors:
-                    if fs.isdir(full_path):
-                        colored_files.append(Text(str(file), style='bold blue'))
-                    elif fs.isfile(full_path):
-                        colored_files.append(Text(str(file), style='white'))
-                    else:
-                        colored_files.append(Text(str(file), style='dim'))
-                else:
-                    colored_files.append(Text(str(file)))
-
-            console.print(*colored_files)
-
-    except Exception as e:
-        console.print(f'[red]ls: {e}[/red]')
-        raise typer.Exit(1) from e
+    table = Table(show_header=False, box=None, pad_edge=False)
+    for entry in entries:
+        props = fs.stat(entry)
+        is_dir = props.kind == 'directory'
+        name = f'[bold blue]{entry.name}/[/bold blue]' if is_dir else entry.name
+        table.add_row('d' if is_dir else '-', str(props.size), name)
+    console.print(table)
 
 
 @app.command()
 def pwd() -> None:
-    """Print current working directory."""
-    console.print(fs.pwd())
+    """Print the working directory."""
+    console.print(str(_fs().pwd()))
 
 
 @app.command()
-def cd(
-    path: Annotated[
-        Path | None,
-        typer.Argument(help='Directory to change to. If not provided, goes to home'),
-    ] = None,
-) -> None:
-    """Change the current directory."""
+def cd(path: Annotated[str | None, typer.Argument()] = None) -> None:
+    """Change directory (no argument: home)."""
     try:
-        fs.cd(path)
-        console.print(f'Changed to: {fs.pwd()}')
-    except Exception as e:
-        console.print(f'[red]cd: {e}[/red]')
-        raise typer.Exit(1) from e
+        _fs().cd(path)
+    except StorageError as exc:
+        _die('cd', exc)
+
+
+@app.command()
+def tree(path: Annotated[str | None, typer.Argument()] = None) -> None:
+    """Print a directory tree."""
+    fs = _fs()
+
+    def walk(target: str, prefix: str = '') -> None:
+        try:
+            children = fs.ls(target, abs=True)
+        except StorageError as exc:
+            _die('tree', exc)
+        for i, child in enumerate(sorted(children, key=lambda p: p.name)):
+            last = i == len(children) - 1
+            branch = '└── ' if last else '├── '
+            is_dir = fs.isdir(child)
+            label = f'[bold blue]{child.name}[/bold blue]' if is_dir else child.name
+            console.print(f'{prefix}{branch}{label}')
+            if is_dir:
+                walk(str(child), prefix + ('    ' if last else '│   '))
+
+    root = str(fs.resolve(path))
+    console.print(f'[bold blue]{root}[/bold blue]')
+    walk(root)
+
+
+# --- creating / writing ---
 
 
 @app.command()
 def mkdir(
-    directories: Annotated[
-        list[Path],
-        typer.Argument(help='Directories to create'),
-    ],
+    directories: Annotated[list[str], typer.Argument()],
     *,
-    parents: Annotated[
-        bool,
-        typer.Option('-p', '--parents', help='Create parent directories as needed'),
-    ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            '-v', '--verbose', help='Print a message for each created directory'
-        ),
-    ] = False,
+    parents: Annotated[bool, typer.Option('-p', '--parents')] = False,
 ) -> None:
-    """Create directories."""
-    for directory in directories:
-        try:
-            fs.mkdir(directory, parents=parents)
-            if verbose:
-                console.print(f'Created directory: {directory}')
-        except Exception as e:
-            console.print(
-                f"[red]mkdir: cannot create directory '{directory}': {e}[/red]"
-            )
-            raise typer.Exit(1) from e
-
-
-@app.command()
-def rmdir(
-    directories: Annotated[
-        list[Path],
-        typer.Argument(help='Directories to remove'),
-    ],
-    *,
-    recursive: Annotated[
-        bool,
-        typer.Option(
-            '-r',
-            '--recursive',
-            help='Remove directories and their contents recursively',
-        ),
-    ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            '-v', '--verbose', help='Print a message for each removed directory'
-        ),
-    ] = False,
-) -> None:
-    """Remove directories."""
-    for directory in directories:
-        try:
-            if fs.rmdir(directory, recursive=recursive):
-                if verbose:
-                    console.print(f'Removed directory: {directory}')
-            else:
-                console.print(f"[red]rmdir: failed to remove '{directory}'[/red]")
-                raise typer.Exit(1)
-        except Exception as e:
-            console.print(f'[red]rmdir: {e}[/red]')
-            raise typer.Exit(1) from e
-
-
-@app.command()
-def touch(
-    files: Annotated[
-        list[Path],
-        typer.Argument(help='Files to create or update'),
-    ],
-) -> None:
-    """Create empty files or update timestamps."""
-    for file in files:
-        try:
-            if fs.touch(file):
-                console.print(f'Touched: {file}')
-            else:
-                console.print(f"[red]touch: failed to touch '{file}'[/red]")
-                raise typer.Exit(1)
-        except Exception as e:
-            console.print(f'[red]touch: {e}[/red]')
-            raise typer.Exit(1) from e
-
-
-@app.command()
-def rm(
-    files: Annotated[
-        list[Path],
-        typer.Argument(help='Files to remove'),
-    ],
-    *,
-    force: Annotated[
-        bool,
-        typer.Option('-f', '--force', help='Ignore nonexistent files'),
-    ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option('-v', '--verbose', help='Print a message for each removed file'),
-    ] = False,
-) -> None:
-    """Remove files."""
-    for file in files:
-        try:
-            if fs.rm(file):
-                if verbose:
-                    console.print(f'Removed: {file}')
-            else:
-                if not force:
-                    console.print(f"[red]rm: failed to remove '{file}'[/red]")
-                    raise typer.Exit(1)
-        except Exception as err:
-            if not force:
-                console.print(f'[red]rm: {err}[/red]')
-                raise typer.Exit(1) from err
-
-
-@app.command()
-def cp(
-    source: Annotated[Path, typer.Argument(help='Source file or directory')],
-    destination: Annotated[Path, typer.Argument(help='Destination file or directory')],
-    *,
-    recursive: Annotated[
-        bool,
-        typer.Option('-r', '-R', '--recursive', help='Copy directories recursively'),
-    ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option('-v', '--verbose', help='Print copied files'),
-    ] = False,
-) -> None:
-    """Copy files or directories."""
+    """Create directories (-p for parents / no error if existing)."""
     try:
-        if fs.isdir(source) and not recursive:
-            console.print(f"[red]cp: '{source}' is a directory (not copied)[/red]")
-            raise typer.Exit(1)
-
-        fs.cp(source, destination)
-        if verbose:
-            console.print(f'Copied: {source} -> {destination}')
-    except Exception as e:
-        console.print(f'[red]cp: {e}[/red]')
-        raise typer.Exit(1) from e
+        _fs().mkdir(*directories, parents=parents)
+    except StorageError as exc:
+        _die('mkdir', exc)
 
 
 @app.command()
-def mv(
-    source: Annotated[Path, typer.Argument(help='Source file or directory')],
-    destination: Annotated[Path, typer.Argument(help='Destination file or directory')],
-    *,
-    verbose: Annotated[
-        bool,
-        typer.Option('-v', '--verbose', help='Print moved files'),
-    ] = False,
-) -> None:
-    """Move/rename files or directories."""
+def touch(files: Annotated[list[str], typer.Argument()]) -> None:
+    """Create files (or refresh their mtime)."""
     try:
-        fs.mv(source, destination)
-        if verbose:
-            console.print(f'Moved: {source} -> {destination}')
-    except Exception as e:
-        console.print(f'[red]mv: {e}[/red]')
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def cat(
-    files: Annotated[
-        list[Path],
-        typer.Argument(help='Files to display'),
-    ],
-    *,
-    number: Annotated[
-        bool,
-        typer.Option('-n', '--number', help='Number output lines'),
-    ] = False,
-    binary: Annotated[
-        bool,
-        typer.Option(
-            '-b', '--binary', help='Output raw binary data (use with caution)'
-        ),
-    ] = False,
-) -> None:
-    """Display file contents."""
-    import sys
-
-    for file in files:
-        try:
-            content = fs.cat(file)
-
-            # Check if content appears to be binary
-            def is_binary(data: bytes) -> bool:
-                """Detect if data appears to be binary."""
-                if not data:
-                    return False
-                # Check for null bytes or high percentage of non-printable characters
-                null_bytes = data.count(b'\x00')
-                if null_bytes > 0:
-                    return True
-
-                try:
-                    data.decode('utf-8')
-                    return False
-                except UnicodeDecodeError:
-                    return True
-
-            if is_binary(content) and not binary:
-                console.print(
-                    f'[yellow]cat: {file}: Binary file (use --binary to force output '
-                    "or 'download' command to save)[/yellow]"
-                )
-                # Show some basic info about the file
-                console.print(f'File size: {len(content)} bytes')
-
-                # Try to identify file type by extension
-                suffix = str(file).lower()
-                if any(
-                    suffix.endswith(ext)
-                    for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
-                ):
-                    console.print(
-                        "File appears to be an image. Use 'download' command to save "
-                        'it locally.'
-                    )
-                elif any(
-                    suffix.endswith(ext)
-                    for ext in ['.pdf', '.doc', '.docx', '.zip', '.tar', '.gz']
-                ):
-                    console.print(
-                        "File appears to be a document/archive. Use 'download' command "
-                        'to save it locally.'
-                    )
-
-                continue
-
-            if binary:
-                # Output raw binary data to stdout
-                sys.stdout.buffer.write(content)
-            else:
-                # Decode as text
-                text = content.decode('utf-8', errors='replace')
-
-                if number:
-                    lines = text.splitlines()
-                    for i, line in enumerate(lines, 1):
-                        console.print(f'{i:6}\t{line}')
-                else:
-                    console.print(text, end='')
-
-        except Exception as e:
-            console.print(f'[red]cat: {file}: {e}[/red]')
-            raise typer.Exit(1) from e
+        _fs().touch(*files)
+    except StorageError as exc:
+        _die('touch', exc)
 
 
 @app.command()
 def echo(
-    text: Annotated[str, typer.Argument(help='Text to display')],
+    text: Annotated[str, typer.Argument()],
+    file: Annotated[str | None, typer.Option('-f', '--file')] = None,
     *,
-    file: Annotated[
-        Path | None,
-        typer.Option('-f', '--file', help='Write to file instead of stdout'),
-    ] = None,
-    append: Annotated[
-        bool,
-        typer.Option('-a', '--append', help='Append to file instead of overwriting'),
-    ] = False,
+    append: Annotated[bool, typer.Option('-a', '--append')] = False,
 ) -> None:
-    """Display text or write to file."""
-    if file:
-        try:
-            if append and fs.exists(file):
-                existing_content = fs.cat(file)
-                new_content = existing_content + text.encode() + b'\n'
-            else:
-                new_content = text.encode() + b'\n'
-
-            fs.touch(file, new_content)
-        except Exception as e:
-            console.print(f'[red]echo: {e}[/red]')
-            raise typer.Exit(1) from e
-    else:
+    """Print text, or write it to a file with -f."""
+    if file is None:
         console.print(text)
+        return
+    try:
+        _fs().echo(text + '\n', file, mode='a' if append else 'w')
+    except StorageError as exc:
+        _die('echo', exc)
+
+
+# --- reading ---
 
 
 @app.command()
-def exists(
-    paths: Annotated[
-        list[Path],
-        typer.Argument(help='Paths to check'),
-    ],
+def cat(
+    files: Annotated[list[str], typer.Argument()],
     *,
-    quiet: Annotated[
-        bool,
-        typer.Option(
-            '-q', '--quiet', help="Don't print messages, just return exit codes"
-        ),
+    binary: Annotated[bool, typer.Option('-b', '--binary')] = False,
+) -> None:
+    """Concatenate and print files."""
+    fs = _fs()
+    try:
+        data = fs.cat(*files)
+    except StorageError as exc:
+        _die('cat', exc)
+
+    if binary:
+        sys.stdout.buffer.write(data)
+        return
+    if b'\x00' in data:
+        err.print(f'[yellow]cat: binary file ({len(data)} bytes); use -b[/yellow]')
+        return
+    console.print(data.decode(errors='replace'), end='')
+
+
+@app.command()
+def stat(path: Annotated[str, typer.Argument()]) -> None:
+    """Show a path's properties."""
+    try:
+        console.print(str(_fs().stat(path)))
+    except StorageError as exc:
+        _die('stat', exc)
+
+
+@app.command()
+def du(path: Annotated[str | None, typer.Argument()] = None) -> None:
+    """Total size in bytes of a tree (apparent content bytes)."""
+    fs = _fs()
+    try:
+        console.print(f'{fs.du(path)}\t{fs.resolve(path)}')
+    except StorageError as exc:
+        _die('du', exc)
+
+
+@app.command()
+def url(
+    path: Annotated[str, typer.Argument()],
+    *,
+    data: Annotated[
+        bool, typer.Option('--data', help='inline base64 data: URL')
     ] = False,
 ) -> None:
-    """Check if files or directories exist."""
-    all_exist = True
-    for path in paths:
-        try:
-            if fs.exists(path):
-                if not quiet:
-                    console.print(f'[green]✓[/green] {path} exists')
-            else:
-                if not quiet:
-                    console.print(f'[red]✗[/red] {path} does not exist')
-                all_exist = False
-        except Exception as e:
-            if not quiet:
-                console.print(f'[red]exists: {e}[/red]')
-            all_exist = False
+    """Print a shareable URL (presigned by default; --data for a data: URL)."""
+    fs = _fs()
+    try:
+        console.print(fs.data_url(path) if data else fs.url(path))
+    except StorageError as exc:
+        _die('url', exc)
 
-    if not all_exist:
+
+# --- removing ---
+
+
+@app.command()
+def rm(
+    files: Annotated[list[str], typer.Argument()],
+    *,
+    recursive: Annotated[bool, typer.Option('-r', '-R', '--recursive')] = False,
+    force: Annotated[bool, typer.Option('-f', '--force')] = False,
+) -> None:
+    """Remove files; -r for directories/trees."""
+    fs = _fs()
+    try:
+        fs.rm(*files, recursive=recursive)
+    except StorageError as exc:
+        if not force:
+            _die('rm', exc)
+
+
+@app.command()
+def rmdir(directories: Annotated[list[str], typer.Argument()]) -> None:
+    """Remove empty directories (use rm -r for non-empty)."""
+    try:
+        _fs().rmdir(*directories)
+    except StorageError as exc:
+        _die('rmdir', exc)
+
+
+# --- moving / copying ---
+
+
+@app.command()
+def cp(
+    paths: Annotated[list[str], typer.Argument()],
+    *,
+    recursive: Annotated[bool, typer.Option('-r', '-R', '--recursive')] = False,
+) -> None:
+    """Copy; the last argument is the destination (-r for directories)."""
+    try:
+        _fs().cp(*paths, recursive=recursive)
+    except (StorageError, TypeError) as exc:
+        _die('cp', exc)
+
+
+@app.command()
+def mv(paths: Annotated[list[str], typer.Argument()]) -> None:
+    """Move/rename; the last argument is the destination."""
+    try:
+        _fs().mv(*paths)
+    except (StorageError, TypeError) as exc:
+        _die('mv', exc)
+
+
+# --- queries ---
+
+
+@app.command()
+def exists(paths: Annotated[list[str], typer.Argument()]) -> None:
+    """Exit 0 only if every path exists."""
+    fs = _fs()
+    if not all(fs.exists(p) for p in paths):
         raise typer.Exit(1)
 
 
-@app.command()
-def tree(
-    path: Annotated[
-        Path | None,
-        typer.Argument(help='Directory to show tree for'),
-    ] = None,
-) -> None:
-    """Display directory tree (not implemented)."""
-    console.print('[yellow]tree: command not implemented yet[/yellow]')
-    raise typer.Exit(1)
-
-
-@app.command()
-def find(
-    path: Annotated[
-        Path | None,
-        typer.Argument(help='Starting directory for search'),
-    ] = None,
-    *,
-    name: Annotated[
-        str | None,
-        typer.Option('-name', help='Find files with this name pattern'),
-    ] = None,
-    type: Annotated[
-        str | None,
-        typer.Option('-type', help='Find files of this type (f=file, d=directory)'),
-    ] = None,
-) -> None:
-    """Find files and directories (basic implementation)."""
-    start_path = Path(path or fs.pwd())
-
-    try:
-
-        def search_recursive(
-            current_path: Path,
-            pattern: str | None = None,
-            file_type: str | None = None,
-        ) -> list[StorixPath]:
-            """Recursively search for files matching a pattern."""
-            results: list[Path] = []
-            current_path = current_path
-            try:
-                items = fs.ls(current_path)
-                for item in items:
-                    item_path = current_path / item
-
-                    # Type filtering
-                    if file_type:
-                        if file_type == 'f' and not fs.isfile(item_path):
-                            continue
-                        if file_type == 'd' and not fs.isdir(item_path):
-                            continue
-
-                    # Name filtering (simple pattern matching)
-                    if pattern and pattern not in item:
-                        if fs.isdir(item_path):
-                            results.extend(
-                                list(
-                                    map(
-                                        Path,
-                                        search_recursive(item_path, pattern, file_type),
-                                    )
-                                )
-                            )
-                        continue
-
-                    results.append(item_path)
-
-                    # Recurse into directories
-                    if fs.isdir(item_path):
-                        results.extend(
-                            list(
-                                map(
-                                    Path,
-                                    search_recursive(item_path, pattern, file_type),
-                                )
-                            )
-                        )
-
-            except Exception:
-                pass  # Skip directories we can't read
-
-            return list(map(StorixPath, results))
-
-        results = search_recursive(start_path, name, type)
-        for result in results:
-            console.print(result)
-
-    except Exception as e:
-        console.print(f'[red]find: {e}[/red]')
-        raise typer.Exit(1) from e
-
-
-@app.command()
-def wc(
-    files: Annotated[
-        list[Path],
-        typer.Argument(help='Files to count'),
-    ],
-    *,
-    lines: Annotated[
-        bool,
-        typer.Option('-l', '--lines', help='Count lines only'),
-    ] = False,
-    words: Annotated[
-        bool,
-        typer.Option('-w', '--words', help='Count words only'),
-    ] = False,
-    chars: Annotated[
-        bool,
-        typer.Option('-c', '--chars', help='Count characters only'),
-    ] = False,
-) -> None:
-    """Count lines, words, and characters in files."""
-    total_lines = total_words = total_chars = 0
-
-    for file in files:
-        try:
-            content = fs.cat(file).decode('utf-8', errors='replace')
-
-            line_count = len(content.splitlines())
-            word_count = len(content.split())
-            char_count = len(content)
-
-            total_lines += line_count
-            total_words += word_count
-            total_chars += char_count
-
-            output = []
-            if lines or (not lines and not words and not chars):
-                output.append(str(line_count))
-            if words or (not lines and not words and not chars):
-                output.append(str(word_count))
-            if chars or (not lines and not words and not chars):
-                output.append(str(char_count))
-
-            output.append(str(file))
-            console.print(' '.join(output))
-
-        except Exception as e:
-            console.print(f'[red]wc: {file}: {e}[/red]')
-            raise typer.Exit(1) from e
-
-    if len(files) > 1:
-        output = []
-        if lines or (not lines and not words and not chars):
-            output.append(str(total_lines))
-        if words or (not lines and not words and not chars):
-            output.append(str(total_words))
-        if chars or (not lines and not words and not chars):
-            output.append(str(total_chars))
-        output.append('total')
-        console.print(' '.join(output))
+# --- local <-> remote transfer ---
 
 
 @app.command()
 def download(
-    remote_path: Annotated[Path, typer.Argument(help='Remote file to download')],
-    local_path: Annotated[
-        Path | None,
-        typer.Argument(
-            help='Local destination path (defaults to filename in current directory)'
-        ),
-    ] = None,
-    *,
-    overwrite: Annotated[
-        bool,
-        typer.Option('-f', '--force', help='Overwrite existing local files'),
-    ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option('-v', '--verbose', help='Show download progress'),
-    ] = False,
+    remote: Annotated[str, typer.Argument()],
+    local: Annotated[str | None, typer.Argument()] = None,
 ) -> None:
-    """Download files from remote storage to local filesystem."""
+    """Copy a file from the storix backend to the local disk."""
+    from pathlib import Path
+
+    fs = _fs()
     try:
-        # Get the file content from remote storage
-        content = fs.cat(remote_path)
-
-        # Determine local destination
-        if local_path is None:
-            local_path = Path(remote_path.name)
-
-        # Check if local file exists
-        if local_path.exists() and not overwrite:
-            console.print(
-                f"[red]download: '{local_path}' already exists "
-                '(use --force to overwrite)[/red]'
-            )
-            raise typer.Exit(1)
-
-        # Create parent directories if needed
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Write content to local file
-        with open(local_path, 'wb') as f:
-            f.write(content)
-
-        if verbose:
-            console.print(
-                f'Downloaded {len(content)} bytes: {remote_path} -> {local_path}'
-            )
-        else:
-            console.print(f'Downloaded: {remote_path} -> {local_path}')
-
-    except Exception as e:
-        console.print(f'[red]download: {e}[/red]')
-        raise typer.Exit(1) from e
+        data = fs.cat(remote)
+    except StorageError as exc:
+        _die('download', exc)
+    dst = Path(local) if local else Path(fs.resolve(remote).name)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    console.print(f'{remote} -> {dst}')
 
 
 @app.command()
 def upload(
-    local_path: Annotated[Path, typer.Argument(help='Local file to upload')],
-    remote_path: Annotated[
-        Path | None,
-        typer.Argument(
-            help='Remote destination path (defaults to filename in current '
-            'remote directory)'
-        ),
-    ] = None,
-    *,
-    overwrite: Annotated[
-        bool,
-        typer.Option('-f', '--force', help='Overwrite existing remote files'),
-    ] = False,
-    verbose: Annotated[
-        bool,
-        typer.Option('-v', '--verbose', help='Show upload progress'),
-    ] = False,
+    local: Annotated[str, typer.Argument()],
+    remote: Annotated[str | None, typer.Argument()] = None,
 ) -> None:
-    """Upload files from local filesystem to remote storage."""
+    """Copy a file from the local disk to the storix backend."""
+    from pathlib import Path
+
+    src = Path(local)
+    if not src.is_file():
+        _die('upload', FileNotFoundError(local))
+    fs = _fs()
+    dst = remote or str(fs.pwd() / src.name)
     try:
-        # Check if local file exists
-        if not local_path.exists():
-            console.print(f"[red]upload: '{local_path}' does not exist[/red]")
-            raise typer.Exit(1)
+        fs.echo(src.read_bytes(), dst)
+    except StorageError as exc:
+        _die('upload', exc)
+    console.print(f'{local} -> {dst}')
 
-        # Determine remote destination
-        if remote_path is None:
-            remote_path = Path(fs.pwd() / local_path.name)
 
-        # Check if remote file exists
-        if not overwrite and fs.exists(remote_path):
-            console.print(
-                f"[red]upload: '{remote_path}' already exists "
-                '(use --force to overwrite)[/red]'
-            )
-            raise typer.Exit(1)
-
-        # Read local file content
-        with open(local_path, 'rb') as f:
-            content = f.read()
-
-        # Upload to remote storage
-        fs.touch(remote_path, content)
-
-        if verbose:
-            console.print(
-                f'Uploaded {len(content)} bytes: {local_path} -> {remote_path}'
-            )
-        else:
-            console.print(f'Uploaded: {local_path} -> {remote_path}')
-
-    except Exception as e:
-        console.print(f'[red]upload: {e}[/red]')
-        raise typer.Exit(1) from e
+# --- session ---
 
 
 @app.command()
 def provider() -> None:
-    """Show current storage provider information."""
-    provider_type = type(fs).__name__
-
-    if provider_type == 'LocalFilesystem':
-        console.print('[green]Current provider:[/green] Local Filesystem')
-        console.print(f'[blue]Working directory:[/blue] {fs.pwd()}')
-        console.print(f'[blue]Home directory:[/blue] {fs.home}')
-    elif provider_type == 'AzureDataLake':
-        console.print('[green]Current provider:[/green] Azure Data Lake Storage Gen2')
-        console.print(f'[blue]Current path:[/blue] {fs.pwd()}')
-        console.print(f'[blue]Home path:[/blue] {fs.home}')
-    else:
-        console.print(f'[green]Current provider:[/green] {provider_type}')
-
-    console.print(
-        '\n[dim]To switch providers, set the STORAGE_PROVIDER environment variable to '
-        "'local' or 'azure'[/dim]"
-    )
+    """Show the active backend and where it is anchored."""
+    fs = _fs()
+    console.print(f'[green]backend:[/green] {type(fs.backend).__name__}')
+    console.print(f'[green]cwd:[/green]     {fs.pwd()}')
+    console.print(f'[green]home:[/green]    {fs.home}')
+    console.print(f'[green]root uri:[/green] {fs.locate("/")}')
 
 
 @app.command()
 def shell() -> None:
-    """Start an interactive shell session."""
+    """Start the interactive shell."""
     from .shell import start_shell
 
-    start_shell()
+    start_shell(_fs())
 
 
-@app.command()
-def repl() -> None:
-    """Start an interactive shell session (alias for shell)."""
-    from .shell import start_shell
+@app.callback(invoke_without_command=True)
+def _main(
+    ctx: typer.Context,
+    *,
+    provider_: Annotated[
+        str | None, typer.Option('-p', '--provider', help='local | azure | ...')
+    ] = None,
+    interactive: Annotated[bool, typer.Option('-i', '--interactive')] = False,
+) -> None:
+    """Set up the session; launch the shell when no command is given."""
+    # rebuild only on explicit --provider, else keep the persistent session
+    # (so cwd survives across shell commands)
+    if provider_ is not None:
+        _session.fs = get_storage(provider_)
 
-    start_shell()
+    if ctx.invoked_subcommand is None or interactive:
+        from .shell import start_shell
+
+        start_shell(_fs())
 
 
 def main() -> None:
-    """Entry point for the storix Typer CLI app."""
+    """Console-script entry point (`sx`)."""
     app()
-
-
-# Add callback for when no command is provided
-@app.callback(invoke_without_command=True)
-def callback(
-    ctx: typer.Context,
-    interactive: Annotated[
-        bool,
-        typer.Option('-i', '--interactive', help='Start interactive shell session'),
-    ] = False,
-    provider: Annotated[
-        str | None,
-        typer.Option(
-            '-p', '--provider', help='Select storage provider (local or azure)'
-        ),
-    ] = None,
-) -> None:
-    """Storix CLI - Unix-like filesystem commands for local and cloud storage."""
-    # Store the provider in context for commands to use
-    ctx.obj = {'provider': provider}
-
-    if ctx.invoked_subcommand is None or interactive:
-        # No command provided or interactive flag used, start interactive shell
-        from .shell import start_shell
-
-        # Use the selected provider for the shell
-        selected_fs = get_fs_with_provider(provider)
-        start_shell(selected_fs)

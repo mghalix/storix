@@ -30,3 +30,22 @@ Azure wire); requests are minimal by construction.
 `None` means *preserve* (write/append leaves metadata untouched), so
 letting it also mean *clear* here would give one value two opposite
 meanings. `{}` is the single unambiguous clear signal everywhere.
+
+## Update (0.2.0): pluggable codec and the locate() primitive
+
+- MetadataLayer takes `serialize`/`deserialize` *callables* (object<->
+  bytes), not a shaped Serializer protocol: any codec plugs in
+  regardless of method names or str-vs-bytes convention (orjson.dumps,
+  a custom .dumpb, ...). A protocol was rejected because it forced one
+  method-name/return-type contract that real serializers (e.g. one whose
+  `dumps` returns str with `dumpb` for bytes) do not share. The params
+  are named serialize/deserialize, not dumps/loads, so the names do not
+  invite `json.dumps` (which returns str, not the required bytes).
+- `fs.locate(path)` returns a fully-qualified physical URI (file://,
+  abfss://; opaque storix:// default) - the EXTERNAL reference primitive
+  (audit logs, Storage Explorer, dedup keys), resolved through any
+  sandbox to the real path. It is deliberately NOT navigable: `resolve()`
+  is the in-program bookmark (a port path that round-trips through cd);
+  parsing a locator back into a session is the URI factory (0.3.0). The
+  in-program save/reopen pattern is (provider, config, resolve()) which
+  the caller owns.

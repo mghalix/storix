@@ -6,7 +6,7 @@ and for individual decisions: `docs/adr/`.
 
 ## 0.2.0 (release gate)
 
-- [ ] CLI rewrite onto the sync core (`sx`, REPL) - the last item
+- [x] CLI rewrite onto the sync core (`sx`, REPL)
 - [x] everything else: hexagonal core, codegen, backends
       (memory/local/azure wire-verified), layers, capabilities,
       metadata/URLs, config/factory, workspaces, teardown,
