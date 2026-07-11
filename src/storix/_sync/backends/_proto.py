@@ -63,6 +63,11 @@ class StorageBackend(Protocol):
         honored when the matching capability is set; the core never
         passes values to a backend without the capability, so others may
         ignore them.
+
+        Metadata semantics are *replace*: a provided mapping replaces the
+        stored metadata entirely, ``{}`` clears it, and ``None`` leaves
+        existing metadata untouched on append (merge is the caller's job:
+        stat, merge, write).
         """
         ...
 

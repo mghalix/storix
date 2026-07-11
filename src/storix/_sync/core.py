@@ -12,7 +12,7 @@ from storix._sync._compat import gather
 from storix._sync._stream import ensure_chunks
 from storix._sync.backends import generic
 from storix.constants import DEFAULT_URL_EXPIRY_SECONDS
-from storix.enums import PathKind
+from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
     NotADirectoryError,
@@ -105,6 +105,11 @@ class Storix:
         if raw.kind is not PathKind.DIRECTORY:
             raise NotADirectoryError(parent)
 
+    def _ensure_capability(self, capability: Capability) -> None:
+        """Raise unless the backend advertises the capability."""
+        if not self._backend.capabilities.supports(capability):
+            raise UnsupportedOperationError(capability)
+
     # --- navigation ---
 
     def cd(self, path: StrPathLike | None = None) -> Self:
@@ -171,9 +176,7 @@ class Storix:
 
         Requires ``capabilities.presigned_urls`` (Azure: a SAS URL).
         """
-        if not self._backend.capabilities.presigned_urls:
-            operation = 'presigned_urls'
-            raise UnsupportedOperationError(operation)
+        self._ensure_capability(Capability.PRESIGNED_URLS)
         return self._backend.make_url(self._resolve(path), expires_in=expires_in)
 
     def data_url(self, path: StrPathLike | None = None) -> str:
@@ -243,12 +246,10 @@ class Storix:
         ``content_type`` and ``metadata`` require the matching backend
         capability.
         """
-        if content_type is not None and not self._backend.capabilities.content_type:
-            operation = 'content_type'
-            raise UnsupportedOperationError(operation)
-        if metadata is not None and not self._backend.capabilities.custom_metadata:
-            operation = 'custom_metadata'
-            raise UnsupportedOperationError(operation)
+        if content_type is not None:
+            self._ensure_capability(Capability.CONTENT_TYPE)
+        if metadata is not None:
+            self._ensure_capability(Capability.CUSTOM_METADATA)
         target = self._resolve(path)
         self._ensure_parent(target)
         self._backend.write(

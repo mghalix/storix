@@ -4,6 +4,7 @@ import abc
 
 from typing import TYPE_CHECKING
 
+from storix.enums import Capability
 from storix.errors import UnsupportedOperationError
 from storix.models import Capabilities
 
@@ -90,8 +91,7 @@ class BackendBase(abc.ABC):
     async def make_url(self, path: PurePosixPath, *, expires_in: int) -> str:
         """Mint a presigned URL (default: unsupported)."""
         del path, expires_in
-        operation = 'presigned_urls'
-        raise UnsupportedOperationError(operation)
+        raise UnsupportedOperationError(Capability.PRESIGNED_URLS)
 
     async def close(self) -> None:  # noqa: B027 - optional hook, deliberately concrete
         """Release backend resources; the default is a no-op."""

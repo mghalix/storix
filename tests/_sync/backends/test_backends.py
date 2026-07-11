@@ -213,6 +213,31 @@ def test_metadata_absent_by_default(backend: StorageBackend):
     assert (backend.stat(P('/plain.txt'))).metadata is None
 
 
+def test_metadata_replace_semantics(backend: StorageBackend):
+    """Provided mapping replaces; None preserves on append; {} clears."""
+    if not backend.capabilities.custom_metadata:
+        pytest.skip('backend does not advertise custom_metadata')
+
+    def put_meta(data: bytes, mode: EchoMode, metadata: dict | None) -> None:
+        backend.write(
+            P('/m.txt'), _astream(data), mode=mode, content_type=None, metadata=metadata
+        )
+
+    def meta() -> dict | None:
+        raw = backend.stat(P('/m.txt'))
+        return dict(raw.metadata) if raw.metadata is not None else None
+
+    put_meta(b'x', 'w', {'a': '1', 'b': '2'})
+    put_meta(b'y', 'a', None)  # None preserves on append
+    assert meta() == {'a': '1', 'b': '2'}
+
+    put_meta(b'z', 'a', {'c': '3'})  # replace, not merge
+    assert meta() == {'c': '3'}
+
+    put_meta(b'w', 'a', {})  # empty mapping clears
+    assert meta() is None
+
+
 def test_make_url_respects_capability(backend: StorageBackend):
     put(backend, '/u.txt', b'x')
     if backend.capabilities.presigned_urls:

@@ -6,7 +6,7 @@ from typing import ClassVar, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from storix.enums import PathKind
+from storix.enums import Capability, PathKind
 
 
 class Entry(NamedTuple):
@@ -76,6 +76,10 @@ class Capabilities:
 
     presigned_urls: bool = False
     """Can mint time-limited shareable URLs (e.g. SAS) for paths."""
+
+    def supports(self, capability: Capability) -> bool:
+        """Whether the given capability is advertised."""
+        return bool(getattr(self, capability))
 
 
 class StorixBaseModel(BaseModel):

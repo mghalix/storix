@@ -16,3 +16,15 @@ class PathKind(StorixEnum):
 
     FILE = auto()
     DIRECTORY = auto()
+
+
+class Capability(StorixEnum):
+    """Optional backend features, mirroring ``Capabilities`` field names.
+
+    Raise ``UnsupportedOperationError(Capability.X)`` instead of a bare
+    string; the alignment test guarantees members and fields never drift.
+    """
+
+    CONTENT_TYPE = auto()
+    CUSTOM_METADATA = auto()
+    PRESIGNED_URLS = auto()
