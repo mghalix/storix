@@ -274,6 +274,7 @@ exclude = [
   "PLR2004", # Magic value comparisons are the point of assertions
   "SLF001",  # Tests may reach into private members
   "INP001",  # Test dirs deliberately have no __init__.py (pytest rootdir style)
+  "FBT001",  # parametrize injects arguments positionally, bools included
 ]
 "src/storix/__init__.py" = ["I001"]
 
