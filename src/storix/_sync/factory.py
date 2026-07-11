@@ -86,7 +86,9 @@ def get_storage(
     provider: Literal['azure'], /, **overrides: Unpack[_AzureOverrides]
 ) -> Storix: ...
 @overload
-def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix: ...
+def get_storage(provider: str, /, **overrides: Any) -> Storix: ...  # plugins
+@overload
+def get_storage(provider: None = None, /) -> Storix: ...  # env-driven, no kwargs
 
 
 def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
@@ -96,7 +98,14 @@ def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
     ``~/.storix``); keyword overrides beat the corresponding
     ``STORIX_<PROVIDER>_*`` environment values. Passing a literal
     provider name gets fully typed keyword completion.
+
+    The provider is positional-only: ``get_storage(provider='azure')``
+    would otherwise be silently swallowed as a config override, so it is
+    rejected both statically (no overload accepts it) and at runtime.
     """
+    if 'provider' in overrides:
+        msg = "pass the provider positionally: get_storage('azure', ...)"
+        raise ConfigurationError(msg)
     name = provider or StorixSettings().provider
     builder = _BUILDERS.get(name)
     if builder is None:

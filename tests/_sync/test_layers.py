@@ -7,7 +7,7 @@ import pytest
 
 from storix._sync.backends import StorageBackend
 from storix._sync.backends.memory import MemoryBackend
-from storix._sync.layers import SandboxLayer
+from storix._sync.layers import PassthroughLayer, SandboxLayer
 from storix.errors import PathNotFoundError
 from storix.types import EchoMode
 
@@ -33,6 +33,13 @@ def test_satisfies_protocol():
     # the annotation is the test: type checkers verify structural conformance
     layer: StorageBackend = SandboxLayer(MemoryBackend(), root='/')
     assert layer.capabilities.content_type is False
+
+
+def test_passthrough_layer_satisfies_protocol_and_delegates():
+    base: StorageBackend = PassthroughLayer(MemoryBackend())  # static conformance
+    put(base, '/a.txt', b'through')
+    assert base.read(P('/a.txt')) == b'through'
+    assert base.capabilities.custom_metadata is True  # inherited from memory
 
 
 def test_paths_are_anchored_under_root(

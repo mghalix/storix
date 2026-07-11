@@ -173,6 +173,19 @@ async def test_cat_concatenates_in_order(fs: Storix):
     assert await fs.cat('/a.txt', '/b.txt') == b'onetwo'
 
 
+async def test_stream_yields_content_in_chunks(fs: Storix):
+    await fs.echo(b'streamed payload', '/a.bin')
+    chunks = [chunk async for chunk in fs.stream('/a.bin')]
+    assert b''.join(chunks) == b'streamed payload'
+
+
+async def test_stream_concatenates_multiple_paths(fs: Storix):
+    await fs.echo(b'one', '/a.txt')
+    await fs.echo(b'two', '/b.txt')
+    joined = b''.join([c async for c in fs.stream('/a.txt', '/b.txt')])
+    assert joined == b'onetwo'
+
+
 # --- touch ---
 
 

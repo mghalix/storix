@@ -42,7 +42,10 @@ def test_azure_from_kwargs_builds_without_network():
     assert fs.backend.container == 'raw'
 
 
-def test_azure_missing_config_raises_helpfully(monkeypatch: pytest.MonkeyPatch):
+def test_azure_missing_config_raises_helpfully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)  # hermetic: a developer .env must not leak in
     for var in (
         'STORIX_AZURE_CONTAINER',
         'STORIX_AZURE_ACCOUNT_NAME',
@@ -58,7 +61,13 @@ def test_azure_missing_config_raises_helpfully(monkeypatch: pytest.MonkeyPatch):
 
 def test_unknown_provider_raises():
     with pytest.raises(ConfigurationError):
-        get_storage('carrier-pigeon')  # type: ignore[arg-type]
+        get_storage('carrier-pigeon')
+
+
+def test_keyword_provider_is_rejected_not_swallowed():
+    """provider= must never silently become a config override."""
+    with pytest.raises(ConfigurationError, match='positionally'):
+        get_storage(provider='azure')  # type: ignore[call-overload]
 
 
 def test_configuration_error_is_a_storage_error():

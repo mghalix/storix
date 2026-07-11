@@ -5,7 +5,14 @@ are under ``storix.backends`` / ``storix.aio.backends``.
 """
 
 from storix import errors
-from storix._sync import SandboxLayer, Storix, get_storage, scratch, temporary
+from storix._sync import (
+    PassthroughLayer,
+    SandboxLayer,
+    Storix,
+    get_storage,
+    scratch,
+    temporary,
+)
 from storix.enums import Capability, PathKind
 from storix.models import Capabilities, Entry, FileProperties, RawStat
 from storix.types import AvailableProviders, StorixPath, StrPathLike
@@ -17,6 +24,7 @@ __all__ = (
     'Capability',
     'Entry',
     'FileProperties',
+    'PassthroughLayer',
     'PathKind',
     'RawStat',
     'SandboxLayer',

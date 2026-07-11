@@ -197,3 +197,96 @@ class SandboxLayer:
     async def close(self) -> None:
         """Release the inner backend's resources."""
         await self._inner.close()
+
+
+class PassthroughLayer:
+    """Base class for custom layers: full delegation, override what matters.
+
+    Unlike ``__getattr__``-based delegation, every port method is written
+    out, so subclasses satisfy the ``StorageBackend`` protocol
+    *statically* - type checkers accept them anywhere a backend goes.
+    Override the operations your layer changes, and reassign
+    ``capabilities`` (e.g. via ``dataclasses.replace``) when it adds one.
+    """
+
+    capabilities: Capabilities
+
+    def __init__(self, backend: StorageBackend) -> None:
+        self._inner = backend
+        self.capabilities = backend.capabilities
+
+    async def read(self, path: PurePosixPath) -> bytes:
+        """Return the full contents of a file."""
+        return await self._inner.read(path)
+
+    async def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
+        """Stream a file's contents in chunks."""
+        async for chunk in self._inner.read_stream(path):
+            yield chunk
+
+    async def write(
+        self,
+        path: PurePosixPath,
+        data: AsyncIterator[bytes],
+        *,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write a file from a chunk stream."""
+        await self._inner.write(
+            path, data, mode=mode, content_type=content_type, metadata=metadata
+        )
+
+    async def delete(self, path: PurePosixPath) -> None:
+        """Delete a leaf: a file or an empty directory."""
+        await self._inner.delete(path)
+
+    async def list_dir(self, path: PurePosixPath) -> AsyncIterator[Entry]:
+        """Yield the direct children of a directory."""
+        async for entry in self._inner.list_dir(path):
+            yield entry
+
+    async def stat(self, path: PurePosixPath) -> RawStat:
+        """Return raw facts about a path."""
+        return await self._inner.stat(path)
+
+    async def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
+        """Create a directory."""
+        await self._inner.make_dir(path, parents=parents)
+
+    async def exists(self, path: PurePosixPath) -> bool:
+        """Whether anything lives at ``path``."""
+        return await self._inner.exists(path)
+
+    async def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
+        """Move a file or directory tree."""
+        await self._inner.move(src, dst)
+
+    async def copy(self, src: PurePosixPath, dst: PurePosixPath) -> None:
+        """Copy a single file."""
+        await self._inner.copy(src, dst)
+
+    async def delete_tree(self, path: PurePosixPath) -> None:
+        """Delete ``path`` and everything below it."""
+        await self._inner.delete_tree(path)
+
+    async def du(self, path: PurePosixPath) -> int:
+        """Total content size in bytes of the tree rooted at ``path``."""
+        return await self._inner.du(path)
+
+    async def set_metadata(
+        self, path: PurePosixPath, metadata: Mapping[str, str]
+    ) -> None:
+        """Replace a file's custom metadata."""
+        await self._inner.set_metadata(path, metadata)
+
+    async def make_url(
+        self, path: PurePosixPath, *, expires_in: int | None = None
+    ) -> str:
+        """Mint a shareable URL for a file."""
+        return await self._inner.make_url(path, expires_in=expires_in)
+
+    async def close(self) -> None:
+        """Release the inner backend's resources."""
+        await self._inner.close()

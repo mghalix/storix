@@ -23,7 +23,7 @@ from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping
     from contextlib import AbstractContextManager
     from types import TracebackType
 
@@ -212,6 +212,17 @@ class Storix:
         targets = [self._resolve(p) for p in (path, *paths)]
         parts = gather(*(self._backend.read(target) for target in targets))
         return b''.join(parts)
+
+    def stream(self, path: StrPathLike, /, *paths: StrPathLike) -> Iterator[bytes]:
+        """Stream file contents in chunks - the streaming form of ``cat``.
+
+        Multiple paths concatenate in order, chunk by chunk, in constant
+        memory however large the files: exactly what unix cat does to a
+        pipe. Feeds straight into e.g. FastAPI's ``StreamingResponse``.
+        Range reads (``head -c``/seek) are a planned port extension.
+        """
+        for target in [self._resolve(p) for p in (path, *paths)]:
+            yield from self._backend.read_stream(target)
 
     def stat(self, path: StrPathLike | None = None) -> FileProperties:
         """Return the user-facing properties of a path."""

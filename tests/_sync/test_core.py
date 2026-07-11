@@ -175,6 +175,19 @@ def test_cat_concatenates_in_order(fs: Storix):
     assert fs.cat('/a.txt', '/b.txt') == b'onetwo'
 
 
+def test_stream_yields_content_in_chunks(fs: Storix):
+    fs.echo(b'streamed payload', '/a.bin')
+    chunks = list(fs.stream('/a.bin'))
+    assert b''.join(chunks) == b'streamed payload'
+
+
+def test_stream_concatenates_multiple_paths(fs: Storix):
+    fs.echo(b'one', '/a.txt')
+    fs.echo(b'two', '/b.txt')
+    joined = b''.join(list(fs.stream('/a.txt', '/b.txt')))
+    assert joined == b'onetwo'
+
+
 # --- touch ---
 
 
