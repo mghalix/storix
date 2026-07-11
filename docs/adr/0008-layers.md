@@ -34,6 +34,6 @@ concrete layers: `DataUrlLayer` (url() via base64 data: URLs - documented
 as unfit for LLM context windows) and `MetadataLayer` (custom metadata
 via a hidden, invisible JSON sidecar inside the wrapped backend).
 Native-preference is a combinator, not a flag: `when_missing(capability,
-layer)` (for `layers=`) and `fs.with_layer(layer, unless=capability)`
+layer)` (for `layers=`) and `fs.with_layer_unless(capability, layer)`
 skip the layer when the backend is already native - one construction
 path works across providers, zero overhead where unneeded.

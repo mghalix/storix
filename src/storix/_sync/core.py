@@ -25,11 +25,22 @@ from storix.types import StorixPath
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
     from contextlib import AbstractContextManager
+    from typing import ParamSpec, Protocol
 
     from storix._sync.backends import StorageBackend
     from storix.types import DataBuffer, EchoMode, StrPathLike
 
-    LayerFactory = Callable[[StorageBackend], StorageBackend]
+    P = ParamSpec('P')
+
+    # a fully-bound layer (the layers= list): backend in, backend out
+    BoundLayer = Callable[[StorageBackend], StorageBackend]
+
+    class LayerFactory(Protocol[P]):
+        """A layer class/factory: backend first, then its own params."""
+
+        def __call__(
+            self, backend: StorageBackend, /, *args: P.args, **kwargs: P.kwargs
+        ) -> StorageBackend: ...
 
 
 _ROOT = StorixPath('/')
@@ -53,7 +64,7 @@ class Storix:
         backend: StorageBackend,
         *,
         home: StrPathLike = '/',
-        layers: Iterable[LayerFactory] = (),
+        layers: Iterable[BoundLayer] = (),
     ) -> None:
         """Open a session over ``backend``, optionally stacking layers.
 
@@ -115,40 +126,43 @@ class Storix:
         return type(self)(SandboxLayer(self._backend, root=self._resolve(path)))
 
     def with_layer(
-        self,
-        layer: Callable[..., StorageBackend],
-        /,
-        *,
-        unless: Capability | None = None,
-        **layer_kwargs: object,
+        self, layer: LayerFactory[P], /, *args: P.args, **kwargs: P.kwargs
     ) -> Self:
         """Return a *new* session over this backend wrapped in ``layer``.
 
-        The current session is untouched; the new one starts fresh at its
-        home (a live cwd may not exist inside the new namespace). Post-
-        construction counterpart of the ``layers=`` constructor argument.
+        Strongly-typed forwarder (Starlette ``add_middleware`` style):
+        extra args/kwargs go to the layer's constructor and are checked
+        against its signature::
 
-        ``**layer_kwargs`` configure the layer inline (the backend is
-        supplied for you)::
+            fs.with_layer(MetadataLayer, dumps=orjson.dumps)
 
-            fs.with_layer(MetadataLayer, serializer=orjson)
-
-        ``unless`` expresses native-preference: skip the layer when the
-        backend already advertises that capability, so one construction
-        path works across providers -
-        ``fs.with_layer(DataUrlLayer, unless=Capability.PRESIGNED_URLS)``
-        wraps a local backend but leaves Azure's native SAS untouched.
+        The current session is untouched; the new one starts at its home
+        (a live cwd may not exist inside the new namespace). For
+        native-preference use ``with_layer_unless``.
         """
-        from functools import partial
+        return type(self)(layer(self._backend, *args, **kwargs), home=self._home)
 
-        factory: LayerFactory = (
-            partial(layer, **layer_kwargs) if layer_kwargs else layer
-        )
-        if unless is not None:
-            from .layers import when_missing
+    def with_layer_unless(
+        self,
+        capability: Capability,
+        layer: LayerFactory[P],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Self:
+        """Like ``with_layer``, but skip the layer when the backend is native.
 
-            factory = when_missing(unless, factory)
-        return type(self)(factory(self._backend), home=self._home)
+        Native-preference: apply ``layer`` only when the backend does
+        not already advertise ``capability``, so one construction path
+        spans providers (Azure's native SAS wins, the layer no-ops)::
+
+            fs.with_layer_unless(Capability.PRESIGNED_URLS, DataUrlLayer)
+
+        Returns the current session unchanged when the capability is native.
+        """
+        if self._backend.capabilities.supports(capability):
+            return self
+        return type(self)(layer(self._backend, *args, **kwargs), home=self._home)
 
     def scratch(
         self, *, root: StrPathLike | None = None, prefix: str = 'scratch-'

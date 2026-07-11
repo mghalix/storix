@@ -22,22 +22,22 @@ from storix.errors import (
     PathNotFoundError,
     PermissionDeniedError,
 )
-from storix.serialization import json_serializer
+from storix.serialization import json_dumpb, json_loadb
 from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import PurePosixPath
+    from typing import Any
 
     from storix.enums import Capability
     from storix.models import Capabilities, Entry, RawStat
-    from storix.serialization import Serializer
     from storix.types import EchoMode, StrPathLike
 
     from .backends import StorageBackend
 
-    LayerFactory = Callable[[StorageBackend], StorageBackend]
+    BoundLayer = Callable[[StorageBackend], StorageBackend]
 
 
 _ROOT = StorixPath('/')
@@ -323,7 +323,7 @@ class LayerBase:
         await self._inner.close()
 
 
-def when_missing(capability: Capability, layer: LayerFactory) -> LayerFactory:
+def when_missing(capability: Capability, layer: BoundLayer) -> BoundLayer:
     """Apply ``layer`` only when the backend lacks ``capability``.
 
     The native-preference combinator: the same construction code works
@@ -353,7 +353,7 @@ class DataUrlLayer(LayerBase):
     character URL) and for anything large. Prefer native presigned URLs
     when the backend has them::
 
-        fs.with_layer(DataUrlLayer, unless=Capability.PRESIGNED_URLS)
+        fs.with_layer_unless(Capability.PRESIGNED_URLS, DataUrlLayer)
 
     ``expires_in`` is ignored - data URLs cannot expire (the advisory
     contract permits this).
@@ -390,33 +390,39 @@ class MetadataLayer(LayerBase):
     through the layer cleans up). ``copy`` does not carry metadata, per
     the port contract. Prefer native metadata when available::
 
-        fs.with_layer(MetadataLayer, unless=Capability.CUSTOM_METADATA)
+        fs.with_layer_unless(Capability.CUSTOM_METADATA, MetadataLayer)
 
-    ``serializer`` swaps the sidecar codec (default: stdlib json); pass
-    ``orjson`` or any bytes-based dumps/loads for speed or custom formats.
+    ``dumps``/``loads`` swap the sidecar codec (default: stdlib json) -
+    two callables, so any serializer plugs in: ``dumps=orjson.dumps``,
+    ``dumps=my_serializer.dumpb``, etc.
     """
 
     _SIDECAR = StorixPath('/.storix-meta.json')
 
     def __init__(
-        self, backend: StorageBackend, *, serializer: Serializer | None = None
+        self,
+        backend: StorageBackend,
+        *,
+        dumps: Callable[[Any], bytes] = json_dumpb,
+        loads: Callable[[bytes], Any] = json_loadb,
     ) -> None:
         super().__init__(backend)
         self.capabilities = dataclasses.replace(
             backend.capabilities, custom_metadata=True
         )
-        self._serializer = serializer or json_serializer
+        self._dumps = dumps
+        self._loads = loads
 
     async def _load(self) -> dict[str, dict[str, str]]:
         try:
             raw = await self._inner.read(self._SIDECAR)
         except PathNotFoundError:
             return {}
-        return self._serializer.loads(raw) if raw else {}
+        return self._loads(raw) if raw else {}
 
     async def _save(self, table: dict[str, dict[str, str]]) -> None:
         if table:
-            payload = self._serializer.dumps(table)
+            payload = self._dumps(table)
             await self._inner.write(
                 self._SIDECAR, ensure_chunks(payload), mode='w', content_type=None
             )
