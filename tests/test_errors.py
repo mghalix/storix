@@ -6,6 +6,7 @@ import pytest
 
 from storix.errors import (
     AlreadyExistsError,
+    DirectoryNotEmptyError,
     IsADirectoryError,
     NotADirectoryError,
     PathNotFoundError,
@@ -53,6 +54,13 @@ PATH_ERRORS = [
         errno.EACCES,
         f"permission denied: '{PATH}'",
         id='PermissionDeniedError',
+    ),
+    pytest.param(
+        DirectoryNotEmptyError,
+        OSError,  # no dedicated stdlib exception exists for ENOTEMPTY
+        errno.ENOTEMPTY,
+        f"directory not empty: '{PATH}'",
+        id='DirectoryNotEmptyError',
     ),
 ]
 

@@ -15,9 +15,10 @@ def make_rawstat() -> RawStat:
 
 
 def test_entry_tuple_unpacking():
-    name, is_dir = Entry('a.txt', is_dir=False)
+    name, is_dir, size = Entry('a.txt', is_dir=False)
     assert name == 'a.txt'
     assert is_dir is False
+    assert size is None
 
 
 def test_rawstat_frozen():
