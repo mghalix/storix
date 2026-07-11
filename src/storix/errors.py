@@ -17,7 +17,7 @@ class StorageError(Exception):
     """
 
 
-class _PathError(StorageError):
+class PathError(StorageError):
     """Base for errors concerning a single path.
 
     Carries the offending path as data instead of burying it in the message:
@@ -46,7 +46,7 @@ class _PathError(StorageError):
         return str(self.args[0]) if self.args else super().__str__()
 
 
-class PathNotFoundError(_PathError, FileNotFoundError):
+class PathNotFoundError(PathError, FileNotFoundError):
     """A path that was expected to exist does not.
 
     Also caught by ``except FileNotFoundError``.
@@ -56,7 +56,7 @@ class PathNotFoundError(_PathError, FileNotFoundError):
     _errno = errno.ENOENT
 
 
-class AlreadyExistsError(_PathError, FileExistsError):
+class AlreadyExistsError(PathError, FileExistsError):
     """A path that was expected to be absent already exists.
 
     Also caught by ``except FileExistsError``.
@@ -66,7 +66,7 @@ class AlreadyExistsError(_PathError, FileExistsError):
     _errno = errno.EEXIST
 
 
-class NotADirectoryError(_PathError, builtins.NotADirectoryError):
+class NotADirectoryError(PathError, builtins.NotADirectoryError):
     """A directory operation was attempted on a path that is not a directory.
 
     Also caught by ``except NotADirectoryError`` (the builtin).
@@ -76,7 +76,7 @@ class NotADirectoryError(_PathError, builtins.NotADirectoryError):
     _errno = errno.ENOTDIR
 
 
-class IsADirectoryError(_PathError, builtins.IsADirectoryError):
+class IsADirectoryError(PathError, builtins.IsADirectoryError):
     """A file operation was attempted on a path that is a directory.
 
     Also caught by ``except IsADirectoryError`` (the builtin).
@@ -86,7 +86,7 @@ class IsADirectoryError(_PathError, builtins.IsADirectoryError):
     _errno = errno.EISDIR
 
 
-class PermissionDeniedError(_PathError, builtins.PermissionError):
+class PermissionDeniedError(PathError, builtins.PermissionError):
     """The backend denied access to a path.
 
     Also caught by ``except PermissionError``.
@@ -96,7 +96,7 @@ class PermissionDeniedError(_PathError, builtins.PermissionError):
     _errno = errno.EACCES
 
 
-class DirectoryNotEmptyError(_PathError, OSError):
+class DirectoryNotEmptyError(PathError, OSError):
     """A directory that was expected to be empty has children.
 
     Raised by ``delete`` on a non-empty directory (``delete`` removes
@@ -125,7 +125,7 @@ class UnsupportedOperationError(StorageError):
         )
 
 
-_OS_ERROR_MAP: tuple[tuple[type[OSError], type[_PathError]], ...] = (
+_OS_ERROR_MAP: tuple[tuple[type[OSError], type[PathError]], ...] = (
     (FileNotFoundError, PathNotFoundError),
     (builtins.IsADirectoryError, IsADirectoryError),
     (builtins.NotADirectoryError, NotADirectoryError),
