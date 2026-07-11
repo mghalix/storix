@@ -14,9 +14,10 @@ from pathlib import Path, PurePosixPath as P
 
 import pytest
 
-from storix._async.backends import BackendBase
+from storix._async.backends import StorageBackend
 from storix._async.backends.local import LocalBackend
 from storix._async.backends.memory import MemoryBackend
+from storix._async.layers import SandboxLayer
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -31,17 +32,24 @@ from storix.types import EchoMode
     params=[
         'memory',
         'local',
+        'sandbox',
         pytest.param('azure', marks=pytest.mark.integration),
     ]
 )
 async def backend(
     request: pytest.FixtureRequest, tmp_path: Path
-) -> AsyncIterator[BackendBase]:
+) -> AsyncIterator[StorageBackend]:
     if request.param == 'memory':
         yield MemoryBackend()
         return
     if request.param == 'local':
         yield LocalBackend(tmp_path)
+        return
+    if request.param == 'sandbox':
+        # a layer must satisfy the full port contract like any backend
+        inner = MemoryBackend()
+        await inner.make_dir(P('/jail'), parents=False)
+        yield SandboxLayer(inner, root='/jail')
         return
 
     account = os.environ.get('ADLSG2_ACCOUNT_NAME')
@@ -69,12 +77,12 @@ async def _astream(*chunks: bytes) -> AsyncIterator[bytes]:
 
 
 async def put(
-    backend: BackendBase, path: str, data: bytes = b'', mode: EchoMode = 'w'
+    backend: StorageBackend, path: str, data: bytes = b'', mode: EchoMode = 'w'
 ) -> None:
     await backend.write(P(path), _astream(data), mode=mode, content_type=None)
 
 
-async def test_root_exists_initially(backend: BackendBase):
+async def test_root_exists_initially(backend: StorageBackend):
     assert await backend.exists(P('/'))
     assert not await backend.exists(P('/anything'))
 
@@ -82,47 +90,47 @@ async def test_root_exists_initially(backend: BackendBase):
 # --- write / read ---
 
 
-async def test_write_creates_and_read_round_trips(backend: BackendBase):
+async def test_write_creates_and_read_round_trips(backend: StorageBackend):
     await put(backend, '/a.txt', b'hello')
     assert await backend.read(P('/a.txt')) == b'hello'
 
 
-async def test_write_truncates_existing(backend: BackendBase):
+async def test_write_truncates_existing(backend: StorageBackend):
     await put(backend, '/a.txt', b'old content')
     await put(backend, '/a.txt', b'new')
     assert await backend.read(P('/a.txt')) == b'new'
 
 
-async def test_append_extends(backend: BackendBase):
+async def test_append_extends(backend: StorageBackend):
     await put(backend, '/a.txt', b'hello ')
     await put(backend, '/a.txt', b'world', mode='a')
     assert await backend.read(P('/a.txt')) == b'hello world'
 
 
-async def test_append_creates_missing(backend: BackendBase):
+async def test_append_creates_missing(backend: StorageBackend):
     await put(backend, '/a.txt', b'created', mode='a')
     assert await backend.read(P('/a.txt')) == b'created'
 
 
 @pytest.mark.parametrize('mode', ['w', 'a'])
-async def test_write_onto_directory_raises(backend: BackendBase, mode: EchoMode):
+async def test_write_onto_directory_raises(backend: StorageBackend, mode: EchoMode):
     await backend.make_dir(P('/d'), parents=False)
     with pytest.raises(IsADirectoryError):
         await put(backend, '/d', b'x', mode=mode)
 
 
-async def test_read_missing_raises(backend: BackendBase):
+async def test_read_missing_raises(backend: StorageBackend):
     with pytest.raises(PathNotFoundError):
         await backend.read(P('/nope'))
 
 
-async def test_read_directory_raises(backend: BackendBase):
+async def test_read_directory_raises(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     with pytest.raises(IsADirectoryError):
         await backend.read(P('/d'))
 
 
-async def test_read_stream_yields_content(backend: BackendBase):
+async def test_read_stream_yields_content(backend: StorageBackend):
     await put(backend, '/a.txt', b'streamed')
     chunks = [chunk async for chunk in backend.read_stream(P('/a.txt'))]
     assert b''.join(chunks) == b'streamed'
@@ -131,7 +139,7 @@ async def test_read_stream_yields_content(backend: BackendBase):
 # --- list_dir ---
 
 
-async def test_list_dir_entries(backend: BackendBase):
+async def test_list_dir_entries(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     await backend.make_dir(P('/d/sub'), parents=False)
     await put(backend, '/d/a.txt', b'12345')
@@ -142,20 +150,20 @@ async def test_list_dir_entries(backend: BackendBase):
     assert entries == {('sub', True, None), ('a.txt', False, 5)}
 
 
-async def test_list_dir_on_file_raises(backend: BackendBase):
+async def test_list_dir_on_file_raises(backend: StorageBackend):
     await put(backend, '/a.txt')
     with pytest.raises(NotADirectoryError):
         async for _ in backend.list_dir(P('/a.txt')):
             pass
 
 
-async def test_list_dir_missing_raises(backend: BackendBase):
+async def test_list_dir_missing_raises(backend: StorageBackend):
     with pytest.raises(PathNotFoundError):
         async for _ in backend.list_dir(P('/nope')):
             pass
 
 
-async def test_list_dir_tolerates_delete_during_iteration(backend: BackendBase):
+async def test_list_dir_tolerates_delete_during_iteration(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     for name in ('a', 'b', 'c'):
         await put(backend, f'/d/{name}')
@@ -169,7 +177,7 @@ async def test_list_dir_tolerates_delete_during_iteration(backend: BackendBase):
 # --- stat ---
 
 
-async def test_stat_file(backend: BackendBase):
+async def test_stat_file(backend: StorageBackend):
     await put(backend, '/a.txt', b'12345')
     props = await backend.stat(P('/a.txt'))
     assert props.kind == 'file'
@@ -178,7 +186,7 @@ async def test_stat_file(backend: BackendBase):
     assert props.modified.tzinfo is not None
 
 
-async def test_stat_directory_size_is_zero(backend: BackendBase):
+async def test_stat_directory_size_is_zero(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     await put(backend, '/d/a.txt', b'12345')
     props = await backend.stat(P('/d'))
@@ -186,7 +194,7 @@ async def test_stat_directory_size_is_zero(backend: BackendBase):
     assert props.size == 0
 
 
-async def test_append_updates_modified(backend: BackendBase):
+async def test_append_updates_modified(backend: StorageBackend):
     await put(backend, '/a.txt', b'x')
     before = await backend.stat(P('/a.txt'))
     await put(backend, '/a.txt', b'y', mode='a')
@@ -197,41 +205,41 @@ async def test_append_updates_modified(backend: BackendBase):
 # --- make_dir ---
 
 
-async def test_make_dir_plain(backend: BackendBase):
+async def test_make_dir_plain(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     assert (await backend.stat(P('/d'))).kind == 'directory'
 
 
-async def test_make_dir_missing_parent_raises(backend: BackendBase):
+async def test_make_dir_missing_parent_raises(backend: StorageBackend):
     with pytest.raises(PathNotFoundError) as excinfo:
         await backend.make_dir(P('/missing/d'), parents=False)
     assert str(excinfo.value.path) == '/missing'
 
 
-async def test_make_dir_parent_is_file_raises(backend: BackendBase):
+async def test_make_dir_parent_is_file_raises(backend: StorageBackend):
     await put(backend, '/a.txt')
     with pytest.raises(NotADirectoryError):
         await backend.make_dir(P('/a.txt/d'), parents=False)
 
 
-async def test_make_dir_existing_raises(backend: BackendBase):
+async def test_make_dir_existing_raises(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     with pytest.raises(AlreadyExistsError):
         await backend.make_dir(P('/d'), parents=False)
 
 
-async def test_make_dir_parents_creates_chain(backend: BackendBase):
+async def test_make_dir_parents_creates_chain(backend: StorageBackend):
     await backend.make_dir(P('/a/b/c'), parents=True)
     for path in ('/a', '/a/b', '/a/b/c'):
         assert (await backend.stat(P(path))).kind == 'directory'
 
 
-async def test_make_dir_parents_is_idempotent(backend: BackendBase):
+async def test_make_dir_parents_is_idempotent(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=True)
     await backend.make_dir(P('/d'), parents=True)  # no raise
 
 
-async def test_make_dir_parents_existing_file_still_raises(backend: BackendBase):
+async def test_make_dir_parents_existing_file_still_raises(backend: StorageBackend):
     await put(backend, '/a.txt')
     with pytest.raises(AlreadyExistsError):
         await backend.make_dir(P('/a.txt'), parents=True)
@@ -240,26 +248,26 @@ async def test_make_dir_parents_existing_file_still_raises(backend: BackendBase)
 # --- delete ---
 
 
-async def test_delete_file(backend: BackendBase):
+async def test_delete_file(backend: StorageBackend):
     await put(backend, '/a.txt')
     await backend.delete(P('/a.txt'))
     assert not await backend.exists(P('/a.txt'))
 
 
-async def test_delete_empty_directory(backend: BackendBase):
+async def test_delete_empty_directory(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     await backend.delete(P('/d'))
     assert not await backend.exists(P('/d'))
 
 
-async def test_delete_non_empty_directory_raises(backend: BackendBase):
+async def test_delete_non_empty_directory_raises(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
     await put(backend, '/d/a.txt')
     with pytest.raises(DirectoryNotEmptyError):
         await backend.delete(P('/d'))
 
 
-async def test_delete_missing_raises(backend: BackendBase):
+async def test_delete_missing_raises(backend: StorageBackend):
     with pytest.raises(PathNotFoundError):
         await backend.delete(P('/nope'))
 
@@ -267,12 +275,12 @@ async def test_delete_missing_raises(backend: BackendBase):
 # --- generic fallbacks / native fast paths through the same contract ---
 
 
-async def test_du_file(backend: BackendBase):
+async def test_du_file(backend: StorageBackend):
     await put(backend, '/a.txt', b'12345')
     assert await backend.du(P('/a.txt')) == 5
 
 
-async def test_du_sums_tree(backend: BackendBase):
+async def test_du_sums_tree(backend: StorageBackend):
     await backend.make_dir(P('/a/b'), parents=True)
     await put(backend, '/a/f1', b'123')
     await put(backend, '/a/b/f2', b'12345')
@@ -280,14 +288,14 @@ async def test_du_sums_tree(backend: BackendBase):
     assert await backend.du(P('/')) == 8
 
 
-async def test_move_file(backend: BackendBase):
+async def test_move_file(backend: StorageBackend):
     await put(backend, '/src.txt', b'payload')
     await backend.move(P('/src.txt'), P('/dst.txt'))
     assert await backend.read(P('/dst.txt')) == b'payload'
     assert not await backend.exists(P('/src.txt'))
 
 
-async def test_move_directory_tree(backend: BackendBase):
+async def test_move_directory_tree(backend: StorageBackend):
     await backend.make_dir(P('/d/sub'), parents=True)
     await put(backend, '/d/sub/a.txt', b'x')
     await backend.move(P('/d'), P('/renamed'))
@@ -295,7 +303,7 @@ async def test_move_directory_tree(backend: BackendBase):
     assert not await backend.exists(P('/d'))
 
 
-async def test_copy_file_is_independent(backend: BackendBase):
+async def test_copy_file_is_independent(backend: StorageBackend):
     await put(backend, '/src.txt', b'payload')
     await backend.copy(P('/src.txt'), P('/dst.txt'))
     assert await backend.read(P('/dst.txt')) == b'payload'
@@ -305,7 +313,7 @@ async def test_copy_file_is_independent(backend: BackendBase):
     assert await backend.read(P('/src.txt')) == b'payload'
 
 
-async def test_delete_tree_removes_everything(backend: BackendBase):
+async def test_delete_tree_removes_everything(backend: StorageBackend):
     await backend.make_dir(P('/d/sub'), parents=True)
     await put(backend, '/d/a.txt', b'x')
     await put(backend, '/d/sub/b.txt', b'y')
