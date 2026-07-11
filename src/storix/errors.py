@@ -148,3 +148,11 @@ def from_os_error(exc: OSError, path: StrPathLike) -> StorageError:
     if exc.errno == errno.ENOTEMPTY:
         return DirectoryNotEmptyError(path)
     return StorageError(f"'{path}': {exc.strerror or exc}")
+
+
+class ConfigurationError(StorageError):
+    """Storage construction was asked for something it cannot build.
+
+    Raised by the factory for unknown providers or incomplete backend
+    configuration; the message says which fields or env vars to set.
+    """

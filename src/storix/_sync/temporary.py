@@ -15,11 +15,11 @@ from .core import Storix
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
 
 @contextmanager
-def temporary() -> Iterator[Storix]:
+def temporary() -> Generator[Storix]:
     """Yield a Storix session over a fresh temporary directory.
 
     The directory and everything in it are deleted on exit.

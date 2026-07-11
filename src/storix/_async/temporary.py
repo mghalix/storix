@@ -13,11 +13,11 @@ from .core import Storix
 
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncGenerator
 
 
 @asynccontextmanager
-async def temporary() -> AsyncIterator[Storix]:
+async def temporary() -> AsyncGenerator[Storix]:
     """Yield a Storix session over a fresh temporary directory.
 
     The directory and everything in it are deleted on exit.
