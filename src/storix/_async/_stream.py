@@ -1,4 +1,4 @@
-"""Byte-stream helpers for the async tree (codegen mirrors these to sync)."""
+"""Byte-stream helpers for the backends and core."""
 
 from collections.abc import AsyncIterator, Buffer, Iterator
 

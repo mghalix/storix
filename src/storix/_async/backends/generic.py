@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from storix._async._compat import gather
 from storix._async._stream import collect
 from storix.enums import PathKind
 from storix.errors import PathNotFoundError
@@ -39,39 +40,49 @@ async def copy(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) 
 
 
 async def delete_tree(backend: StorageBackend, path: PurePosixPath) -> None:
-    """Delete ``path`` and everything below it, children first."""
-    # TODO(codegen): parallelize via _compat.gather once the shim exists
-    async for entry in backend.list_dir(path):
-        item = path / entry.name
-        delete_fn = backend.delete_tree if entry.is_dir else backend.delete
-        await delete_fn(item)
+    """Delete ``path`` and everything below it, children first.
 
+    Siblings are deleted concurrently (bounded per tree level by the
+    ``gather`` shim); the directory itself goes last, once empty.
+    """
+    files: list[PurePosixPath] = []
+    subdirs: list[PurePosixPath] = []
+    async for entry in backend.list_dir(path):
+        (subdirs if entry.is_dir else files).append(path / entry.name)
+
+    await gather(
+        *(backend.delete_tree(subdir) for subdir in subdirs),
+        *(backend.delete(file) for file in files),
+    )
     await backend.delete(path)
 
 
 async def du(backend: StorageBackend, path: PurePosixPath) -> int:
     """Sum the sizes of the tree rooted at ``path``.
 
-    Uses listing-provided sizes when available; falls back to a per-file
-    ``stat`` otherwise.
+    Uses listing-provided sizes when available, falling back to per-file
+    ``stat`` calls; stats and subtree walks fan out concurrently (bounded
+    per tree level by the ``gather`` shim).
     """
     props = await backend.stat(path)
     if props.kind is PathKind.FILE:
         return props.size
 
     size = 0
-    # TODO(codegen): parallelize via _compat.gather once the shim exists
+    stat_targets: list[PurePosixPath] = []
+    subdirs: list[PurePosixPath] = []
     async for entry in backend.list_dir(path):
         child = path / entry.name
         if entry.is_dir:
-            size += await backend.du(child)
+            subdirs.append(child)
+        elif entry.size is not None:
+            size += entry.size
         else:
-            size += (
-                entry.size
-                if entry.size is not None
-                else (await backend.stat(child)).size
-            )
-    return size
+            stat_targets.append(child)
+
+    stats = await gather(*(backend.stat(target) for target in stat_targets))
+    subtotals = await gather(*(backend.du(subdir) for subdir in subdirs))
+    return size + sum(s.size for s in stats) + sum(subtotals)
 
 
 async def exists(backend: StorageBackend, path: PurePosixPath) -> bool:

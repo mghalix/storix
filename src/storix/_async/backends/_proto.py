@@ -39,8 +39,9 @@ class StorageBackend(Protocol):
     def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
         """Stream a file's contents in chunks.
 
-        Declared ``def`` (not ``async def``): implementations are async
-        generators, which are plain callables returning an AsyncIterator.
+        Implementations are async generator functions: plain callables
+        that return the iterator directly, so the declaration here
+        carries no ``async`` keyword of its own.
         """
         ...
 
