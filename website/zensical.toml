@@ -1,0 +1,120 @@
+# Storix documentation — Zensical config.
+# Serve:  uvx zensical serve -o        Build:  uvx zensical build  (-> site/)
+
+[project]
+site_name = "Storix"
+site_description = "One unix-flavored filesystem API over any storage — local disk, in-memory, Azure Data Lake. Sync and async, sandboxable, fully typed."
+site_author = "Mohanad Ghali"
+site_url = "https://storix.mghalix.com/"
+copyright = "Copyright &copy; 2026 Mohanad Ghali"
+
+repo_url = "https://github.com/mghalix/storix"
+repo_name = "mghalix/storix"
+
+extra_css = ["stylesheets/extra.css"]
+
+# Explicit navigation. Grows as we add pages.
+nav = [
+  { "Home" = "index.md" },
+  { "Get started" = [
+    { "Introduction" = "get-started/introduction.md" },
+    { "Installation" = "get-started/installation.md" },
+    { "Quickstart" = "get-started/quickstart.md" },
+  ] },
+  { "Guide" = [
+    { "Reading and writing" = "guide/reading-and-writing.md" },
+    { "Backends" = "guide/backends.md" },
+    { "Layers" = "guide/layers.md" },
+  ] },
+]
+
+[project.theme]
+logo = "assets/logo.png"
+favicon = "assets/favicon.png"
+features = [
+  "announce.dismiss",
+  "content.code.annotate",
+  "content.code.copy",
+  "content.footnote.tooltips",
+  "content.tabs.link",
+  "content.tooltips",
+  "navigation.footer",
+  "navigation.indexes",
+  "navigation.instant",
+  "navigation.instant.prefetch",
+  "navigation.path",
+  "navigation.sections",
+  "navigation.top",
+  "navigation.tracking",
+  "search.highlight",
+  "toc.follow",
+]
+
+# GitHub logo (not the generic git branch icon) for the repo link.
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+# System-aware 3-way toggle: auto (follow OS) -> light -> dark, cycling.
+# The icon shows the ACTIVE state: auto glyph, sun in light, moon in dark.
+[[project.theme.palette]]
+media = "(prefers-color-scheme)"
+toggle.icon = "material/brightness-auto"
+toggle.name = "Switch to light mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+toggle.icon = "lucide/sun"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/github"
+link = "https://github.com/mghalix/storix"
+
+[[project.extra.social]]
+icon = "fontawesome/brands/python"
+link = "https://pypi.org/project/storix/"
+
+# Material's authoring toolkit: admonitions, tabbed code, annotations,
+# mermaid, math — the tools that make FastAPI-style docs possible.
+[project.markdown_extensions.abbr]
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.md_in_html]
+[project.markdown_extensions.toc]
+permalink = true
+[project.markdown_extensions.pymdownx.arithmatex]
+generic = true
+[project.markdown_extensions.pymdownx.betterem]
+[project.markdown_extensions.pymdownx.caret]
+[project.markdown_extensions.pymdownx.details]
+[project.markdown_extensions.pymdownx.emoji]
+emoji_generator = "zensical.extensions.emoji.to_svg"
+emoji_index = "zensical.extensions.emoji.twemoji"
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+line_spans = "__span"
+pygments_lang_class = true
+[project.markdown_extensions.pymdownx.inlinehilite]
+[project.markdown_extensions.pymdownx.keys]
+[project.markdown_extensions.pymdownx.magiclink]
+[project.markdown_extensions.pymdownx.mark]
+[project.markdown_extensions.pymdownx.smartsymbols]
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true
+combine_header_slug = true
+[project.markdown_extensions.pymdownx.tasklist]
+custom_checkbox = true
+[project.markdown_extensions.pymdownx.tilde]

@@ -1,0 +1,68 @@
+/* Storix docs: small theme tweaks. */
+
+/* Minimalist heading anchor, like FastAPI: subtle, appears on hover. */
+.md-typeset .headerlink {
+  font-size: 0.7em;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.md-typeset h1:hover .headerlink,
+.md-typeset h2:hover .headerlink,
+.md-typeset h3:hover .headerlink,
+.md-typeset h4:hover .headerlink,
+.md-typeset h5:hover .headerlink,
+.md-typeset h6:hover .headerlink {
+  opacity: 0.35;
+}
+.md-typeset .headerlink:hover {
+  opacity: 0.9;
+}
+
+/* Keep code identifiers (import paths) on one line inside tables. */
+.md-typeset table td code {
+  white-space: nowrap;
+}
+
+/* Footer: a deep, intentional dark instead of a jarring lighter band. */
+[data-md-color-scheme="slate"] {
+  --md-footer-bg-color: #0b0e14;
+  --md-footer-bg-color--dark: #08090d;
+}
+
+/* Mute the footer meta line (copyright + attribution) so it recedes. */
+.md-footer-meta {
+  font-size: 0.72rem;
+  opacity: 0.55;
+}
+
+/* Repo link: GitHub icon + name only. Hide the injected star/fork/version
+   facts, which are noise on a young project. */
+.md-source__facts {
+  display: none;
+}
+
+/* Header layout: search centered, GitHub + theme toggle grouped at the far right. */
+.md-search {
+  flex: 0 1 auto;
+  margin: 0 auto;
+}
+.md-header__source {
+  order: 90;
+  margin-left: 0.4rem;
+}
+.md-header__option {
+  order: 91;
+  margin-left: 0.15rem;
+}
+
+/* Copy confirmation popup (md-dialog) and hover tooltips: match the theme
+   instead of a bright default block. */
+.md-dialog,
+.md-tooltip {
+  background-color: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
+.md-dialog__inner {
+  color: var(--md-default-fg-color);
+}
