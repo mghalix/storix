@@ -7,6 +7,7 @@ are under ``storix.backends`` / ``storix.aio.backends``.
 from storix import errors
 from storix._sync import (
     CacheLayer,
+    CacheOp,
     CacheStore,
     DataUrlLayer,
     InMemoryCacheStore,
@@ -15,6 +16,7 @@ from storix._sync import (
     SandboxLayer,
     Storix,
     available_providers,
+    cache,
     get_storage,
     register_backend,
     scratch,
@@ -43,6 +45,7 @@ __all__ = (
     'StorixPath',
     'StrPathLike',
     'available_providers',
+    'cache',
     'errors',
     'get_storage',
     'register_backend',

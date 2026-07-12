@@ -385,3 +385,107 @@ def test_inmemory_store_satisfies_the_protocol():
 
     store: CacheStore = InMemoryCacheStore()  # the annotation is the test
     assert store is not None
+
+
+# --- CacheLayer: configurable ops ---
+
+
+async def test_cache_du_when_enabled_and_evicts_ancestors():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer, cache
+
+    inner = CountingBackend()
+    inner.du_calls = 0
+    orig_du = inner.du
+
+    async def counting_du(path):
+        inner.du_calls += 1
+        return await orig_du(path)
+
+    inner.du = counting_du  # type: ignore[method-assign]
+    fs = Storix(CacheLayer(inner, du=cache(ttl=60)))
+    await fs.mkdir('/a')
+    await fs.echo(b'12345', '/a/f.txt')
+
+    inner.du_calls = 0
+    assert await fs.du('/a') == 5
+    assert await fs.du('/a') == 5  # cached
+    assert inner.du_calls == 1
+
+    await fs.echo(b'more', '/a/g.txt')  # write -> evicts du of /a and /
+    assert await fs.du('/a') == 9  # recomputed
+    assert inner.du_calls == 2
+
+
+async def test_cache_du_off_by_default():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer
+
+    fs = Storix(CacheLayer(MemoryBackend()))  # du not enabled
+    await fs.mkdir('/a')
+    await fs.echo(b'x', '/a/f.txt')
+    assert await fs.du('/a') == 1  # works, just not cached (passthrough)
+
+
+async def test_cache_read_content_with_max_bytes_skip():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer, cache
+
+    class ReadCounter(MemoryBackend):
+        reads = 0
+
+        async def read_stream(self, path):
+            ReadCounter.reads += 1
+            async for c in super().read_stream(path):
+                yield c
+
+    inner = ReadCounter()
+    fs = Storix(CacheLayer(inner, read=cache(max_bytes=4)))
+    await fs.echo(b'abc', '/small.txt')  # 3 bytes <= 4 -> cached
+    await fs.echo(b'toolong', '/big.txt')  # 7 bytes > 4 -> not cached
+
+    ReadCounter.reads = 0
+    assert await fs.cat('/small.txt') == b'abc'
+    assert await fs.cat('/small.txt') == b'abc'  # cached
+    assert ReadCounter.reads == 1
+
+    ReadCounter.reads = 0
+    assert await fs.cat('/big.txt') == b'toolong'
+    assert await fs.cat('/big.txt') == b'toolong'  # NOT cached (too big)
+    assert ReadCounter.reads == 2
+
+
+async def test_cache_per_op_stores_are_independent():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer, InMemoryCacheStore, cache
+
+    meta_store = InMemoryCacheStore()
+    read_store = InMemoryCacheStore()
+    fs = Storix(
+        CacheLayer(
+            MemoryBackend(),
+            metadata=cache(store=meta_store),
+            read=cache(store=read_store),
+        )
+    )
+    await fs.echo(b'x', '/a.txt')
+    await fs.stat('/a.txt')
+    await fs.cat('/a.txt')
+
+    assert any('stat' in k for k in meta_store._data)
+    assert not any('read' in k for k in meta_store._data)  # read went elsewhere
+    assert any('read' in k for k in read_store._data)
+
+
+async def test_inmemory_store_maxsize_evicts_lru():
+    from storix._async.layers import InMemoryCacheStore
+
+    store = InMemoryCacheStore(maxsize=2)
+    await store.set('a', 1)
+    await store.set('b', 2)
+    await store.get('a')  # touch 'a' -> 'b' now LRU
+    await store.set('c', 3)  # over cap -> evict LRU ('b')
+
+    assert await store.get('a') == 1
+    assert await store.get('c') == 3
+    assert await store.get('b', 'gone') == 'gone'  # evicted

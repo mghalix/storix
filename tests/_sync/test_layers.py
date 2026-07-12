@@ -385,3 +385,106 @@ def test_inmemory_store_satisfies_the_protocol():
 
     store: CacheStore = InMemoryCacheStore()  # the annotation is the test
     assert store is not None
+
+
+# --- CacheLayer: configurable ops ---
+
+
+def test_cache_du_when_enabled_and_evicts_ancestors():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer, cache
+
+    inner = CountingBackend()
+    inner.du_calls = 0
+    orig_du = inner.du
+
+    def counting_du(path):
+        inner.du_calls += 1
+        return orig_du(path)
+
+    inner.du = counting_du  # type: ignore[method-assign]
+    fs = Storix(CacheLayer(inner, du=cache(ttl=60)))
+    fs.mkdir('/a')
+    fs.echo(b'12345', '/a/f.txt')
+
+    inner.du_calls = 0
+    assert fs.du('/a') == 5
+    assert fs.du('/a') == 5  # cached
+    assert inner.du_calls == 1
+
+    fs.echo(b'more', '/a/g.txt')  # write -> evicts du of /a and /
+    assert fs.du('/a') == 9  # recomputed
+    assert inner.du_calls == 2
+
+
+def test_cache_du_off_by_default():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    fs = Storix(CacheLayer(MemoryBackend()))  # du not enabled
+    fs.mkdir('/a')
+    fs.echo(b'x', '/a/f.txt')
+    assert fs.du('/a') == 1  # works, just not cached (passthrough)
+
+
+def test_cache_read_content_with_max_bytes_skip():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer, cache
+
+    class ReadCounter(MemoryBackend):
+        reads = 0
+
+        def read_stream(self, path):
+            ReadCounter.reads += 1
+            yield from super().read_stream(path)
+
+    inner = ReadCounter()
+    fs = Storix(CacheLayer(inner, read=cache(max_bytes=4)))
+    fs.echo(b'abc', '/small.txt')  # 3 bytes <= 4 -> cached
+    fs.echo(b'toolong', '/big.txt')  # 7 bytes > 4 -> not cached
+
+    ReadCounter.reads = 0
+    assert fs.cat('/small.txt') == b'abc'
+    assert fs.cat('/small.txt') == b'abc'  # cached
+    assert ReadCounter.reads == 1
+
+    ReadCounter.reads = 0
+    assert fs.cat('/big.txt') == b'toolong'
+    assert fs.cat('/big.txt') == b'toolong'  # NOT cached (too big)
+    assert ReadCounter.reads == 2
+
+
+def test_cache_per_op_stores_are_independent():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer, InMemoryCacheStore, cache
+
+    meta_store = InMemoryCacheStore()
+    read_store = InMemoryCacheStore()
+    fs = Storix(
+        CacheLayer(
+            MemoryBackend(),
+            metadata=cache(store=meta_store),
+            read=cache(store=read_store),
+        )
+    )
+    fs.echo(b'x', '/a.txt')
+    fs.stat('/a.txt')
+    fs.cat('/a.txt')
+
+    assert any('stat' in k for k in meta_store._data)
+    assert not any('read' in k for k in meta_store._data)  # read went elsewhere
+    assert any('read' in k for k in read_store._data)
+
+
+def test_inmemory_store_maxsize_evicts_lru():
+    from storix._sync.layers import InMemoryCacheStore
+
+    store = InMemoryCacheStore(maxsize=2)
+    store.set('a', 1)
+    store.set('b', 2)
+    store.get('a')  # touch 'a' -> 'b' now LRU
+    store.set('c', 3)  # over cap -> evict LRU ('b')
+
+    assert store.get('a') == 1
+    assert store.get('c') == 3
+    assert store.get('b', 'gone') == 'gone'  # evicted

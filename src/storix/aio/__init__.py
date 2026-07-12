@@ -6,6 +6,7 @@ Identical names to the sync package; every operation is awaitable.
 from storix import errors
 from storix._async import (
     CacheLayer,
+    CacheOp,
     CacheStore,
     DataUrlLayer,
     InMemoryCacheStore,
@@ -14,6 +15,7 @@ from storix._async import (
     SandboxLayer,
     Storix,
     available_providers,
+    cache,
     get_storage,
     register_backend,
     scratch,
@@ -40,6 +42,7 @@ __all__ = (
     'StorixPath',
     'StrPathLike',
     'available_providers',
+    'cache',
     'errors',
     'get_storage',
     'register_backend',
