@@ -30,11 +30,14 @@ from storix.types import StorageProvider, StorixPath, StrPathLike
 
 __all__ = (
     'CacheLayer',
+    'CacheOp',
+    'CacheStore',
     'Capabilities',
     'Capability',
     'DataUrlLayer',
     'Entry',
     'FileProperties',
+    'InMemoryCacheStore',
     'LayerBase',
     'MetadataLayer',
     'PathKind',
