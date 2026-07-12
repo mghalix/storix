@@ -331,6 +331,18 @@ class CacheLayer(LayerBase):
             seen.add(id(op.store))
             await op.store.delete_match(pattern)
 
+    @property
+    def enabled(self) -> tuple[str, ...]:
+        """Names of the ops this layer caches, e.g. ``('metadata', 'du')``."""
+        return tuple(self._ops)
+
+    def store_names(self) -> tuple[str, ...]:
+        """Distinct store class names backing the enabled ops (in order)."""
+        names: dict[str, None] = {}
+        for op in self._ops.values():
+            names[type(op.store).__name__] = None
+        return tuple(names)
+
     # --- eviction (per enabled op, in that op's store) ---
 
     async def _evict(self, path: PurePosixPath) -> None:

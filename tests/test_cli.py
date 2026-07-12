@@ -102,6 +102,7 @@ def test_apply_layers_composition_and_lookup():
     summary = layer_summary(fs)
     assert summary is not None
     assert 'cache' in summary and 'sandbox' in summary
+    assert 'InMemoryCacheStore' in summary  # names the store backing the cache
 
 
 def test_apply_layers_none_is_passthrough():
@@ -112,3 +113,27 @@ def test_apply_layers_none_is_passthrough():
     assert fs is base
     assert cache_layer(fs) is None
     assert layer_summary(fs) is None
+
+
+def test_prompt_label_shows_base_backend_not_the_layer():
+    from storix.cli.app import _apply_layers, base_backend, prompt_label
+
+    plain = Storix(MemoryBackend())
+    assert prompt_label(plain) == 'MemoryBackend'  # no layers -> just the backend
+
+    fs = _apply_layers(
+        Storix(MemoryBackend()), cache=True, cache_ttl=None, sandbox='/jail'
+    )
+    # the real provider is surfaced, annotated with the stack (not "CacheLayer")
+    assert type(base_backend(fs)).__name__ == 'MemoryBackend'
+    assert prompt_label(fs) == 'MemoryBackend(cache, sandbox)'
+
+
+def test_url_expire_flag_is_accepted():
+    from storix import DataUrlLayer
+
+    cli.use_fs(Storix(DataUrlLayer(MemoryBackend())))
+    run('echo', 'hi', '-f', '/a.txt')
+    out = run('url', '/a.txt', '--expire', '60')
+    assert out.exit_code == 0
+    assert out.stdout.strip().startswith('data:')  # data URLs ignore expiry

@@ -31,7 +31,7 @@ def _prompt(fs: Storix) -> str:
     cwd = str(fs.pwd())
     if len(cwd) > _MAX_CWD:
         cwd = '...' + cwd[-(_MAX_CWD - 3) :]
-    return f'{type(fs.backend).__name__} {cwd} $ '
+    return f'{cli.prompt_label(fs)} {cwd} $ '
 
 
 def _help() -> None:
@@ -58,7 +58,7 @@ def start_shell(fs: Storix | None = None) -> None:
     command = get_command(cli.app)
 
     console.print('[bold blue]storix shell[/bold blue]')
-    console.print(f'connected to [green]{type(fs.backend).__name__}[/green]')
+    console.print(f'connected to [green]{cli.prompt_label(fs)}[/green]')
     summary = cli.layer_summary(fs)
     if summary:
         tip = ' · type [cyan]refresh[/cyan] to clear' if cli.cache_layer(fs) else ''

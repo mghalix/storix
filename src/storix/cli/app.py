@@ -52,13 +52,41 @@ def cache_layer(fs: Storix) -> CacheLayer | None:
     return None
 
 
+def base_backend(fs: Storix) -> StorageBackend:
+    """The innermost real backend under any layers (the actual provider)."""
+    node: StorageBackend = fs.backend
+    while (inner := getattr(node, '_inner', None)) is not None:
+        node = inner
+    return node
+
+
+def prompt_label(fs: Storix) -> str:
+    """Provider name annotated with active layers, e.g. ``AzureBackend(cache)``."""
+    tags: list[str] = []
+    node: StorageBackend | None = fs.backend
+    while node is not None:
+        if isinstance(node, CacheLayer):
+            tags.append('cache')
+        elif isinstance(node, SandboxLayer):
+            tags.append('sandbox')
+        node = getattr(node, '_inner', None)
+    base = type(base_backend(fs)).__name__
+    return f'{base}({", ".join(tags)})' if tags else base
+
+
+# op name -> the CLI verbs it accelerates, for the layer summary
+_CACHE_VERBS = {'metadata': 'ls/stat', 'du': 'du', 'read': 'cat', 'url': 'url'}
+
+
 def layer_summary(fs: Storix) -> str | None:
     """A one-line description of the active layer stack (outermost first)."""
     parts: list[str] = []
     node: StorageBackend | None = fs.backend
     while node is not None:
         if isinstance(node, CacheLayer):
-            parts.append('cache on (du/ls/stat/cat)')
+            verbs = '/'.join(_CACHE_VERBS[o] for o in node.enabled if o in _CACHE_VERBS)
+            via = '+'.join(node.store_names())
+            parts.append(f'cache {verbs} via {via}')
         elif isinstance(node, SandboxLayer):
             parts.append(f'sandbox {node.to_real("/")}')  # public audit handle
         node = getattr(node, '_inner', None)
@@ -274,11 +302,15 @@ def url(
     data: Annotated[
         bool, typer.Option('--data', help='inline base64 data: URL')
     ] = False,
+    expire: Annotated[
+        int | None,
+        typer.Option('--expire', help='seconds until the presigned URL expires'),
+    ] = None,
 ) -> None:
     """Print a shareable URL (presigned by default; --data for a data: URL)."""
     fs = _fs()
     try:
-        console.print(fs.data_url(path) if data else fs.url(path))
+        console.print(fs.data_url(path) if data else fs.url(path, expires_in=expire))
     except StorageError as exc:
         _die('url', exc)
 
@@ -396,7 +428,7 @@ def upload(
 def provider() -> None:
     """Show the active backend and where it is anchored."""
     fs = _fs()
-    console.print(f'[green]backend:[/green] {type(fs.backend).__name__}')
+    console.print(f'[green]backend:[/green] {type(base_backend(fs)).__name__}')
     console.print(f'[green]cwd:[/green]     {fs.pwd()}')
     console.print(f'[green]home:[/green]    {fs.home}')
     console.print(f'[green]root uri:[/green] {fs.locate("/")}')
