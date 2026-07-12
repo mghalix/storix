@@ -156,3 +156,18 @@ class ConfigurationError(StorageError):
     Raised by the factory for unknown providers or incomplete backend
     configuration; the message says which fields or env vars to set.
     """
+
+
+class NonRemovableLayerError(StorageError):
+    """``without_layer`` was asked to strip a layer that forbids removal.
+
+    A layer sets ``removable = False`` when its presence is a guarantee
+    callers must not be able to revoke - notably
+    :class:`~storix.SandboxLayer`, whose whole purpose is that a sandboxed
+    session cannot escape its jail. You can always ask for *less* (drop a
+    cache); you can never ask your way out of a security boundary.
+    """
+
+    def __init__(self, layer: str, msg: str | None = None) -> None:
+        self.layer = layer
+        super().__init__(msg or f'{layer} cannot be removed (it is a boundary)')

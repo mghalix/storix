@@ -6,6 +6,7 @@ are under ``storix.backends`` / ``storix.aio.backends``.
 
 from storix import errors
 from storix._sync import (
+    BoundLayer,
     CacheLayer,
     CacheOp,
     CacheStore,
@@ -29,12 +30,16 @@ from storix.types import StorageProvider, StorixPath, StrPathLike
 
 
 __all__ = (
+    'BoundLayer',
     'CacheLayer',
+    'CacheOp',
+    'CacheStore',
     'Capabilities',
     'Capability',
     'DataUrlLayer',
     'Entry',
     'FileProperties',
+    'InMemoryCacheStore',
     'LayerBase',
     'MetadataLayer',
     'PathKind',

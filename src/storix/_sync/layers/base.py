@@ -39,6 +39,11 @@ class LayerBase:
     provides: ClassVar[Capability | None] = None
     """The capability this layer backfills, if any (used by native-preference)."""
 
+    removable: ClassVar[bool] = True
+    """Whether ``Storix.without_layer`` may strip this layer. A layer that is
+    a guarantee (e.g. a sandbox) sets this ``False`` so it can never be
+    bypassed."""
+
     capabilities: Capabilities
 
     def __init__(self, backend: StorageBackend) -> None:

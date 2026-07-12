@@ -5,6 +5,7 @@ Identical names to the sync package; every operation is awaitable.
 
 from storix import errors
 from storix._async import (
+    BoundLayer,
     CacheLayer,
     CacheOp,
     CacheStore,
@@ -28,14 +29,20 @@ from storix.types import StorageProvider, StorixPath, StrPathLike
 
 
 __all__ = (
+    'BoundLayer',
     'CacheLayer',
+    'CacheOp',
+    'CacheStore',
     'Capabilities',
     'Capability',
     'DataUrlLayer',
     'Entry',
     'FileProperties',
+    'InMemoryCacheStore',
     'LayerBase',
     'MetadataLayer',
+    'PathKind',
+    'RawStat',
     'SandboxLayer',
     'StorageProvider',
     'Storix',

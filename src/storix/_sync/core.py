@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import copy
+
 from typing import TYPE_CHECKING, Self
 
 from storix import pathops
@@ -14,6 +16,7 @@ from storix._sync.backends import generic
 from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
+    NonRemovableLayerError,
     NotADirectoryError,
     PathNotFoundError,
     UnsupportedOperationError,
@@ -32,15 +35,17 @@ if TYPE_CHECKING:
 
     P = ParamSpec('P')
 
-    # a fully-bound layer (the layers= list): backend in, backend out
-    BoundLayer = Callable[[StorageBackend], StorageBackend]
-
     class LayerFactory(Protocol[P]):
         """A layer class/factory: backend first, then its own params."""
 
         def __call__(
             self, backend: StorageBackend, /, *args: P.args, **kwargs: P.kwargs
         ) -> StorageBackend: ...
+
+
+# a fully-bound layer (the layers= list, and what with_layer produces):
+# backend in, backend out. Public so consumers need not redefine it.
+type BoundLayer = Callable[[StorageBackend], StorageBackend]
 
 
 _ROOT = StorixPath('/')
@@ -168,6 +173,51 @@ class Storix:
         if self._backend.capabilities.supports(capability):
             return self
         return type(self)(layer(self._backend, *args, **kwargs), home=self._home)
+
+    def without_layer(self, *layers: type) -> Self:
+        """Return a *new* session with the given layer types bypassed.
+
+        Walks the stack and drops every layer that is an instance of one of
+        ``layers``, re-composing the rest so operations go straight past
+        them - e.g. ``fs.without_layer(CacheLayer).ls()`` forces a
+        cache-bypassing read. Layer types not present are a no-op, so this
+        is safe to call unconditionally. The current session is untouched;
+        cwd is preserved (a removable layer never changes the path
+        namespace).
+
+        Raises :class:`~storix.errors.NonRemovableLayerError` if a matched
+        layer sets ``removable = False`` - a :class:`SandboxLayer` is a
+        security boundary and can never be stripped.
+        """
+        chain: list[StorageBackend] = []
+        node = self._backend
+        while (inner := getattr(node, '_inner', None)) is not None:
+            chain.append(node)
+            node = inner
+        for lyr in chain:
+            if isinstance(lyr, layers) and not getattr(lyr, 'removable', True):
+                raise NonRemovableLayerError(type(lyr).__name__)
+        rebuilt = node  # the base backend
+        for lyr in reversed(chain):
+            if isinstance(lyr, layers):
+                continue
+            clone = copy.copy(lyr)  # shallow: only the wrapped backend changes
+            clone._inner = rebuilt  # noqa: SLF001 - core owns layer re-composition
+            rebuilt = clone
+        new = type(self)(rebuilt, home=self._home)
+        new._cwd = self._cwd  # noqa: SLF001 - carry cwd (same namespace, same class)
+        return new
+
+    @property
+    def uncached(self) -> Self:
+        """This session with any ``CacheLayer`` bypassed (a fresh-read view).
+
+        Sugar for ``without_layer(CacheLayer)``; a no-op when no cache is
+        active. Use for a guaranteed-fresh read: ``fs.uncached.ls()``.
+        """
+        from .layers import CacheLayer
+
+        return self.without_layer(CacheLayer)
 
     def scratch(
         self, *, root: StrPathLike | None = None, prefix: str = 'scratch-'

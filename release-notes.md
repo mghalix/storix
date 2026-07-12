@@ -1,5 +1,30 @@
 # Release Notes
 
+## [0.2.2] - 2026-07-12
+
+Per-op cache bypass, and public-API fixes.
+
+### Added
+
+- `Storix.without_layer(*types)` - a *new* session with the given layer
+  types bypassed, the rest re-composed (absent types are a no-op; cwd is
+  preserved). `Storix.uncached` is sugar for `without_layer(CacheLayer)`,
+  for a guaranteed-fresh read: `fs.uncached.ls()`. Layers gate this with
+  `removable: ClassVar[bool]` (default `True`); `SandboxLayer` sets it
+  `False` - a jail is a security boundary and raises
+  `NonRemovableLayerError` if you try to strip it. (ADR 0016)
+- `BoundLayer` (`Callable[[StorageBackend], StorageBackend]`, the
+  `layers=` / `with_layer` shape) is now a public export from `storix`
+  and `storix.aio`, so consumers stop redefining it.
+
+### Fixed
+
+- `CacheOp`, `CacheStore`, and `InMemoryCacheStore` are now in the
+  `__all__` of both `storix` and `storix.aio` - they were importable at
+  runtime but rejected by type checkers. `storix.aio` also regains the
+  `PathKind`/`RawStat` exports the sync namespace already had, so the two
+  flavors are symmetric (now guarded by a test).
+
 ## [0.2.1] - 2026-07-12
 
 Configurable read-through caching, in the library and the `sx` CLI.

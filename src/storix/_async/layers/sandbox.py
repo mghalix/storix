@@ -12,6 +12,7 @@ from storix.types import StorixPath
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
     from pathlib import PurePosixPath
+    from typing import ClassVar
 
     from storix.models import Capabilities, Entry, RawStat
     from storix.types import EchoMode, StrPathLike
@@ -31,6 +32,9 @@ class SandboxLayer:
     re-scoped back into the virtual namespace, so the real prefix never
     leaks through error paths or tracebacks.
     """
+
+    removable: ClassVar[bool] = False
+    """A jail is a guarantee: ``without_layer`` can never strip it."""
 
     capabilities: Capabilities
 
