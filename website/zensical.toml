@@ -26,6 +26,12 @@ nav = [
     { "Backends" = "guide/backends.md" },
     { "Layers" = "guide/layers.md" },
   ] },
+  { "Reference" = [
+    { "Storix session" = "reference/storix.md" },
+    { "Backends and factory" = "reference/backends.md" },
+    { "Layers" = "reference/layers.md" },
+    { "Errors" = "reference/errors.md" },
+  ] },
 ]
 
 [project.theme]
