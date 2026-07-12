@@ -49,9 +49,15 @@ stack, ruff-style: loader precedence `storix.toml` / `.storix.toml` ->
 `pyproject.toml [tool.storix.cli]` -> env/defaults; an ordered
 `[[layers]]` array of `{name, ...kwargs}` resolved through a
 name->LayerFactory registry (mirrors `register_backend`, ADR 0009).
-Deliberate non-goal for 0.2.1: no half-built config loader - flags-only
-now, the whole file system later, so `--cache`/`--sandbox` never become
-a second config source competing with the file.
+The stack is also how a CLI user swaps the cache's in-memory default
+for a persistent store (`store=` a cashews URL, or a built-in
+disk-backed `CacheStore`) - which is what lets a one-shot `sx --cache`
+benefit across invocations. That store needs a cross-process staleness
+default (a TTL, or content-hash validation), since separate `sx`
+processes sharing one store reopen the single-writer assumption of
+ADR 0014. Deliberate non-goal for 0.2.1: no half-built config loader -
+flags-only now, the whole file system later, so `--cache`/`--sandbox`
+never become a second config source competing with the file.
 
 ## Consequences
 The interactive shell gets instant repeat navigation / `du` / `cat`

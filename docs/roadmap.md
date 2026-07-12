@@ -36,6 +36,12 @@ and for individual decisions: `docs/adr/`.
 - CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
   (ruff-style precedence) with an ordered `[[layers]]` DSL; backend
   config stays shared, layer stack is CLI-scoped (ADR 0015)
+- CLI cache store selection: swap the in-memory default for a persistent
+  store via the `[[layers]]` `store=` (a cashews URL, or a new built-in
+  disk-backed `CacheStore`). Lets one-shot `sx --cache` benefit across
+  invocations; needs a cross-process staleness default (TTL/validation),
+  since separate processes sharing a store reopen the single-writer
+  assumption (ADR 0014/0015)
 - Range reads: `read_stream(start=, length=)` port extension ->
   `fs.stream`/`head`/`tail`; needed for video seeking / HTTP Range
 - `tree`, `find`, `wc` on the new core; `glob`
