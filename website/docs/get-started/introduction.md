@@ -1,6 +1,7 @@
 # Introduction
 
-Storix is a filesystem for people who already think in filesystems.
+Storix puts one unix filesystem interface in front of every storage backend, so
+you work with cloud storage the way you already work with local files.
 
 Cloud storage SDKs make you relearn storage for every provider: containers and
 blobs here, buckets and keys there, each with its own client, its own errors,
