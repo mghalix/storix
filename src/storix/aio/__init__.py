@@ -6,7 +6,9 @@ Identical names to the sync package; every operation is awaitable.
 from storix import errors
 from storix._async import (
     CacheLayer,
+    CacheStore,
     DataUrlLayer,
+    InMemoryCacheStore,
     LayerBase,
     MetadataLayer,
     SandboxLayer,

@@ -10,9 +10,10 @@ rather than inside the core or any backend.
 from __future__ import annotations
 
 import dataclasses
+import fnmatch
 import time
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from storix import pathops
 from storix._async._stream import ensure_chunks
@@ -549,7 +550,66 @@ class MetadataLayer(LayerBase):
 
 
 # distinct from a cached ``None`` (a known-absent path)
-_MISS: object = object()
+_MISS: Any = object()
+
+
+class CacheStore(Protocol):
+    """Cashews-shaped async cache backend for ``CacheLayer``.
+
+    Four coroutine methods; the in-memory default ships. Pass any object
+    that provides them for a shared/persistent cache - a ``cashews.Cache``
+    fits directly. Return types are intentionally loose (``Any``) so real
+    caches (whose ``set``/``delete`` return bool/int) satisfy it
+    structurally with no adapter.
+    """
+
+    async def get(self, key: str, default: Any = None) -> Any:
+        """Return the value for ``key``, or ``default`` on miss."""
+        ...
+
+    async def set(self, key: str, value: Any, *, expire: float | None = None) -> Any:
+        """Store ``value`` under ``key``, expiring after ``expire`` seconds."""
+        ...
+
+    async def delete(self, key: str) -> Any:
+        """Drop ``key``."""
+        ...
+
+    async def delete_match(self, pattern: str) -> Any:
+        """Drop every key matching a glob ``pattern`` (e.g. ``stat:/a/*``)."""
+        ...
+
+
+class InMemoryCacheStore:
+    """Default ``CacheStore``: an in-process dict with per-key expiry."""
+
+    def __init__(self) -> None:
+        self._data: dict[str, tuple[float | None, Any]] = {}
+
+    async def get(self, key: str, default: Any = None) -> Any:
+        """Return the (unexpired) value for ``key``, else ``default``."""
+        entry = self._data.get(key)
+        if entry is None:
+            return default
+        deadline, value = entry
+        if deadline is not None and time.monotonic() > deadline:
+            self._data.pop(key, None)
+            return default
+        return value
+
+    async def set(self, key: str, value: Any, *, expire: float | None = None) -> None:
+        """Store ``value``; ``expire`` seconds from now if given."""
+        deadline = None if expire is None else time.monotonic() + expire
+        self._data[key] = (deadline, value)
+
+    async def delete(self, key: str) -> None:
+        """Drop ``key`` if present."""
+        self._data.pop(key, None)
+
+    async def delete_match(self, pattern: str) -> None:
+        """Drop every key matching the glob ``pattern``."""
+        for key in [k for k in self._data if fnmatch.fnmatch(k, pattern)]:
+            self._data.pop(key, None)
 
 
 class CacheLayer(LayerBase):
@@ -564,67 +624,71 @@ class CacheLayer(LayerBase):
     the session always sees its own writes. Not a capability (``provides``
     stays None): compose with ``with_layer(CacheLayer, ttl=...)``.
 
+    ``store`` is the cache backend (default: in-process
+    :class:`InMemoryCacheStore`). Pass a shared store - a ``cashews.Cache``
+    or any :class:`CacheStore` - so multiple app instances share one
+    metadata cache. ``ttl`` (seconds) applies to every entry.
+
     .. warning::
        Correctness assumes yours is the only writer of this store. The
        cache cannot see changes made *outside* this layer (another
        process, a second storix session, the cloud console). If the store
-       has other writers, pass ``ttl`` (seconds) to bound how long a stale
-       entry can live - the default ``None`` never expires and is only
-       safe for a single owner.
+       has other writers, pass ``ttl`` to bound how long a stale entry can
+       live - the default ``None`` never expires and is only safe for a
+       single owner.
     """
 
-    def __init__(self, backend: StorageBackend, *, ttl: float | None = None) -> None:
+    def __init__(
+        self,
+        backend: StorageBackend,
+        *,
+        store: CacheStore | None = None,
+        ttl: float | None = None,
+    ) -> None:
         super().__init__(backend)
+        self._store: CacheStore = store or InMemoryCacheStore()
         self._ttl = ttl
-        self._stat: dict[str, tuple[float, RawStat | None]] = {}
-        self._list: dict[str, tuple[float, list[Entry]]] = {}
 
-    # --- cache primitives ---
+    @staticmethod
+    def _skey(path: PurePosixPath) -> str:
+        return f'stat:{path}'
 
-    def _get(self, cache: dict, key: str) -> object:
-        entry = cache.get(key)
-        if entry is None:
-            return _MISS
-        stamped, value = entry
-        if self._ttl is not None and time.monotonic() - stamped > self._ttl:
-            cache.pop(key, None)
-            return _MISS
-        return value
+    @staticmethod
+    def _lkey(path: PurePosixPath) -> str:
+        return f'list:{path}'
 
-    def _put(self, cache: dict, key: str, value: object) -> None:
-        cache[key] = (time.monotonic(), value)
+    async def _evict(self, path: PurePosixPath) -> None:
+        await self._store.delete(self._skey(path))
+        await self._store.delete(self._lkey(path))  # the path's own listing
+        await self._store.delete(self._lkey(path.parent))  # parent membership
 
-    def _evict(self, path: PurePosixPath) -> None:
-        self._stat.pop(str(path), None)
-        self._list.pop(str(path), None)  # the path's own listing (if a dir)
-        self._list.pop(str(path.parent), None)  # parent listing membership changed
-
-    def _evict_tree(self, path: PurePosixPath) -> None:
-        prefix = str(path).rstrip('/') + '/'
-        for cache in (self._stat, self._list):
-            for key in [k for k in cache if k == str(path) or k.startswith(prefix)]:
-                cache.pop(key, None)
-        self._list.pop(str(path.parent), None)
+    async def _evict_tree(self, path: PurePosixPath) -> None:
+        base = str(path).rstrip('/')
+        await self._store.delete(self._skey(path))
+        await self._store.delete(self._lkey(path))
+        await self._store.delete_match(f'stat:{base}/*')
+        await self._store.delete_match(f'list:{base}/*')
+        await self._store.delete(self._lkey(path.parent))
 
     # --- cached reads ---
 
     async def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts, cached (negatives cached as absent too)."""
-        cached = self._get(self._stat, str(path))
-        if cached is not _MISS:
-            if cached is None:
+        hit = await self._store.get(self._skey(path), _MISS)
+        if hit is not _MISS:
+            if hit is None:
                 raise PathNotFoundError(path)
-            return cached  # type: ignore[return-value]
+            return hit
         try:
             raw = await self._inner.stat(path)
         except PathNotFoundError:
-            self._put(self._stat, str(path), None)
+            await self._store.set(self._skey(path), None, expire=self._ttl)
             raise
-        self._put(self._stat, str(path), raw)
+        await self._store.set(self._skey(path), raw, expire=self._ttl)
         return raw
 
     async def exists(self, path: PurePosixPath) -> bool:
-        """Derive existence from the stat cache (shares one cache)."""
+        """Derive existence from the stat cache (shares one key)."""
         try:
             await self.stat(path)
         except PathNotFoundError:
@@ -633,13 +697,13 @@ class CacheLayer(LayerBase):
 
     async def list_dir(self, path: PurePosixPath) -> AsyncIterator[Entry]:
         """Yield children, cached as a materialized list."""
-        cached = self._get(self._list, str(path))
-        if cached is not _MISS:
-            for entry in cached:  # type: ignore[union-attr]
+        hit = await self._store.get(self._lkey(path), _MISS)
+        if hit is not _MISS:
+            for entry in hit:
                 yield entry
             return
         entries = [entry async for entry in self._inner.list_dir(path)]
-        self._put(self._list, str(path), entries)
+        await self._store.set(self._lkey(path), entries, expire=self._ttl)
         for entry in entries:
             yield entry
 
@@ -658,37 +722,37 @@ class CacheLayer(LayerBase):
         await self._inner.write(
             path, data, mode=mode, content_type=content_type, metadata=metadata
         )
-        self._evict(path)
+        await self._evict(path)
 
     async def delete(self, path: PurePosixPath) -> None:
         """Delete a leaf, then evict it and its parent listing."""
         await self._inner.delete(path)
-        self._evict(path)
+        await self._evict(path)
 
     async def delete_tree(self, path: PurePosixPath) -> None:
         """Delete a tree, then evict every cached entry beneath it."""
         await self._inner.delete_tree(path)
-        self._evict_tree(path)
+        await self._evict_tree(path)
 
     async def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
         """Create a directory, then evict it and its parent listing."""
         await self._inner.make_dir(path, parents=parents)
-        self._evict(path)
+        await self._evict(path)
 
     async def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
         """Move, then evict both subtrees."""
         await self._inner.move(src, dst)
-        self._evict_tree(src)
-        self._evict_tree(dst)
+        await self._evict_tree(src)
+        await self._evict_tree(dst)
 
     async def copy(self, src: PurePosixPath, dst: PurePosixPath) -> None:
         """Copy, then evict the destination."""
         await self._inner.copy(src, dst)
-        self._evict(dst)
+        await self._evict(dst)
 
     async def set_metadata(
         self, path: PurePosixPath, metadata: Mapping[str, str]
     ) -> None:
         """Replace metadata, then evict the path's cached stat."""
         await self._inner.set_metadata(path, metadata)
-        self._evict(path)
+        await self._evict(path)

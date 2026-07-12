@@ -2,7 +2,9 @@ from .core import Storix
 from .factory import available_providers, get_storage, register_backend
 from .layers import (
     CacheLayer,
+    CacheStore,
     DataUrlLayer,
+    InMemoryCacheStore,
     LayerBase,
     MetadataLayer,
     SandboxLayer,
@@ -13,7 +15,9 @@ from .temporary import scratch, temporary
 
 __all__ = (
     'CacheLayer',
+    'CacheStore',
     'DataUrlLayer',
+    'InMemoryCacheStore',
     'LayerBase',
     'MetadataLayer',
     'SandboxLayer',

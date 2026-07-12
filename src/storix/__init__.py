@@ -7,7 +7,9 @@ are under ``storix.backends`` / ``storix.aio.backends``.
 from storix import errors
 from storix._sync import (
     CacheLayer,
+    CacheStore,
     DataUrlLayer,
+    InMemoryCacheStore,
     LayerBase,
     MetadataLayer,
     SandboxLayer,

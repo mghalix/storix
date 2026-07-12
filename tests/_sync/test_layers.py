@@ -342,3 +342,43 @@ def test_cache_layer_ttl_expires(monkeypatch: pytest.MonkeyPatch):
     clock['t'] += 31  # advance the clock past the ttl
     fs.stat('/a.txt')  # expired -> re-fetch
     assert inner.stat_calls == 2
+
+
+def test_cache_layer_uses_a_custom_store():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer, CacheStore, InMemoryCacheStore
+
+    class RecordingStore(InMemoryCacheStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.ops: list[str] = []
+
+        def get(self, key, default=None):
+            self.ops.append(f'get {key}')
+            return super().get(key, default)
+
+        def set(self, key, value, *, expire=None):
+            self.ops.append(f'set {key}')
+            super().set(key, value, expire=expire)
+
+        def delete(self, key):
+            self.ops.append(f'del {key}')
+            super().delete(key)
+
+    store: CacheStore = RecordingStore()  # structural conformance
+    fs = Storix(CacheLayer(MemoryBackend(), store=store))
+    fs.mkdir('/d')
+    fs.stat('/d')  # miss -> set, then a warm read
+    fs.stat('/d')  # hit
+
+    assert any(o.startswith('set stat:/d') for o in store.ops)  # wrote through
+    assert sum(o == 'get stat:/d' for o in store.ops) == 2  # both reads hit store
+    # the mkdir evicted the parent listing through the same store:
+    assert any(o.startswith('del list:/') for o in store.ops)
+
+
+def test_inmemory_store_satisfies_the_protocol():
+    from storix._sync.layers import CacheStore, InMemoryCacheStore
+
+    store: CacheStore = InMemoryCacheStore()  # the annotation is the test
+    assert store is not None

@@ -15,7 +15,8 @@ and for individual decisions: `docs/adr/`.
 ## 0.2.x - polish
 
 - [x] `CacheLayer`: read-through metadata cache (stat/list_dir/exists)
-  with evict-on-mutation + opt-in TTL - navigation vroom on cloud
+  with evict-on-mutation + opt-in TTL, and a pluggable `CacheStore`
+  (cashews-shaped; in-memory default, swap for Redis/etc.) - vroom
 
 - `MountLayer`: unix-style multi-container compositor (designed, see
   deferred-decisions.md)
@@ -35,12 +36,6 @@ and for individual decisions: `docs/adr/`.
   speed - storix stays the DX layer, like FastAPI over Starlette
 - URI factory (`get_storage('azure://container/path')`) + entry-point
   plugin discovery
-
-- Pluggable `CacheLayer` store: a small `CacheStore` protocol (async
-  get/set/delete/delete_match) so the in-memory default can be swapped
-  for a shared/persistent cache (Redis via cashews, etc.) - lets
-  multiple app instances share cached metadata. Needs RawStat/Entry
-  serialization; in-memory stays the zero-dep default.
 
 ## 0.4.0 - differentiators
 
