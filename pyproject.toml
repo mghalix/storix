@@ -22,6 +22,7 @@ requires-python = ">=3.12"
 #
 dependencies = [
     "storix[core, local]",
+    "zensical==0.0.50",
 ]
 
 [project.optional-dependencies]
