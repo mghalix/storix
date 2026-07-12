@@ -40,13 +40,5 @@ and speak only in storix errors, so the core stays identical across all of them.
   A sandboxed session cannot see or escape above its root, not even by bypassing
   the core.
 
-## What storix is not
-
-Storix is not trying to out-plumb the cloud SDKs on raw throughput or provider
-count. It is the ergonomic layer on top of them, the way FastAPI is a layer over
-the web rather than a replacement for it. When you need a provider storix does
-not ship, you bring a backend that implements the port, and everything above it
-keeps working.
-
 Ready? [Install it](installation.md), then walk through the
 [Quickstart](quickstart.md).

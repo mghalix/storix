@@ -11,6 +11,8 @@ copyright = "Copyright &copy; 2026 Mohanad Ghali"
 repo_url = "https://github.com/mghalix/storix"
 repo_name = "mghalix/storix"
 
+extra_css = ["stylesheets/extra.css"]
+
 # Explicit navigation. Grows as we add pages.
 nav = [
   { "Home" = "index.md" },
@@ -27,10 +29,10 @@ nav = [
 ]
 
 [project.theme]
+logo = "assets/logo.png"
+favicon = "assets/favicon.png"
 features = [
   "announce.dismiss",
-  "content.action.edit",
-  "content.action.view",
   "content.code.annotate",
   "content.code.copy",
   "content.code.select",

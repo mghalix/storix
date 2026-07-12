@@ -4,7 +4,7 @@ hide:
 ---
 
 <p align="center">
-  <img src="assets/storix-banner.png" alt="Storix" style="width: 100%; max-width: 640px;">
+  <img src="assets/storix-banner.png" alt="Storix" style="width: 100%; max-width: 460px;">
 </p>
 
 <p align="center"><strong>Storage for Unix lovers.</strong></p>
