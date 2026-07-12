@@ -590,3 +590,68 @@ def test_cache_clear_drops_only_this_namespace():
 
     assert store.get('other:stat:/z') == 'keep'
     assert not any(k.startswith('storix:prod:') for k in store._data)
+
+
+# --- without_layer / uncached ---
+
+
+def test_without_layer_drops_cache_but_keeps_the_jail():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer, SandboxLayer
+    from storix.errors import NonRemovableLayerError
+
+    inner = MemoryBackend()
+    inner.make_dir(P('/jail'), parents=False)
+    fs = Storix(CacheLayer(SandboxLayer(inner, root='/jail')))
+
+    # uncached view bypasses the cache but preserves the sandbox
+    bare = fs.without_layer(CacheLayer)
+    assert not isinstance(bare.backend, CacheLayer)
+    assert isinstance(bare.backend, SandboxLayer)
+
+    # the jail is a boundary: it can never be stripped
+    with pytest.raises(NonRemovableLayerError, match='SandboxLayer'):
+        fs.without_layer(SandboxLayer)
+
+
+def test_without_layer_absent_is_noop_and_preserves_cwd():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    fs = Storix(MemoryBackend())
+    fs.mkdir('/a')
+    fs.cd('/a')
+    # no cache present -> a graceful no-op that keeps cwd
+    view = fs.without_layer(CacheLayer)
+    assert str(view.pwd()) == '/a'
+    assert type(view.backend).__name__ == 'MemoryBackend'
+
+
+def test_uncached_bypasses_the_cache_for_a_fresh_read():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    class Counter(MemoryBackend):
+        stat_calls = 0
+
+        def stat(self, path):
+            Counter.stat_calls += 1
+            return super().stat(path)
+
+    inner = Counter()
+    fs = Storix(CacheLayer(inner))
+    fs.echo(b'x', '/a.txt')
+
+    Counter.stat_calls = 0
+    fs.stat('/a.txt')  # miss -> 1 backend stat, now cached
+    fs.stat('/a.txt')  # hit -> still 1
+    assert Counter.stat_calls == 1
+    fs.uncached.stat('/a.txt')  # bypass -> hits the backend again
+    assert Counter.stat_calls == 2
+
+
+def test_bound_layer_type_is_public():
+    from storix import BoundLayer as SyncBound
+    from storix.aio import BoundLayer as AsyncBound
+
+    assert SyncBound is not None and AsyncBound is not None

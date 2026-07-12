@@ -1,4 +1,4 @@
-from .core import Storix
+from .core import BoundLayer, Storix
 from .factory import available_providers, get_storage, register_backend
 from .layers import (
     CacheLayer,
@@ -16,6 +16,7 @@ from .temporary import scratch, temporary
 
 
 __all__ = (
+    'BoundLayer',
     'CacheLayer',
     'CacheOp',
     'CacheStore',

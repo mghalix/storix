@@ -31,6 +31,16 @@ and for individual decisions: `docs/adr/`.
   cache-outermost; REPL start banner + `refresh` command +
   `provider` layers line. Opt-in, shell is where it pays off (ADR 0015)
 
+## 0.2.2
+
+- [x] `Storix.without_layer(*types)` / `uncached` - per-op layer bypass
+  (a fresh-read view), gated by `removable` so a `SandboxLayer` can never
+  be stripped (`NonRemovableLayerError`). `BoundLayer` made a public
+  export; `CacheOp`/`CacheStore`/`InMemoryCacheStore` added to `__all__`
+  of both flavors (ADR 0016)
+
+## 0.2.x - polish
+
 - `MountLayer`: unix-style multi-container compositor (designed, see
   deferred-decisions.md)
 - CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
