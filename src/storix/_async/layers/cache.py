@@ -7,7 +7,7 @@ import time
 
 from typing import TYPE_CHECKING, Protocol
 
-from storix.constants import DEFAULT_CACHE_KEY_PREFIX
+from storix.constants import DEFAULT_CACHE_NAMESPACE
 from storix.errors import PathNotFoundError
 
 from .base import LayerBase
@@ -124,12 +124,18 @@ class CacheLayer(LayerBase):
         *,
         store: CacheStore | None = None,
         ttl: float | None = None,
-        prefix: str = DEFAULT_CACHE_KEY_PREFIX,
+        namespace: str = DEFAULT_CACHE_NAMESPACE,
+        environment: str | None = None,
     ) -> None:
         super().__init__(backend)
         self._store: CacheStore = store or InMemoryCacheStore()
         self._ttl = ttl
-        self._prefix = prefix
+        # key layout follows the ``sdk:env:resource:id`` convention:
+        # <namespace>[:<environment>]:<op>:<locator>
+        self._segments = tuple(p for p in (namespace, environment) if p)
+
+    def _kbase(self, op: str, locator: str) -> str:
+        return ':'.join((*self._segments, op, locator))
 
     def _key(self, op: str, path: PurePosixPath) -> str:
         # key on the *physical* locator, not the virtual path: two
@@ -137,7 +143,7 @@ class CacheLayer(LayerBase):
         # not collide on the same virtual path, and must share on the same
         # physical object. locate() is pure (no I/O) and prefix-consistent
         # (a child's locator extends its parent's), so tree eviction works.
-        return f'{self._prefix}:{op}:{self._inner.locate(path)}'
+        return self._kbase(op, self._inner.locate(path))
 
     async def _cached(
         self, op: str, path: PurePosixPath, fetch: Callable[[], Any]
@@ -165,8 +171,8 @@ class CacheLayer(LayerBase):
         locator = self._inner.locate(path)
         await self._store.delete(self._key('stat', path))
         await self._store.delete(self._key('list', path))
-        await self._store.delete_match(f'{self._prefix}:stat:{locator}/*')
-        await self._store.delete_match(f'{self._prefix}:list:{locator}/*')
+        await self._store.delete_match(f'{self._kbase("stat", locator)}/*')
+        await self._store.delete_match(f'{self._kbase("list", locator)}/*')
         await self._store.delete(self._key('list', path.parent))
 
     # --- cached reads ---
