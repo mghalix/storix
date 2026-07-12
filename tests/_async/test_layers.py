@@ -1,3 +1,5 @@
+import time
+
 from collections.abc import AsyncIterator
 from pathlib import PurePosixPath as P
 
@@ -7,6 +9,7 @@ from storix._async.backends import StorageBackend
 from storix._async.backends.memory import MemoryBackend
 from storix._async.layers import LayerBase, SandboxLayer
 from storix.errors import PathNotFoundError
+from storix.models import Capabilities
 from storix.types import EchoMode
 
 
@@ -489,3 +492,83 @@ async def test_inmemory_store_maxsize_evicts_lru():
     assert await store.get('a') == 1
     assert await store.get('c') == 3
     assert await store.get('b', 'gone') == 'gone'  # evicted
+
+
+async def test_cache_url_ttl_only_and_capped_to_lifetime():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer, InMemoryCacheStore, cache
+
+    class Signer(MemoryBackend):
+        capabilities = Capabilities(custom_metadata=True, presigned_urls=True)
+        mints = 0
+
+        async def make_url(self, path, *, expires_in=None):
+            Signer.mints += 1
+            return f'https://signed/{path}?n={Signer.mints}&e={expires_in}'
+
+    inner = Signer()
+    store = InMemoryCacheStore()
+    # ttl far above lifetime -> must be capped to the 30s URL lifetime
+    fs = Storix(CacheLayer(inner, url=cache(ttl=99_999), store=store))
+    await fs.echo(b'x', '/a.txt')
+
+    Signer.mints = 0
+    u1 = await fs.url('/a.txt', expires_in=30)
+    u2 = await fs.url('/a.txt', expires_in=30)
+    assert u1 == u2  # cached, minted once
+    assert Signer.mints == 1
+
+    # different expires_in is a different URL (part of the key)
+    u3 = await fs.url('/a.txt', expires_in=60)
+    assert u3 != u1
+    assert Signer.mints == 2
+
+    # entry never outlives the URL: capped at lifetime, not the 99_999 ttl
+    key = f'{fs.backend._key("url", P("/a.txt"))}:30'
+    deadline, _ = store._data[key]
+    assert deadline is not None and deadline <= time.monotonic() + 30
+
+
+async def test_cache_url_survives_writes():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer, cache
+
+    class Signer(MemoryBackend):
+        capabilities = Capabilities(custom_metadata=True, presigned_urls=True)
+        mints = 0
+
+        async def make_url(self, path, *, expires_in=None):
+            Signer.mints += 1
+            return f'https://signed/{path}?n={Signer.mints}'
+
+    inner = Signer()
+    fs = Storix(CacheLayer(inner, url=cache(ttl=60)))
+    await fs.echo(b'x', '/a.txt')
+
+    Signer.mints = 0
+    u1 = await fs.url('/a.txt')
+    await fs.echo(b'changed', '/a.txt')  # content change does NOT invalidate a URL
+    u2 = await fs.url('/a.txt')
+    assert u1 == u2  # still cached
+    assert Signer.mints == 1
+
+
+async def test_cache_url_off_by_default():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer
+
+    class Signer(MemoryBackend):
+        capabilities = Capabilities(custom_metadata=True, presigned_urls=True)
+        mints = 0
+
+        async def make_url(self, path, *, expires_in=None):
+            Signer.mints += 1
+            return 'https://signed/x'
+
+    inner = Signer()
+    fs = Storix(CacheLayer(inner))  # url not enabled
+    await fs.echo(b'x', '/a.txt')
+    Signer.mints = 0
+    await fs.url('/a.txt')
+    await fs.url('/a.txt')
+    assert Signer.mints == 2  # passthrough, not cached

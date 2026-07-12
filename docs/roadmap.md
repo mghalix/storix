@@ -12,11 +12,19 @@ and for individual decisions: `docs/adr/`.
       metadata/URLs, config/factory, workspaces, teardown,
       DataUrlLayer + MetadataLayer (portable capabilities via layers)
 
-## 0.2.x - polish
+## 0.2.1
 
-- [x] `CacheLayer`: read-through metadata cache (stat/list_dir/exists)
-  with evict-on-mutation + opt-in TTL, and a pluggable `CacheStore`
-  (cashews-shaped; in-memory default, swap for Redis/etc.) - vroom
+- [x] `CacheLayer`: configurable read-through cache. Per-op specs
+  (`metadata` on by default; `du`, `read`, `url` opt-in) as
+  `bool | CacheOp`, each with its own `ttl`/`store` (share one or split,
+  e.g. metadata in Redis + content on a bounded local store) and,
+  for `read`, a per-file `max_bytes` cap. Evict-on-mutation
+  (metadata: path+parent; du: ancestor chain; read: the file); `url` is
+  TTL-only and capped to the URL lifetime. Keys follow
+  `<namespace>[:<environment>]:<op>:<locator>`, keyed on the physical
+  `locate()` so sessions sharing a store never collide. Pluggable
+  `CacheStore` (cashews-shaped; in-memory default with optional
+  `maxsize` LRU, swap for Redis/etc.) - vroom
 
 - `MountLayer`: unix-style multi-container compositor (designed, see
   deferred-decisions.md)

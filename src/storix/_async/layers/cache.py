@@ -9,7 +9,7 @@ import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Protocol
 
-from storix.constants import DEFAULT_CACHE_NAMESPACE
+from storix.constants import DEFAULT_CACHE_NAMESPACE, DEFAULT_URL_EXPIRY_SECONDS
 from storix.errors import PathNotFoundError
 
 from .base import LayerBase
@@ -134,12 +134,13 @@ class _Op:
 
 
 class CacheLayer(LayerBase):
-    """Configurable read-through cache: metadata, du, and/or content.
+    """Configurable read-through cache: metadata, du, content, and URLs.
 
     ``metadata`` (default on) caches stat/list_dir/exists - the ops
     navigation hammers. ``du`` caches the expensive tree-size walk.
-    ``read`` caches file content. Each is ``bool | CacheOp``: ``True`` for
-    defaults, ``cache(ttl=.., store=.., max_bytes=..)`` to override,
+    ``read`` caches file content. ``url`` caches presigned URLs
+    (TTL-only; see :meth:`make_url`). Each is ``bool | CacheOp``: ``True``
+    for defaults, ``cache(ttl=.., store=.., max_bytes=..)`` to override,
     ``False`` to disable. Every mutation *through this layer* evicts the
     entries it affects (metadata: path+parent; du: ancestors; read: the
     file), so the session always sees its own writes.
@@ -158,13 +159,14 @@ class CacheLayer(LayerBase):
        default ``None`` never expires and is only safe for a single owner.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - a kw-only config surface, not a call site
         self,
         backend: StorageBackend,
         *,
         metadata: bool | CacheOp = True,
         du: bool | CacheOp = False,
         read: bool | CacheOp = False,
+        url: bool | CacheOp = False,
         store: CacheStore | None = None,
         ttl: float | None = None,
         namespace: str = DEFAULT_CACHE_NAMESPACE,
@@ -174,7 +176,12 @@ class CacheLayer(LayerBase):
         default_store = store or InMemoryCacheStore()
         self._segments = tuple(p for p in (namespace, environment) if p)
         self._ops: dict[str, _Op] = {}
-        for name, spec in (('metadata', metadata), ('du', du), ('read', read)):
+        for name, spec in (
+            ('metadata', metadata),
+            ('du', du),
+            ('read', read),
+            ('url', url),
+        ):
             resolved = self._resolve(spec, default_store, ttl)
             if resolved is not None:
                 self._ops[name] = resolved
@@ -281,6 +288,32 @@ class CacheLayer(LayerBase):
         if op.max_bytes is None or len(data) <= op.max_bytes:
             await op.store.set(key, data, expire=op.ttl)
         return data
+
+    async def make_url(
+        self, path: PurePosixPath, *, expires_in: int | None = None
+    ) -> str:
+        """Return a presigned URL, cached until (before) it expires.
+
+        Unlike the other ops this is TTL-only: a minted URL stays valid
+        for its lifetime no matter how the object changes, so mutations do
+        not evict it. The entry never outlives the URL - it is capped at
+        the URL's lifetime (``expires_in``, or the provider default), so a
+        cached URL is never served dead. ``expires_in`` is part of the key
+        (different lifetimes are different URLs). Set the op's ``ttl``
+        below ``expires_in`` for a safety margin.
+        """
+        op = self._ops.get('url')
+        if op is None:
+            return await self._inner.make_url(path, expires_in=expires_in)
+        lifetime = expires_in if expires_in is not None else DEFAULT_URL_EXPIRY_SECONDS
+        key = f'{self._key("url", path)}:{expires_in}'
+        hit = await op.store.get(key, _MISS)
+        if hit is not _MISS:
+            return hit
+        signed = await self._inner.make_url(path, expires_in=expires_in)
+        cache_ttl = min(op.ttl, lifetime) if op.ttl is not None else lifetime
+        await op.store.set(key, signed, expire=cache_ttl)
+        return signed
 
     # --- eviction (per enabled op, in that op's store) ---
 
