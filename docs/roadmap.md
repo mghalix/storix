@@ -14,6 +14,9 @@ and for individual decisions: `docs/adr/`.
 
 ## 0.2.x - polish
 
+- [x] `CacheLayer`: read-through metadata cache (stat/list_dir/exists)
+  with evict-on-mutation + opt-in TTL - navigation vroom on cloud
+
 - `MountLayer`: unix-style multi-container compositor (designed, see
   deferred-decisions.md)
 - Range reads: `read_stream(start=, length=)` port extension ->
@@ -38,7 +41,6 @@ and for individual decisions: `docs/adr/`.
 - Agent story: capability-stripped sessions (a sandboxed session whose
   backend handle cannot unmask paths), audit/ObservabilityLayer,
   possible MCP server
-- `CacheLayer`
 - Staged-write transactions (`with fs.transaction():` - all-or-nothing
   for new writes, honestly scoped)
 

@@ -17,7 +17,12 @@ import pytest
 from storix._async.backends import StorageBackend
 from storix._async.backends.local import LocalBackend
 from storix._async.backends.memory import MemoryBackend
-from storix._async.layers import DataUrlLayer, MetadataLayer, SandboxLayer
+from storix._async.layers import (
+    CacheLayer,
+    DataUrlLayer,
+    MetadataLayer,
+    SandboxLayer,
+)
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -36,6 +41,7 @@ from storix.types import EchoMode
         'sandbox',
         'metadata',
         'dataurl',
+        'cache',
         pytest.param('azure', marks=pytest.mark.integration),
     ]
 )
@@ -61,6 +67,11 @@ async def backend(
         return
     if request.param == 'dataurl':
         yield DataUrlLayer(MemoryBackend())
+        return
+    if request.param == 'cache':
+        # the whole conformance suite proves cache eviction is correct:
+        # every write-then-read must return fresh data, not a stale hit
+        yield CacheLayer(MemoryBackend())
         return
 
     account = os.environ.get('ADLSG2_ACCOUNT_NAME')

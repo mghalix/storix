@@ -12,6 +12,7 @@ rather than inside the core or any backend.
 from __future__ import annotations
 
 import dataclasses
+import time
 
 from typing import TYPE_CHECKING
 
@@ -530,3 +531,142 @@ class MetadataLayer(LayerBase):
         if moved:
             table.update(moved)
             self._save(table)
+
+
+# distinct from a cached ``None`` (a known-absent path)
+_MISS: object = object()
+
+
+class CacheLayer(LayerBase):
+    """Read-through cache for metadata: stat / list_dir / exists.
+
+    Serves the operations navigation hammers (``ls``, ``cd``, ``tree``)
+    from memory after the first hit - a big win on network backends where
+    each is a round-trip. ``read`` stays a pass-through (content is not
+    cached in this version).
+
+    Every mutation *through this layer* evicts the entries it affects, so
+    the session always sees its own writes. ``ttl`` (seconds) bounds
+    staleness from writers that bypass the layer; the default ``None``
+    caches until mutated - correct and fastest for a single session
+    driving one store. Not a capability (``provides`` stays None):
+    compose with ``with_layer(CacheLayer, ttl=...)``.
+    """
+
+    def __init__(self, backend: StorageBackend, *, ttl: float | None = None) -> None:
+        super().__init__(backend)
+        self._ttl = ttl
+        self._stat: dict[str, tuple[float, RawStat | None]] = {}
+        self._list: dict[str, tuple[float, list[Entry]]] = {}
+
+    # --- cache primitives ---
+
+    def _get(self, cache: dict, key: str) -> object:
+        entry = cache.get(key)
+        if entry is None:
+            return _MISS
+        stamped, value = entry
+        if self._ttl is not None and time.monotonic() - stamped > self._ttl:
+            cache.pop(key, None)
+            return _MISS
+        return value
+
+    def _put(self, cache: dict, key: str, value: object) -> None:
+        cache[key] = (time.monotonic(), value)
+
+    def _evict(self, path: PurePosixPath) -> None:
+        self._stat.pop(str(path), None)
+        self._list.pop(str(path), None)  # the path's own listing (if a dir)
+        self._list.pop(str(path.parent), None)  # parent listing membership changed
+
+    def _evict_tree(self, path: PurePosixPath) -> None:
+        prefix = str(path).rstrip('/') + '/'
+        for cache in (self._stat, self._list):
+            for key in [k for k in cache if k == str(path) or k.startswith(prefix)]:
+                cache.pop(key, None)
+        self._list.pop(str(path.parent), None)
+
+    # --- cached reads ---
+
+    def stat(self, path: PurePosixPath) -> RawStat:
+        """Return raw facts, cached (negatives cached as absent too)."""
+        cached = self._get(self._stat, str(path))
+        if cached is not _MISS:
+            if cached is None:
+                raise PathNotFoundError(path)
+            return cached  # type: ignore[return-value]
+        try:
+            raw = self._inner.stat(path)
+        except PathNotFoundError:
+            self._put(self._stat, str(path), None)
+            raise
+        self._put(self._stat, str(path), raw)
+        return raw
+
+    def exists(self, path: PurePosixPath) -> bool:
+        """Derive existence from the stat cache (shares one cache)."""
+        try:
+            self.stat(path)
+        except PathNotFoundError:
+            return False
+        return True
+
+    def list_dir(self, path: PurePosixPath) -> Iterator[Entry]:
+        """Yield children, cached as a materialized list."""
+        cached = self._get(self._list, str(path))
+        if cached is not _MISS:
+            for entry in cached:  # type: ignore[union-attr]
+                yield entry
+            return
+        entries = list(self._inner.list_dir(path))
+        self._put(self._list, str(path), entries)
+        for entry in entries:
+            yield entry
+
+    # --- mutations evict, then delegate ---
+
+    def write(
+        self,
+        path: PurePosixPath,
+        data: Iterator[bytes],
+        *,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write, then evict the path and its parent listing."""
+        self._inner.write(
+            path, data, mode=mode, content_type=content_type, metadata=metadata
+        )
+        self._evict(path)
+
+    def delete(self, path: PurePosixPath) -> None:
+        """Delete a leaf, then evict it and its parent listing."""
+        self._inner.delete(path)
+        self._evict(path)
+
+    def delete_tree(self, path: PurePosixPath) -> None:
+        """Delete a tree, then evict every cached entry beneath it."""
+        self._inner.delete_tree(path)
+        self._evict_tree(path)
+
+    def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
+        """Create a directory, then evict it and its parent listing."""
+        self._inner.make_dir(path, parents=parents)
+        self._evict(path)
+
+    def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
+        """Move, then evict both subtrees."""
+        self._inner.move(src, dst)
+        self._evict_tree(src)
+        self._evict_tree(dst)
+
+    def copy(self, src: PurePosixPath, dst: PurePosixPath) -> None:
+        """Copy, then evict the destination."""
+        self._inner.copy(src, dst)
+        self._evict(dst)
+
+    def set_metadata(self, path: PurePosixPath, metadata: Mapping[str, str]) -> None:
+        """Replace metadata, then evict the path's cached stat."""
+        self._inner.set_metadata(path, metadata)
+        self._evict(path)

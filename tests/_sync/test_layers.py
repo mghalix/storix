@@ -251,3 +251,94 @@ def test_metadata_layer_delete_drops_sidecar_entry():
     # recreating without metadata must not resurrect the old entry
     fs.echo(b'y', '/a.txt')
     assert (fs.stat('/a.txt')).metadata is None
+
+
+# --- CacheLayer ---
+
+
+class CountingBackend(MemoryBackend):
+    """MemoryBackend that counts inner stat/list_dir calls, to prove hits."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stat_calls = 0
+        self.list_calls = 0
+
+    def stat(self, path):
+        self.stat_calls += 1
+        return super().stat(path)
+
+    def list_dir(self, path):
+        self.list_calls += 1
+        yield from super().list_dir(path)
+
+
+def test_cache_layer_serves_repeat_reads_from_memory():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    inner = CountingBackend()
+    fs = Storix(CacheLayer(inner))
+    fs.mkdir('/d')
+    fs.touch('/d/a.txt')
+
+    inner.stat_calls = inner.list_calls = 0
+    for _ in range(3):
+        fs.stat('/d/a.txt')
+        fs.ls('/d')
+    # 3 iterations, but each distinct path hits the inner backend once:
+    # /d/a.txt (fs.stat) and /d (ls's internal kind check) -> 2 stats, 1 list
+    assert inner.stat_calls == 2
+    assert inner.list_calls == 1
+
+
+def test_cache_layer_evicts_on_write():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    fs = Storix(CacheLayer(MemoryBackend()))
+    fs.echo(b'one', '/a.txt')
+    assert (fs.stat('/a.txt')).size == 3  # warms the cache
+    fs.echo(b'seventeen bytes!!', '/a.txt')  # mutation must evict
+    assert (fs.stat('/a.txt')).size == 17  # not a stale 3
+
+
+def test_cache_layer_evicts_listing_on_new_file():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    fs = Storix(CacheLayer(MemoryBackend()))
+    fs.mkdir('/d')
+    assert fs.ls('/d') == []  # warms empty listing
+    fs.touch('/d/a.txt')  # must evict the parent listing
+    assert [p.name for p in fs.ls('/d')] == ['a.txt']
+
+
+def test_cache_layer_caches_negative_then_evicts_on_create():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    fs = Storix(CacheLayer(MemoryBackend()))
+    assert not fs.exists('/a.txt')  # caches 'absent'
+    fs.touch('/a.txt')  # evicts the negative
+    assert fs.exists('/a.txt')
+
+
+def test_cache_layer_ttl_expires(monkeypatch: pytest.MonkeyPatch):
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer
+
+    clock = {'t': 1000.0}
+    monkeypatch.setattr('time.monotonic', lambda: clock['t'])
+
+    inner = CountingBackend()
+    fs = Storix(CacheLayer(inner, ttl=30))
+    fs.touch('/a.txt')
+    inner.stat_calls = 0
+    fs.stat('/a.txt')  # miss -> 1
+    fs.stat('/a.txt')  # hit -> still 1
+    assert inner.stat_calls == 1
+
+    clock['t'] += 31  # advance the clock past the ttl
+    fs.stat('/a.txt')  # expired -> re-fetch
+    assert inner.stat_calls == 2
