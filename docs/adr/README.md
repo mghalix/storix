@@ -12,4 +12,5 @@ cousins; FastAPI keeps the same knowledge as narrative docs
 (alternatives.md, history-design-future.md) - we use ADRs while the
 project is design-heavy and may distill narrative docs from them later.
 
-All decisions were made during the 0.2.0 rework (2026-07-10/11).
+Decisions 0001-0013 were made during the 0.2.0 rework (2026-07-10/11);
+0014 onward cover 0.2.1 polish (2026-07-11/12).

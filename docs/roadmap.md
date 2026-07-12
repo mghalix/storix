@@ -24,10 +24,18 @@ and for individual decisions: `docs/adr/`.
   `<namespace>[:<environment>]:<op>:<locator>`, keyed on the physical
   `locate()` so sessions sharing a store never collide. Pluggable
   `CacheStore` (cashews-shaped; in-memory default with optional
-  `maxsize` LRU, swap for Redis/etc.) - vroom
+  `maxsize` LRU, swap for Redis/etc.) - vroom (ADR 0014)
+
+- [ ] CLI layers: `sx --cache [--cache-ttl N]` (metadata+du+read,
+  bounded) and `--sandbox PATH`, applied sandbox-innermost /
+  cache-outermost; REPL start banner + `refresh` command +
+  `provider` layers line. Opt-in, shell is where it pays off (ADR 0015)
 
 - `MountLayer`: unix-style multi-container compositor (designed, see
   deferred-decisions.md)
+- CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
+  (ruff-style precedence) with an ordered `[[layers]]` DSL; backend
+  config stays shared, layer stack is CLI-scoped (ADR 0015)
 - Range reads: `read_stream(start=, length=)` port extension ->
   `fs.stream`/`head`/`tail`; needed for video seeking / HTTP Range
 - `tree`, `find`, `wc` on the new core; `glob`
