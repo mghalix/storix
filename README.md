@@ -9,21 +9,31 @@
 </p>
 
 <p align="center">
-  One unix-flavored filesystem API over any storage — local disk, in-memory,<br>
-  Azure Data Lake — sync &amp; async, sandboxable, fully typed.
+  One unix-flavored filesystem API over any storage: local disk, in-memory,<br>
+  Azure Data Lake. Python-first, sync and async, sandboxable, fully typed.
 </p>
 
 <p align="center">
+  <a href="https://storix.mghalix.com"><img src="https://img.shields.io/badge/docs-storix.mghalix.com-8A2BE2" alt="Documentation"></a>
   <a href="https://pypi.org/project/storix/"><img src="https://badge.fury.io/py/storix.svg" alt="PyPI version"></a>
   <a href="https://github.com/mghalix/storix"><img src="https://img.shields.io/github/stars/mghalix/storix.svg?style=social" alt="GitHub stars"></a>
   <a href="https://github.com/mghalix/storix/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mghalix/storix.svg" alt="License"></a>
 </p>
 
-> **0.2.0 is a ground-up rework** (hexagonal core, generated sync flavor,
-> layers, capabilities). Migrating from 0.1.x? See the table in
-> [release-notes.md](./release-notes.md). Full documentation site: coming soon.
+<p align="center">
+  <b>Documentation</b>: <a href="https://storix.mghalix.com">storix.mghalix.com</a>
+</p>
 
 ---
+
+Storix puts one unix filesystem interface in front of every storage backend, so
+you work with cloud storage the way you already work with local files: `ls`,
+`cd`, `cat`, `mkdir`, `mv`, `rm`. The backend can be your disk, an in-memory
+store for tests, or Azure Data Lake in production, behind one small, fully typed
+API, sync or async. Swap the backend, keep the code.
+
+It is not a plumbing competitor to the cloud SDKs. It is the ergonomic layer over
+them, the way FastAPI is a layer over the web rather than a new web server.
 
 ## Install
 
@@ -32,7 +42,7 @@ uv add storix            # local filesystem + in-memory
 uv add "storix[azure]"   # + Azure Data Lake Gen2 (HNS accounts)
 ```
 
-## Five minutes of storix
+## Quick look
 
 ```python
 from storix import Storix
@@ -44,155 +54,57 @@ fs.mkdir('/docs')
 fs.echo(b'hello, storix!', '/docs/readme.txt')
 print(fs.cat('/docs/readme.txt'))       # b'hello, storix!'
 
-fs.cd('/docs')                          # sessions have a cwd, like a shell
-fs.touch('a.txt', 'b.txt')              # variadic, like real touch
-print(fs.ls())                          # dotfiles hidden, like real ls
-fs.mkdir('/archive')
-fs.mv('a.txt', 'b.txt', '/archive')     # last argument is the destination
-fs.rm('/archive', recursive=True)       # rm -r; rmdir is strictly empty dirs
+fs.cd('/docs')                          # a session has a cwd, like a shell
+fs.mv('readme.txt', '/archive')         # the last argument is the destination
 ```
 
-Async is the same API under `storix.aio` - every operation awaitable:
+Async is the same API under `storix.aio`, generated from the sync source so the
+two never drift:
 
 ```python
-from storix.aio import Storix
-from storix.aio.backends import AzureBackend
+from storix.aio import get_storage
 
-async with Storix(AzureBackend('raw', account_name=..., credential=...)) as fs:
+async with get_storage('azure') as fs:
     await fs.echo(b'...', '/report.csv')
-    print(await fs.url('/report.csv', expires_in=600))   # SAS link
+    print(await fs.url('/report.csv', expires_in=600))   # presigned SAS link
 ```
 
-(The sync flavor is *generated* from the async source - identical semantics,
-verified by one conformance suite running against every backend in both
-flavors.)
+## Highlights
 
-## Configuration
+- **Unix semantics, everywhere.** `ls`/`cd`/`cat`/`du`/`mv` with a real session
+  and cwd, identical across local, memory, and cloud. There is an `sx` shell too.
+- **Python-first and streaming.** `echo` takes `bytes`, `str`, an iterator, or an
+  async iterator, so large files move through bounded memory instead of loading
+  whole.
+- **Composable layers.** Sandbox a session (escape-proof chroot), add a
+  read-through cache, or backfill capabilities, all as middleware that wraps any
+  backend.
+- **Sync and async, one API**, generated from a single source and proven by one
+  conformance suite across every backend.
+- **Typed and safe.** Fully typed and `py.typed`. Every failure raises a typed
+  error, and a sandbox cannot be escaped, not even by the code inside it.
 
-`get_storage()` builds a session from the environment (see
-[env.example](./env.example)):
-
-```bash
-STORIX_PROVIDER=azure
-STORIX_AZURE_CONTAINER=raw
-STORIX_AZURE_ACCOUNT_NAME=myaccount
-STORIX_AZURE_CREDENTIAL=...
-```
-
-```python
-from storix import get_storage
-
-fs = get_storage()                        # env-driven; defaults to ~/.storix
-fs = get_storage('local', base='~/x')     # typed per-provider overrides
-```
-
-## Sandboxing & scratch spaces
-
-Layers are backends that wrap backends. `SandboxLayer` is chroot as
-middleware - escape-proof, with errors re-scoped so the real prefix never
-leaks to the sandboxed caller:
-
-```python
-from storix import SandboxLayer, Storix, temporary
-from storix.backends import LocalBackend
-
-backend = LocalBackend('/srv/data')
-fs = Storix(SandboxLayer(backend, root='/tenant-42'))   # escape-proof jail
-
-with fs.scratch() as tmp:               # ephemeral workspace on fs's OWN
-    tmp.echo(b'work', '/notes.txt')     # backend (any backend) - unique
-                                        # subtree, deleted on exit
-
-with fs.scratch(root='/agent-7') as tmp:  # pinned: created if missing,
-    ...                                   # reused, PERSISTS on exit
-
-with temporary() as fs:                 # local-only convenience: zero-config
-    fs.echo(b'scratch', '/tmp.txt')     # mkdtemp on real disk, self-destructs
-```
-
-Write your own layers by subclassing `LayerBase` (override what you
-change, upgrade the capabilities you add) — see
-[samples/layers/](./samples/layers/).
-
-## Capabilities
-
-Backends advertise optional features; storix fails loudly instead of
-silently dropping arguments:
-
-```python
-fs.echo(b'x', '/f.png', content_type='image/png')       # azure: stored
-fs.set_metadata('/f.png', {'owner': 'me'}, merge=True)  # azure/memory
-fs.url('/f.png', expires_in=600)                        # presigned (SAS)
-fs.data_url('/f.png')                                   # any backend
-# unsupported -> UnsupportedOperationError naming the missing capability
-```
-
-**Portable capabilities via layers.** Bundled layers backfill missing
-capabilities so one construction path works across providers.
-`with_layer_missing` infers the capability from the layer and skips it
-where the backend is already native:
-
-```python
-from storix import DataUrlLayer, MetadataLayer
-
-# url() everywhere: native SAS on azure, data: URLs on local
-fs = get_storage('local').with_layer_missing(DataUrlLayer)
-# custom metadata everywhere: native on azure, JSON sidecar on local
-fs = fs.with_layer_missing(MetadataLayer)
-# with_layer forwards typed kwargs to the layer, Starlette-style
-# (serialize/deserialize are object<->bytes; orjson works, json.dumps
-# does not - it returns str):
-fs = fs.with_layer(MetadataLayer, serialize=orjson.dumps, deserialize=orjson.loads)
-```
-
-Switching `'local'` to `'azure'` needs no code change — the native
-capability wins and the layer becomes a no-op.
-
-## Caching
-
-`CacheLayer` is a read-through cache — another layer. Cache the ops that
-repeat: metadata (`stat`/`ls`/`exists`, on by default), the expensive
-`du` walk, file `read`s, and presigned `url`s. Each op is `True` or a
-`cache(...)` spec; every write *through the layer* evicts what it touches.
-
-```python
-from storix import CacheLayer, cache, get_storage
-
-fs = get_storage('azure').with_layer(
-    CacheLayer,
-    du=cache(ttl=60),                 # opt in; du (the tree walk) is the big win
-    read=cache(max_bytes=8 << 20),    # content, capped per file
-)
-fs.du('/big-tree')                    # first call: a full walk
-fs.du('/big-tree')                    # then: instant, until you write
-```
-
-The store is pluggable — a cashews-shaped `get`/`set`/`delete`/`delete_match`
-protocol — so the in-memory default swaps for a `cashews.Cache` (Redis,
-disk) with no adapter. Keys are namespaced and keyed on the physical
-location, so sessions sharing one store never collide. Correctness assumes
-you are the only writer; pass `ttl` to bound staleness.
-
-In the `sx` shell, one flag turns it on:
-
-```bash
-sx -p azure --cache                        # cache on: du/ls/stat/cat
-sx -p azure --cache --sandbox /tenant-42   # compose with a jail
-# in the REPL: `refresh` clears it; `provider` shows the stack + store
-```
+Full tutorials, task recipes (FastAPI, settings, caching, testing, custom
+backends), and the API reference live at
+**[storix.mghalix.com](https://storix.mghalix.com)**.
 
 ## Backends
 
 | Backend | Import | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Local disk | `storix.backends.LocalBackend` | anchored at a base directory |
-| In-memory | `storix.backends.MemoryBackend` | reference backend; great for tests |
+| In-memory | `storix.backends.MemoryBackend` | reference backend, great for tests |
 | Azure ADLS Gen2 | `storix.backends.AzureBackend` | requires hierarchical namespaces |
 
-Third-party backends implement the ~13-method `StorageBackend` port (or
-subclass `BackendBase` for generic fallbacks) and hook in via
-`register_backend()`.
+Third-party backends implement the small `StorageBackend` port and register via
+`register_backend()`. See
+[Write a custom backend](https://storix.mghalix.com/recipes/custom-backend/).
+
+## Migrating from 0.1.x
+
+0.2.0 was a ground-up rework (hexagonal core, generated sync flavor, layers,
+capabilities). See the migration table in [release-notes.md](./release-notes.md).
 
 ## License
 
-Storix is licensed under the Apache 2.0 License
+Apache 2.0. See [LICENSE](./LICENSE).
