@@ -54,16 +54,24 @@ features = [
 [project.theme.icon]
 repo = "fontawesome/brands/github"
 
-# Dark by default (MCP-docs feel), with a toggle to light.
+# System-aware 3-way toggle: auto (follow OS) -> light -> dark, cycling.
+# The icon shows the ACTIVE state: auto glyph, sun in light, moon in dark.
 [[project.theme.palette]]
-scheme = "slate"
-toggle.icon = "lucide/moon"
+media = "(prefers-color-scheme)"
+toggle.icon = "material/brightness-auto"
 toggle.name = "Switch to light mode"
 
 [[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
 scheme = "default"
 toggle.icon = "lucide/sun"
 toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+toggle.icon = "lucide/moon"
+toggle.name = "Switch to system preference"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
