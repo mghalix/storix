@@ -144,21 +144,17 @@ def generate() -> int:
     # C416 ([x for x in it] -> list(it)) and UP028 (yield loop -> yield from).
     targets = [str(dst) for _, dst in MAPPINGS if dst.exists()]
     unsafe_rules = 'C416,UP028'
+    # invoke ruff via the current interpreter, not a bare ``ruff`` on PATH:
+    # under some launchers (e.g. `just`) PATH may miss it, and check=False
+    # would then silently skip the fix pass, leaving un-canonicalized output.
+    ruff = [sys.executable, '-m', 'ruff']
     subprocess.run(
-        [
-            'ruff',
-            'check',
-            '--fix',
-            '--unsafe-fixes',
-            '--select',
-            unsafe_rules,
-            '--quiet',
-            *targets,
-        ],
+        [*ruff, 'check', '--fix', '--unsafe-fixes', '--select', unsafe_rules,
+         '--quiet', *targets],
         check=False,
-    )
-    subprocess.run(['ruff', 'check', '--fix', '--quiet', *targets], check=False)
-    subprocess.run(['ruff', 'format', '--quiet', *targets], check=True)
+    )  # fmt: skip
+    subprocess.run([*ruff, 'check', '--fix', '--quiet', *targets], check=False)
+    subprocess.run([*ruff, 'format', '--quiet', *targets], check=True)
     return 0
 
 

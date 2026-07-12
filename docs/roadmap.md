@@ -61,11 +61,24 @@ and for individual decisions: `docs/adr/`.
 
 ## 0.3.0 - adoption
 
+Multiple ergonomic front-ends over the one core, and breadth of
+providers - the two levers that make storix promotable.
+
 - `storix.pathlike`: pathlib-flavored adapter over the same core
   (the cloudpathlib audience)
+- Stateless flat facade (working name `Boring[Storix]` / `storix.flat`):
+  drops cwd/session, exposes `read`/`write`/`size`/`read_stream`/
+  `write_stream`/`delete`/`exists`/`list` on absolute keys - the
+  object-store mental model for users unfamiliar with the unix metaphor.
+  A thin front-end over the same engine, not a new one; widens the
+  audience without diluting the identity (naming TBD)
 - `FsspecBackend` / `OpendalBackend`: one adapter each = every provider
   those ecosystems support (S3, GCS, SFTP...) plus their maturity and
   speed - storix stays the DX layer, like FastAPI over Starlette
+- fsspec-compatible *interface* (storix *implementing* `AbstractFileSystem`,
+  the inverse of `FsspecBackend`): lets the data ecosystem
+  (pandas/pyarrow/polars/dask) read storix paths. Big adoption lever,
+  big surface - its own design pass
 - URI factory (`get_storage('azure://container/path')`) + entry-point
   plugin discovery
 
