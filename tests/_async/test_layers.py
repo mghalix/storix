@@ -644,8 +644,8 @@ async def test_uncached_bypasses_the_cache_for_a_fresh_read():
     await fs.echo(b'x', '/a.txt')
 
     Counter.stat_calls = 0
-    await fs.stat('/a.txt')       # miss -> 1 backend stat, now cached
-    await fs.stat('/a.txt')       # hit -> still 1
+    await fs.stat('/a.txt')  # miss -> 1 backend stat, now cached
+    await fs.stat('/a.txt')  # hit -> still 1
     assert Counter.stat_calls == 1
     await fs.uncached.stat('/a.txt')  # bypass -> hits the backend again
     assert Counter.stat_calls == 2
