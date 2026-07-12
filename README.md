@@ -14,7 +14,6 @@
 </p>
 
 <p align="center">
-  <a href="https://storix.mghalix.com"><img src="https://img.shields.io/badge/docs-storix.mghalix.com-8A2BE2" alt="Documentation"></a>
   <a href="https://pypi.org/project/storix/"><img src="https://badge.fury.io/py/storix.svg" alt="PyPI version"></a>
   <a href="https://github.com/mghalix/storix"><img src="https://img.shields.io/github/stars/mghalix/storix.svg?style=social" alt="GitHub stars"></a>
   <a href="https://github.com/mghalix/storix/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mghalix/storix.svg" alt="License"></a>
