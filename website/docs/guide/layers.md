@@ -1,0 +1,88 @@
+# Layers
+
+A layer is a backend that wraps another backend. Because it implements the same
+`StorageBackend` port, it composes with backends and with other layers, the way
+middleware wraps a web app. Layers are how storix adds cross-cutting behavior
+(sandboxing, caching, capability backfill) without touching the core or the
+backends.
+
+```python
+from storix import Storix, SandboxLayer
+from storix.backends import LocalBackend
+
+backend = LocalBackend("/srv/data")
+fs = Storix(SandboxLayer(backend, root="/tenant-42"))
+```
+
+You can also add layers fluently, which returns a new session and leaves the
+original untouched:
+
+```python
+fs = Storix(LocalBackend("/srv/data")).with_layer(SandboxLayer, root="/tenant-42")
+```
+
+## Sandbox: chroot as middleware
+
+`SandboxLayer` confines a session beneath a virtual root. Inside it, `/` means
+the root, and traversal cannot escape, even if a caller tries to bypass the core
+with `..`. Errors are re-scoped to the virtual namespace, so the real path prefix
+never leaks. A sandboxed session simply cannot see or reach anything above its
+root, which makes it a real security boundary, not a convenience.
+
+```python
+fs = Storix(SandboxLayer(LocalBackend("/srv/data"), root="/tenant-42"))
+fs.cat("/../secrets.txt")   # raises PathNotFoundError, not a jailbreak
+```
+
+## Cache: read-through, opt-in per operation
+
+`CacheLayer` caches the operations that repeat. Metadata (`stat`/`ls`/`exists`)
+is cached by default; the expensive tree walk (`du`), file content (`read`), and
+presigned URLs are opt-in. Every write through the layer evicts what it touched,
+so you always see your own changes.
+
+```python
+from storix import CacheLayer, cache, get_storage
+
+fs = get_storage("azure").with_layer(
+    CacheLayer,
+    du=cache(ttl=60),                 # opt in; the tree walk is the big win
+    read=cache(max_bytes=8 << 20),    # content, capped per file
+)
+```
+
+The store is pluggable (a cashews-shaped protocol), so the in-memory default
+swaps for Redis or disk with no adapter. Correctness assumes you are the only
+writer; pass a `ttl` to bound staleness.
+
+## Portable capabilities
+
+Some layers backfill a capability a backend lacks, so one code path spans
+providers. `with_layer_missing` applies a layer only when the backend is not
+already native, inferring the capability from the layer:
+
+```python
+from storix import DataUrlLayer, MetadataLayer, get_storage
+
+fs = (
+    get_storage("local")
+    .with_layer_missing(DataUrlLayer)    # url() everywhere: SAS on azure, data: URL on local
+    .with_layer_missing(MetadataLayer)   # custom metadata everywhere
+)
+```
+
+Switch `local` to `azure` and the native capability wins, so the layer becomes a
+no-op. No code changes.
+
+## Bypassing a layer
+
+`without_layer` returns a session with a layer type stripped, and `uncached` is
+sugar for dropping the cache, which is handy for a guaranteed-fresh read:
+
+```python
+fs.uncached.ls("/live")                 # bypass the cache for this read
+fs.without_layer(CacheLayer).du("/big")
+```
+
+A `SandboxLayer` is deliberately non-removable. You can always ask for less
+caching; you can never ask your way out of a security boundary.

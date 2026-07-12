@@ -11,9 +11,19 @@ copyright = "Copyright &copy; 2026 Mohanad Ghali"
 repo_url = "https://github.com/mghalix/storix"
 repo_name = "mghalix/storix"
 
-# Explicit navigation — grows as we add pages.
+# Explicit navigation. Grows as we add pages.
 nav = [
   { "Home" = "index.md" },
+  { "Get started" = [
+    { "Introduction" = "get-started/introduction.md" },
+    { "Installation" = "get-started/installation.md" },
+    { "Quickstart" = "get-started/quickstart.md" },
+  ] },
+  { "Guide" = [
+    { "Reading and writing" = "guide/reading-and-writing.md" },
+    { "Backends" = "guide/backends.md" },
+    { "Layers" = "guide/layers.md" },
+  ] },
 ]
 
 [project.theme]
