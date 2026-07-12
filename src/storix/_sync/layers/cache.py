@@ -16,7 +16,7 @@ from .base import LayerBase
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Callable, Iterator, Mapping
     from pathlib import PurePosixPath
     from typing import Any
 
@@ -106,6 +106,11 @@ class CacheLayer(LayerBase):
     or any :class:`CacheStore` - so multiple app instances share one
     metadata cache. ``ttl`` (seconds) applies to every entry.
 
+    Caching *more* operations is a subclass, not a config flag - each op
+    has its own invalidation. Use the protected primitives (``_cached``,
+    ``_key``, ``_store``, ``_evict``); see ``samples/layers/`` for a
+    ``du``-caching subclass.
+
     .. warning::
        Correctness assumes yours is the only writer of this store. The
        cache cannot see changes made *outside* this layer (another
@@ -135,6 +140,21 @@ class CacheLayer(LayerBase):
         # physical object. locate() is pure (no I/O) and prefix-consistent
         # (a child's locator extends its parent's), so tree eviction works.
         return f'{self._prefix}:{op}:{self._inner.locate(path)}'
+
+    def _cached(self, op: str, path: PurePosixPath, fetch: Callable[[], Any]) -> Any:
+        """Read-through a scalar op: cache hit, or fetch-then-store.
+
+        The extension point for subclasses caching more operations - call
+        it from the read method, and extend ``_evict``/``_evict_tree``
+        with that op's key so mutations invalidate it.
+        """
+        key = self._key(op, path)
+        hit = self._store.get(key, _MISS)
+        if hit is not _MISS:
+            return hit
+        value = fetch()
+        self._store.set(key, value, expire=self._ttl)
+        return value
 
     def _evict(self, path: PurePosixPath) -> None:
         self._store.delete(self._key('stat', path))
