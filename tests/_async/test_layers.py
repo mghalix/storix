@@ -572,3 +572,22 @@ async def test_cache_url_off_by_default():
     await fs.url('/a.txt')
     await fs.url('/a.txt')
     assert Signer.mints == 2  # passthrough, not cached
+
+
+async def test_cache_clear_drops_only_this_namespace():
+    from storix._async import Storix
+    from storix._async.layers import CacheLayer, InMemoryCacheStore
+
+    store = InMemoryCacheStore()
+    fs = Storix(CacheLayer(MemoryBackend(), du=True, store=store, environment='prod'))
+    await fs.echo(b'x', '/a.txt')
+    await fs.stat('/a.txt')
+    await fs.du('/')
+    assert any(k.startswith('storix:prod:') for k in store._data)
+    # a foreign key sharing the same store (different namespace) must survive
+    await store.set('other:stat:/z', 'keep')
+
+    await fs.backend.clear()
+
+    assert await store.get('other:stat:/z') == 'keep'
+    assert not any(k.startswith('storix:prod:') for k in store._data)

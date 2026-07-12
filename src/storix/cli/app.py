@@ -11,12 +11,58 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from storix import get_storage
+from storix import CacheLayer, SandboxLayer, cache as cache_op, get_storage
 from storix.errors import StorageError
 
 
 if TYPE_CHECKING:
     from storix import Storix
+    from storix.backends import StorageBackend
+
+
+# cap cached file content at 8 MiB in the CLI, so `cat`ing a huge file
+# never balloons the session's memory
+_CLI_READ_CAP = 8 * 1024 * 1024
+
+
+def _apply_layers(
+    fs: Storix, *, cache: bool, cache_ttl: float | None, sandbox: str | None
+) -> Storix:
+    """Wrap the session in the requested layers - sandbox innermost."""
+    if sandbox is not None:
+        fs = fs.with_layer(SandboxLayer, root=sandbox)
+    if cache:
+        fs = fs.with_layer(
+            CacheLayer,
+            metadata=True,
+            du=True,
+            read=cache_op(max_bytes=_CLI_READ_CAP),
+            ttl=cache_ttl,
+        )
+    return fs
+
+
+def cache_layer(fs: Storix) -> CacheLayer | None:
+    """The active ``CacheLayer`` in the session's stack, if any."""
+    node: StorageBackend | None = fs.backend
+    while node is not None:
+        if isinstance(node, CacheLayer):
+            return node
+        node = getattr(node, '_inner', None)
+    return None
+
+
+def layer_summary(fs: Storix) -> str | None:
+    """A one-line description of the active layer stack (outermost first)."""
+    parts: list[str] = []
+    node: StorageBackend | None = fs.backend
+    while node is not None:
+        if isinstance(node, CacheLayer):
+            parts.append('cache on (du/ls/stat/cat)')
+        elif isinstance(node, SandboxLayer):
+            parts.append(f'sandbox {node.to_real("/")}')  # public audit handle
+        node = getattr(node, '_inner', None)
+    return ' · '.join(parts) if parts else None
 
 
 app = typer.Typer(
@@ -354,6 +400,9 @@ def provider() -> None:
     console.print(f'[green]cwd:[/green]     {fs.pwd()}')
     console.print(f'[green]home:[/green]    {fs.home}')
     console.print(f'[green]root uri:[/green] {fs.locate("/")}')
+    summary = layer_summary(fs)
+    if summary:
+        console.print(f'[green]layers:[/green]  {summary}')
 
 
 @app.command()
@@ -371,13 +420,26 @@ def _main(
     provider_: Annotated[
         str | None, typer.Option('-p', '--provider', help='local | azure | ...')
     ] = None,
+    cache: Annotated[
+        bool, typer.Option('--cache', help='read-through cache: du/ls/stat/cat')
+    ] = False,
+    cache_ttl: Annotated[
+        float | None,
+        typer.Option('--cache-ttl', help='seconds before cached entries expire'),
+    ] = None,
+    sandbox: Annotated[
+        str | None, typer.Option('--sandbox', help='jail the session under this path')
+    ] = None,
     interactive: Annotated[bool, typer.Option('-i', '--interactive')] = False,
 ) -> None:
     """Set up the session; launch the shell when no command is given."""
-    # rebuild only on explicit --provider, else keep the persistent session
-    # (so cwd survives across shell commands)
-    if provider_ is not None:
-        _session.fs = get_storage(provider_)
+    # rebuild on an explicit --provider or any layer flag, else keep the
+    # persistent session (so cwd survives across shell commands)
+    if provider_ is not None or cache or sandbox is not None:
+        base = get_storage(provider_) if provider_ is not None else get_storage()
+        _session.fs = _apply_layers(
+            base, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
+        )
 
     if ctx.invoked_subcommand is None or interactive:
         from .shell import start_shell

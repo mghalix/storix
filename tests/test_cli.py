@@ -86,3 +86,29 @@ def test_data_url_works_but_presigned_needs_capability():
     unsupported = run('url', '/a.txt')  # memory has no presigned_urls
     assert unsupported.exit_code == 1
     assert 'presigned_urls' in unsupported.stderr
+
+
+def test_apply_layers_composition_and_lookup():
+    from storix import CacheLayer, SandboxLayer
+    from storix.cli.app import _apply_layers, cache_layer, layer_summary
+
+    fs = _apply_layers(
+        Storix(MemoryBackend()), cache=True, cache_ttl=None, sandbox='/jail'
+    )
+    # sandbox innermost, cache outermost
+    assert isinstance(fs.backend, CacheLayer)
+    assert isinstance(fs.backend._inner, SandboxLayer)
+    assert cache_layer(fs) is fs.backend
+    summary = layer_summary(fs)
+    assert summary is not None
+    assert 'cache' in summary and 'sandbox' in summary
+
+
+def test_apply_layers_none_is_passthrough():
+    from storix.cli.app import _apply_layers, cache_layer, layer_summary
+
+    base = Storix(MemoryBackend())
+    fs = _apply_layers(base, cache=False, cache_ttl=None, sandbox=None)
+    assert fs is base
+    assert cache_layer(fs) is None
+    assert layer_summary(fs) is None

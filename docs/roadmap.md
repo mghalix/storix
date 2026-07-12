@@ -26,7 +26,7 @@ and for individual decisions: `docs/adr/`.
   `CacheStore` (cashews-shaped; in-memory default with optional
   `maxsize` LRU, swap for Redis/etc.) - vroom (ADR 0014)
 
-- [ ] CLI layers: `sx --cache [--cache-ttl N]` (metadata+du+read,
+- [x] CLI layers: `sx --cache [--cache-ttl N]` (metadata+du+read,
   bounded) and `--sandbox PATH`, applied sandbox-innermost /
   cache-outermost; REPL start banner + `refresh` command +
   `provider` layers line. Opt-in, shell is where it pays off (ADR 0015)

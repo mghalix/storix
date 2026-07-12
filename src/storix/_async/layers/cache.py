@@ -315,6 +315,22 @@ class CacheLayer(LayerBase):
         await op.store.set(key, signed, expire=cache_ttl)
         return signed
 
+    async def clear(self) -> None:
+        """Drop every entry this layer owns, across its store(s).
+
+        Scoped to the layer's ``<namespace>[:<environment>]`` prefix - a
+        shared store keeps other namespaces' keys. Deletes once per
+        distinct store when ops share one.
+        """
+        prefix = ':'.join(self._segments)
+        pattern = f'{prefix}:*' if prefix else '*'
+        seen: set[int] = set()
+        for op in self._ops.values():
+            if id(op.store) in seen:
+                continue
+            seen.add(id(op.store))
+            await op.store.delete_match(pattern)
+
     # --- eviction (per enabled op, in that op's store) ---
 
     async def _evict(self, path: PurePosixPath) -> None:

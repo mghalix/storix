@@ -44,7 +44,7 @@ def _help() -> None:
         '  [cyan]move[/cyan]      mv  cp\n'
         '  [cyan]transfer[/cyan]  upload  download\n'
         '  [cyan]session[/cyan]   provider  exists\n'
-        '  [cyan]shell[/cyan]     help  clear  exit\n'
+        '  [cyan]shell[/cyan]     help  clear  refresh  exit\n'
     )
     console.print('[dim]any command supports --help, e.g. `ls --help`[/dim]')
 
@@ -59,6 +59,10 @@ def start_shell(fs: Storix | None = None) -> None:
 
     console.print('[bold blue]storix shell[/bold blue]')
     console.print(f'connected to [green]{type(fs.backend).__name__}[/green]')
+    summary = cli.layer_summary(fs)
+    if summary:
+        tip = ' · type [cyan]refresh[/cyan] to clear' if cli.cache_layer(fs) else ''
+        console.print(f'[green]{summary}[/green]{tip}')
     console.print("type 'help' for commands, 'exit' to quit\n")
 
     while True:
@@ -85,6 +89,14 @@ def start_shell(fs: Storix | None = None) -> None:
             continue
         if name == 'clear':
             console.clear()
+            continue
+        if name == 'refresh':
+            layer = cli.cache_layer(cli.current_fs())
+            if layer is None:
+                console.print('[yellow]no cache layer active[/yellow]')
+            else:
+                layer.clear()
+                console.print('[green]cache cleared[/green]')
             continue
 
         _dispatch(command, argv)
