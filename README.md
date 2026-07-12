@@ -148,6 +148,39 @@ fs = fs.with_layer(MetadataLayer, serialize=orjson.dumps, deserialize=orjson.loa
 Switching `'local'` to `'azure'` needs no code change — the native
 capability wins and the layer becomes a no-op.
 
+## Caching
+
+`CacheLayer` is a read-through cache — another layer. Cache the ops that
+repeat: metadata (`stat`/`ls`/`exists`, on by default), the expensive
+`du` walk, file `read`s, and presigned `url`s. Each op is `True` or a
+`cache(...)` spec; every write *through the layer* evicts what it touches.
+
+```python
+from storix import CacheLayer, cache, get_storage
+
+fs = get_storage('azure').with_layer(
+    CacheLayer,
+    du=cache(ttl=60),                 # opt in; du (the tree walk) is the big win
+    read=cache(max_bytes=8 << 20),    # content, capped per file
+)
+fs.du('/big-tree')                    # first call: a full walk
+fs.du('/big-tree')                    # then: instant, until you write
+```
+
+The store is pluggable — a cashews-shaped `get`/`set`/`delete`/`delete_match`
+protocol — so the in-memory default swaps for a `cashews.Cache` (Redis,
+disk) with no adapter. Keys are namespaced and keyed on the physical
+location, so sessions sharing one store never collide. Correctness assumes
+you are the only writer; pass `ttl` to bound staleness.
+
+In the `sx` shell, one flag turns it on:
+
+```bash
+sx -p azure --cache                        # cache on: du/ls/stat/cat
+sx -p azure --cache --sandbox /tenant-42   # compose with a jail
+# in the REPL: `refresh` clears it; `provider` shows the stack + store
+```
+
 ## Backends
 
 | Backend | Import | Notes |

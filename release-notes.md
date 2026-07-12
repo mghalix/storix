@@ -1,6 +1,48 @@
 # Release Notes
 
-## [0.2.0] - unreleased
+## [0.2.1] - 2026-07-12
+
+Configurable read-through caching, in the library and the `sx` CLI.
+
+### Added
+
+- `CacheLayer`: a configurable per-op read-through cache. metadata
+  (stat/list/exists, on by default), `du`, `read` (content) and `url`
+  (presigned) each toggle as `bool | CacheOp` - `cache(ttl=, store=,
+  max_bytes=)` per op, or the layer defaults. Eviction is per op on every
+  mutation through the layer (metadata: path+parent; du: ancestor chain;
+  read: the file); `url` is TTL-only, capped to the URL's lifetime. Keys
+  follow `<namespace>[:<environment>]:<op>:<locator>` and are keyed on the
+  physical `locate()`, so sessions sharing a store never collide.
+  (ADR 0014)
+- Pluggable `CacheStore` - a cashews-shaped async protocol
+  (`get`/`set`/`delete`/`delete_match`) with loose returns, so a
+  `cashews.Cache` (Redis, disk, ...) satisfies it with no adapter. Ships
+  `InMemoryCacheStore` (optional `maxsize` LRU) as the default. New
+  exports: `CacheLayer`, `CacheOp`, `cache`, `CacheStore`,
+  `InMemoryCacheStore`.
+- CLI layer flags: `sx --cache [--cache-ttl N]` (metadata+du+read, content
+  capped at 8 MiB) and `sx --sandbox PATH`, applied sandbox-innermost /
+  cache-outermost. The REPL prints the active stack and gains a `refresh`
+  built-in (namespace-scoped cache clear); `provider` lists the layers and
+  the backing store. (ADR 0015)
+- `sx url <file> --expire <seconds>` to set presigned-URL lifetime.
+
+### Changed
+
+- The `sx` shell prompt and `provider` now show the real backend annotated
+  with the active stack (e.g. `LocalBackend(cache, sandbox)`) instead of
+  the outermost layer's class name.
+
+### Notes
+
+- `CacheLayer` correctness assumes a single writer of its store(s); pass
+  `ttl` to bound staleness (the default never expires). A declarative
+  `[tool.storix.cli]` layer stack and CLI cache-store selection
+  (disk/redis) are designed and deferred - see `docs/adr/0015` and
+  `docs/roadmap.md`.
+
+## [0.2.0] - 2026-07-12
 
 Ground-up hexagonal rework: one core engine (`Storix`) owns every unix
 semantic over a small backend port; the sync flavor is generated from
