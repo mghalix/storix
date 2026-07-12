@@ -66,3 +66,9 @@
 .md-dialog__inner {
   color: var(--md-default-fg-color);
 }
+
+/* Utility: hide an element (e.g. the home page's H1, kept only to suppress the
+   auto-generated "Index" title). */
+.hidden {
+  display: none;
+}
