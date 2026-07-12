@@ -65,3 +65,11 @@ clean:
 # Run a sample by path: `just sample layers/configurable_cache.py`.
 sample path:
     uv run python samples/{{ path }}
+
+# Serve the docs site locally with live reload (opens the browser).
+docs:
+    cd website && uvx zensical serve -o
+
+# Build the docs site into website/site.
+docs-build:
+    cd website && uvx zensical build --strict
