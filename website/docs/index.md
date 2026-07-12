@@ -1,10 +1,13 @@
 ---
+title: Storix
 hide:
   - toc
 ---
 
+# Storix { .hidden }
+
 <p align="center">
-  <img src="assets/storix-banner.png" alt="Storix" style="width: 100%; max-width: 460px;">
+  <img src="assets/storix-banner.png" alt="Storix" style="width: 100%; max-width: 720px;">
 </p>
 
 <p align="center"><strong>Storage for Unix lovers.</strong></p>
