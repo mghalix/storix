@@ -36,6 +36,12 @@ and for individual decisions: `docs/adr/`.
 - URI factory (`get_storage('azure://container/path')`) + entry-point
   plugin discovery
 
+- Pluggable `CacheLayer` store: a small `CacheStore` protocol (async
+  get/set/delete/delete_match) so the in-memory default can be swapped
+  for a shared/persistent cache (Redis via cashews, etc.) - lets
+  multiple app instances share cached metadata. Needs RawStat/Entry
+  serialization; in-memory stays the zero-dep default.
+
 ## 0.4.0 - differentiators
 
 - Agent story: capability-stripped sessions (a sandboxed session whose

@@ -561,11 +561,16 @@ class CacheLayer(LayerBase):
     cached in this version).
 
     Every mutation *through this layer* evicts the entries it affects, so
-    the session always sees its own writes. ``ttl`` (seconds) bounds
-    staleness from writers that bypass the layer; the default ``None``
-    caches until mutated - correct and fastest for a single session
-    driving one store. Not a capability (``provides`` stays None):
-    compose with ``with_layer(CacheLayer, ttl=...)``.
+    the session always sees its own writes. Not a capability (``provides``
+    stays None): compose with ``with_layer(CacheLayer, ttl=...)``.
+
+    .. warning::
+       Correctness assumes yours is the only writer of this store. The
+       cache cannot see changes made *outside* this layer (another
+       process, a second storix session, the cloud console). If the store
+       has other writers, pass ``ttl`` (seconds) to bound how long a stale
+       entry can live - the default ``None`` never expires and is only
+       safe for a single owner.
     """
 
     def __init__(self, backend: StorageBackend, *, ttl: float | None = None) -> None:
