@@ -366,15 +366,18 @@ async def test_cache_layer_uses_a_custom_store():
             await super().delete(key)
 
     store: CacheStore = RecordingStore()  # structural conformance
-    fs = Storix(CacheLayer(MemoryBackend(), store=store))
+    fs = Storix(CacheLayer(MemoryBackend(), store=store, prefix='storix:cache'))
     await fs.mkdir('/d')
     await fs.stat('/d')  # miss -> set, then a warm read
     await fs.stat('/d')  # hit
 
-    assert any(o.startswith('set stat:/d') for o in store.ops)  # wrote through
-    assert sum(o == 'get stat:/d' for o in store.ops) == 2  # both reads hit store
+    # keys are prefixed and keyed on the physical locator (not the raw path)
+    stat_key = fs.backend._key('stat', P('/d'))  # type: ignore[attr-defined]
+    assert stat_key.startswith('storix:cache:stat:')
+    assert any(o == f'set {stat_key}' for o in store.ops)  # wrote through
+    assert sum(o == f'get {stat_key}' for o in store.ops) == 2  # both reads hit
     # the mkdir evicted the parent listing through the same store:
-    assert any(o.startswith('del list:/') for o in store.ops)
+    assert any(o.startswith('del storix:cache:list:') for o in store.ops)
 
 
 def test_inmemory_store_satisfies_the_protocol():

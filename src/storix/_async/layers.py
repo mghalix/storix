@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from storix import pathops
 from storix._async._stream import ensure_chunks
+from storix.constants import DEFAULT_CACHE_KEY_PREFIX
 from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
@@ -644,37 +645,39 @@ class CacheLayer(LayerBase):
         *,
         store: CacheStore | None = None,
         ttl: float | None = None,
+        prefix: str = DEFAULT_CACHE_KEY_PREFIX,
     ) -> None:
         super().__init__(backend)
         self._store: CacheStore = store or InMemoryCacheStore()
         self._ttl = ttl
+        self._prefix = prefix
 
-    @staticmethod
-    def _skey(path: PurePosixPath) -> str:
-        return f'stat:{path}'
-
-    @staticmethod
-    def _lkey(path: PurePosixPath) -> str:
-        return f'list:{path}'
+    def _key(self, op: str, path: PurePosixPath) -> str:
+        # key on the *physical* locator, not the virtual path: two
+        # sessions sharing one store (different sandboxes/backends) must
+        # not collide on the same virtual path, and must share on the same
+        # physical object. locate() is pure (no I/O) and prefix-consistent
+        # (a child's locator extends its parent's), so tree eviction works.
+        return f'{self._prefix}:{op}:{self._inner.locate(path)}'
 
     async def _evict(self, path: PurePosixPath) -> None:
-        await self._store.delete(self._skey(path))
-        await self._store.delete(self._lkey(path))  # the path's own listing
-        await self._store.delete(self._lkey(path.parent))  # parent membership
+        await self._store.delete(self._key('stat', path))
+        await self._store.delete(self._key('list', path))  # the path's listing
+        await self._store.delete(self._key('list', path.parent))  # parent membership
 
     async def _evict_tree(self, path: PurePosixPath) -> None:
-        base = str(path).rstrip('/')
-        await self._store.delete(self._skey(path))
-        await self._store.delete(self._lkey(path))
-        await self._store.delete_match(f'stat:{base}/*')
-        await self._store.delete_match(f'list:{base}/*')
-        await self._store.delete(self._lkey(path.parent))
+        locator = self._inner.locate(path)
+        await self._store.delete(self._key('stat', path))
+        await self._store.delete(self._key('list', path))
+        await self._store.delete_match(f'{self._prefix}:stat:{locator}/*')
+        await self._store.delete_match(f'{self._prefix}:list:{locator}/*')
+        await self._store.delete(self._key('list', path.parent))
 
     # --- cached reads ---
 
     async def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts, cached (negatives cached as absent too)."""
-        hit = await self._store.get(self._skey(path), _MISS)
+        hit = await self._store.get(self._key('stat', path), _MISS)
         if hit is not _MISS:
             if hit is None:
                 raise PathNotFoundError(path)
@@ -682,9 +685,9 @@ class CacheLayer(LayerBase):
         try:
             raw = await self._inner.stat(path)
         except PathNotFoundError:
-            await self._store.set(self._skey(path), None, expire=self._ttl)
+            await self._store.set(self._key('stat', path), None, expire=self._ttl)
             raise
-        await self._store.set(self._skey(path), raw, expire=self._ttl)
+        await self._store.set(self._key('stat', path), raw, expire=self._ttl)
         return raw
 
     async def exists(self, path: PurePosixPath) -> bool:
@@ -697,13 +700,13 @@ class CacheLayer(LayerBase):
 
     async def list_dir(self, path: PurePosixPath) -> AsyncIterator[Entry]:
         """Yield children, cached as a materialized list."""
-        hit = await self._store.get(self._lkey(path), _MISS)
+        hit = await self._store.get(self._key('list', path), _MISS)
         if hit is not _MISS:
             for entry in hit:
                 yield entry
             return
         entries = [entry async for entry in self._inner.list_dir(path)]
-        await self._store.set(self._lkey(path), entries, expire=self._ttl)
+        await self._store.set(self._key('list', path), entries, expire=self._ttl)
         for entry in entries:
             yield entry
 
