@@ -26,6 +26,9 @@ nav = [
     { "Backends" = "guide/backends.md" },
     { "Layers" = "guide/layers.md" },
   ] },
+  { "Recipes" = [
+    { "FastAPI" = "recipes/fastapi.md" },
+  ] },
   { "Reference" = [
     { "Storix session" = "reference/storix.md" },
     { "Backends and factory" = "reference/backends.md" },
@@ -124,3 +127,6 @@ combine_header_slug = true
 [project.markdown_extensions.pymdownx.tasklist]
 custom_checkbox = true
 [project.markdown_extensions.pymdownx.tilde]
+[project.markdown_extensions.pymdownx.snippets]
+base_path = [".", ".."]
+check_paths = true
