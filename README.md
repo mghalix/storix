@@ -1,13 +1,23 @@
-# Storix: Storage for Unix Lovers
+<p align="center">
+  <img src="./.github/assets/storix-banner.png" alt="storix" width="100%">
+</p>
 
-**One unix-flavored filesystem API over any storage - local disk, in-memory,
-Azure Data Lake - sync and async, sandboxable, fully typed.**
+<h1 align="center">Storix</h1>
 
-[![PyPI version](https://badge.fury.io/py/storix.svg)](https://pypi.org/project/storix/)
-[![GitHub stars](https://img.shields.io/github/stars/mghalix/storix.svg?style=social)](https://github.com/mghalix/storix)
-[![License](https://img.shields.io/github/license/mghalix/storix.svg)](https://github.com/mghalix/storix/blob/main/LICENSE)
+<p align="center">
+  <b>Storage for Unix lovers.</b>
+</p>
 
-![storix-icon](./.github/assets/storix-icon.png)
+<p align="center">
+  One unix-flavored filesystem API over any storage — local disk, in-memory,<br>
+  Azure Data Lake — sync &amp; async, sandboxable, fully typed.
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/storix/"><img src="https://badge.fury.io/py/storix.svg" alt="PyPI version"></a>
+  <a href="https://github.com/mghalix/storix"><img src="https://img.shields.io/github/stars/mghalix/storix.svg?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/mghalix/storix/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mghalix/storix.svg" alt="License"></a>
+</p>
 
 > **0.2.0 is a ground-up rework** (hexagonal core, generated sync flavor,
 > layers, capabilities). Migrating from 0.1.x? See the table in
