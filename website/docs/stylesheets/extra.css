@@ -34,3 +34,21 @@
   font-size: 0.72rem;
   opacity: 0.55;
 }
+
+/* Repo link: GitHub icon + name only. Hide the injected star/fork/version
+   facts, which are noise on a young project. */
+.md-source__facts {
+  display: none;
+}
+
+/* Put the theme toggle at the far right of the header, after the GitHub link. */
+.md-header__option {
+  order: 100;
+}
+
+/* Copy and hover tooltips: match the theme instead of a bright default block. */
+.md-tooltip {
+  background-color: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+  border: 1px solid var(--md-default-fg-color--lightest);
+}
