@@ -6,6 +6,7 @@ import pytest
 
 from storix._sync import Storix, get_storage
 from storix._sync.backends.local import LocalBackend
+from storix._sync.backends.memory import MemoryBackend
 from storix.errors import ConfigurationError, StorageError
 
 
@@ -35,6 +36,20 @@ def test_env_selects_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv('STORIX_PROVIDER', 'local')
     monkeypatch.setenv('STORIX_LOCAL_BASE', str(tmp_path))
     assert isinstance(get_storage().backend, LocalBackend)
+
+
+def test_memory_provider_builds_zero_config():
+    assert isinstance(get_storage('memory').backend, MemoryBackend)
+
+
+def test_env_selects_memory_provider(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv('STORIX_PROVIDER', 'memory')
+    assert isinstance(get_storage().backend, MemoryBackend)
+
+
+def test_memory_provider_rejects_configuration_overrides():
+    with pytest.raises(ConfigurationError, match='accepts no configuration'):
+        get_storage('memory', unexpected=True)
 
 
 def test_azure_from_kwargs_builds_without_network():
@@ -104,9 +119,7 @@ def test_keyword_provider_is_rejected_not_swallowed():
 def test_available_providers_lists_builtins_and_plugins():
     from storix._sync.factory import available_providers, register_backend
 
-    assert set(available_providers()) >= {'local', 'azure'}
-
-    from storix._sync.backends.memory import MemoryBackend
+    assert set(available_providers()) >= {'local', 'memory', 'azure'}
 
     register_backend('unit-avail', lambda **_: MemoryBackend())
     try:

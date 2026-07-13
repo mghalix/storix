@@ -20,7 +20,7 @@ from storix.aio import DataUrlLayer, Storix, get_storage
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # One session for the whole app. get_storage reads STORIX_* from the
-    # environment, so the provider (local, azure, ...) is configured, not
+    # environment, so the provider (local, memory, azure, ...) is configured, not
     # hard-coded. DataUrlLayer backfills url() so it works on any backend.
     app.state.fs = get_storage().with_layer_missing(DataUrlLayer)
     try:

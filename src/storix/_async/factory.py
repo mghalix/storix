@@ -36,6 +36,17 @@ def _build_local(**overrides: Any) -> StorageBackend:
     return LocalBackend(cfg.base)
 
 
+def _build_memory(**overrides: Any) -> StorageBackend:
+    if overrides:
+        fields = ', '.join(sorted(overrides))
+        msg = f'memory backend accepts no configuration overrides: {fields}'
+        raise ConfigurationError(msg)
+
+    from .backends.memory import MemoryBackend
+
+    return MemoryBackend()
+
+
 def _build_azure(**overrides: Any) -> StorageBackend:
     # lazy: the azure SDK is an optional dependency
     from .backends.azure import AzureBackend
@@ -68,6 +79,7 @@ def _build_azure(**overrides: Any) -> StorageBackend:
 # arbitrary names (the whole point of register_backend)
 _BUILDERS: dict[str, Callable[..., StorageBackend]] = {
     'local': _build_local,
+    'memory': _build_memory,
     'azure': _build_azure,
 }
 
@@ -97,6 +109,8 @@ def available_providers() -> tuple[str, ...]:
 def get_storage(
     provider: Literal['local'], /, **overrides: Unpack[_LocalOverrides]
 ) -> Storix: ...
+@overload
+def get_storage(provider: Literal['memory'], /) -> Storix: ...
 @overload
 def get_storage(
     provider: Literal['azure'], /, **overrides: Unpack[_AzureOverrides]

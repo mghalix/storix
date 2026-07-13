@@ -450,7 +450,8 @@ def _main(
     ctx: typer.Context,
     *,
     provider_: Annotated[
-        str | None, typer.Option('-p', '--provider', help='local | azure | ...')
+        str | None,
+        typer.Option('-p', '--provider', help='local | memory | azure | ...'),
     ] = None,
     cache: Annotated[
         bool, typer.Option('--cache', help='read-through cache: du/ls/stat/cat')

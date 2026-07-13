@@ -47,6 +47,7 @@ from storix import get_storage
 
 fs = get_storage()              # provider from STORIX_PROVIDER (default: local)
 fs = get_storage("local", base="~/storix-data")  # explicit typed override
+fs = get_storage("memory")      # zero-config, in-process, disposable
 fs = get_storage("azure")       # reads STORIX_AZURE_* from the environment
 
 fs = get_storage(
@@ -75,7 +76,8 @@ STORIX_LOCAL_BASE=~/storix-data
 Settings are read from the process environment and a `.env` file in the current
 working directory. Overrides passed to `get_storage` win over both, and every
 backend config field mirrors its constructor keyword, so the env key always
-matches the argument name.
+matches the argument name. Memory is zero-configuration and has no
+`STORIX_MEMORY_*` settings.
 
 !!! note "Azure validates on first I/O"
 

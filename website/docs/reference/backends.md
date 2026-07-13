@@ -65,11 +65,13 @@ get_storage(provider: str | None = None, /, **overrides) -> Storix
 Build a session. With no argument, the provider comes from `STORIX_PROVIDER`
 (default `local`) and each backend reads its `STORIX_<PROVIDER>_*` environment
 values. Keyword `overrides` win over the environment, and each key mirrors the
-backend's constructor argument.
+backend's constructor argument. The memory provider takes no overrides and has
+no environment settings.
 
 ```python
 get_storage()                         # env-driven
 get_storage("local", base="~/storix-data")   # explicit + typed override
+get_storage("memory")                 # zero-config, in-process, disposable
 get_storage("azure")                  # reads STORIX_AZURE_*
 ```
 

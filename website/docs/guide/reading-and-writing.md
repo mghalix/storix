@@ -3,6 +3,15 @@
 Storix is Python-first about data: you hand it whatever shape you already have,
 and its streaming-native built-ins move large payloads through bounded memory.
 
+The synchronous examples below use a disposable, zero-configuration memory
+session:
+
+```python
+from storix import get_storage
+
+fs = get_storage("memory")
+```
+
 ## Writing with `echo`
 
 `echo` is the one write verb. Its first argument accepts native Python:

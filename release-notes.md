@@ -7,6 +7,9 @@ backend-port release. See ADR 0017.
 
 ### Added
 
+- `get_storage("memory")` and `STORIX_PROVIDER=memory` now expose the built-in
+  zero-configuration memory backend through the same typed factory as local and
+  Azure storage.
 - `Storix.stream(..., chunk_size=)` now exposes a consumer-facing maximum
   chunk size. It splits oversized provider chunks without coalescing smaller
   ones; `None` selects the backend default.
