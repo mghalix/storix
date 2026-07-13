@@ -69,7 +69,7 @@ backend's constructor argument.
 
 ```python
 get_storage()                         # env-driven
-get_storage("local", base="~/data")   # explicit + typed override
+get_storage("local", base="~/storix-data")   # explicit + typed override
 get_storage("azure")                  # reads STORIX_AZURE_*
 ```
 

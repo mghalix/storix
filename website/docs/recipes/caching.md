@@ -1,9 +1,12 @@
 # Cache with Redis or disk
 
-The `CacheLayer` store is a small cashews-shaped protocol (`get` / `set` /
-`delete` / `delete_match`), so a `cashews.Cache` plugs in with no adapter. Use
-Redis for a cache shared across processes, or a disk backend for one that
-survives restarts.
+The `CacheLayer` store is a small protocol (`get` / `set` / `delete` /
+`delete_match`) deliberately shaped like
+[Cashews](https://github.com/Krukov/cashews), so a `cashews.Cache` plugs in with
+no adapter. Configure Cashews with Redis for a cache shared across processes, or
+with a disk backend for one that survives restarts. The raw
+[redis-py](https://redis.io/docs/latest/develop/clients/redis-py/) API is not the
+same protocol; use it through Cashews or provide a small adapter.
 
 ```python
 --8<-- "samples/recipes/caching_redis.py"

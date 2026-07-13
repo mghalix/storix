@@ -13,7 +13,7 @@ the same session code runs over any of them.
 from storix import Storix
 from storix.backends import LocalBackend, MemoryBackend
 
-Storix(LocalBackend("~/data"))   # '/' is ~/data
+Storix(LocalBackend("~/storix-data"))   # '/' is ~/storix-data
 Storix(MemoryBackend())          # in-process, disposable
 ```
 
@@ -34,6 +34,9 @@ from storix import register_backend
 register_backend("myprovider", MyBackend)
 ```
 
+See [Write a custom backend](../recipes/custom-backend.md) for a runnable
+implementation and the whole-object/streaming fallback contract.
+
 ## Configuration and the factory
 
 `get_storage` builds a session from the environment, so application code does not
@@ -43,8 +46,15 @@ hard-code a provider:
 from storix import get_storage
 
 fs = get_storage()              # provider from STORIX_PROVIDER (default: local)
-fs = get_storage("local", base="~/data")   # explicit, with typed overrides
+fs = get_storage("local", base="~/storix-data")  # explicit typed override
 fs = get_storage("azure")       # reads STORIX_AZURE_* from the environment
+
+fs = get_storage(
+    "azure",
+    container="raw",
+    account_name="myaccount",
+    credential="<account key or SAS token>",
+)
 ```
 
 Configuration is namespaced under `STORIX_`:
@@ -59,12 +69,20 @@ STORIX_AZURE_READ_CHUNK_SIZE=4194304
 STORIX_AZURE_WRITE_CHUNK_SIZE=4194304
 STORIX_AZURE_READ_PREFETCH_SIZE=33554432
 # for local:
-STORIX_LOCAL_BASE=~/data
+STORIX_LOCAL_BASE=~/storix-data
 ```
 
-Overrides passed to `get_storage` win over the environment, and every backend
-config field mirrors its constructor keyword, so the env key always matches the
-argument name.
+Settings are read from the process environment and a `.env` file in the current
+working directory. Overrides passed to `get_storage` win over both, and every
+backend config field mirrors its constructor keyword, so the env key always
+matches the argument name.
+
+!!! note "Azure validates on first I/O"
+
+    Constructing an Azure session does not make a network request. Azure alone
+    can validate the account and credential, so that happens on the first I/O
+    operation. Authentication failures become `PermissionDeniedError`; the
+    original Azure SDK exception remains chained for diagnosis.
 
 Azure defaults to 4 MiB range reads and write batches, with a 32 MiB initial
 download request. These SDK buffers live in the application's memory. Tune them
@@ -81,9 +99,17 @@ lacks raises `UnsupportedOperationError` naming the missing capability instead o
 quietly dropping your argument.
 
 ```python
-fs.url("/f.png", expires_in=600)   # presigned SAS on azure; raises on plain local
-fs.data_url("/f.png")              # a base64 data: URL, works on any backend
+azure = get_storage("azure")
+azure.url("/f.png", expires_in=600)  # presigned SAS URL
+
+local = get_storage("local", base="~/storix-data")
+local.echo("hello from storix", "/hello.txt")
+durl = local.data_url("/hello.txt")  # works on every backend
+print(durl)
 ```
 
-[Layers](layers.md) can backfill some of these capabilities so one code path
-works across providers.
+Paste the printed `data:` URL into a browser to open the file without hosting
+it. Calling `local.url(...)` directly raises `UnsupportedOperationError` because
+local storage cannot mint a presigned URL. A
+[capability layer](layers.md#portable-capabilities) can backfill `url()` when one
+code path must work across providers.

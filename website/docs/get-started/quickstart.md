@@ -6,14 +6,15 @@ is the whole point.
 
 ## Open a session
 
-A session is anchored at a backend. `LocalBackend("~/data")` makes `~/data` the
-root, so inside the session `/` means `~/data` and you can never wander above it.
+A session is anchored at a backend. `LocalBackend("~/storix-data")` makes that
+directory the root, so inside the session `/` means `~/storix-data` and you can
+never wander above it.
 
 ```python
 from storix import Storix
 from storix.backends import LocalBackend
 
-fs = Storix(LocalBackend("~/data"))
+fs = Storix(LocalBackend("~/storix-data"))
 print(fs.pwd())   # / , the session starts at its home
 ```
 
@@ -21,7 +22,7 @@ print(fs.pwd())   # / , the session starts at its home
 
 ```python
 fs.mkdir("/notes")
-fs.echo(b"buy milk", "/notes/todo.txt")
+fs.echo("buy milk", "/notes/todo.txt")
 
 print(fs.cat("/notes/todo.txt"))   # b'buy milk'
 print(fs.exists("/notes/todo.txt"))  # True
@@ -38,8 +39,8 @@ a terminal.
 ```python
 fs.cd("/notes")
 print(fs.pwd())          # /notes
-print(fs.ls())           # [PosixPath('todo.txt')]
-fs.echo(b"...", "idea.txt")   # relative to the cwd -> /notes/idea.txt
+print(fs.ls())           # [StorixPath('todo.txt')]
+fs.echo("...", "idea.txt")   # relative to the cwd -> /notes/idea.txt
 ```
 
 `ls` hides dotfiles by default, like the real thing. Pass `all=True` to show them.
@@ -50,7 +51,7 @@ Move and copy are variadic, and the last argument is the destination, just like
 unix `mv` and `cp`.
 
 ```python
-fs.mkdir("/archive")
+fs.mkdir("/archive", parents=True)  # mkdir -p; safe if it already exists
 fs.mv("/notes/todo.txt", "/notes/idea.txt", "/archive")  # both into /archive
 fs.rm("/notes", recursive=True)                          # rm -r
 ```
@@ -68,7 +69,7 @@ from storix.backends import MemoryBackend
 
 fs = Storix(MemoryBackend())   # nothing on disk
 fs.mkdir("/notes")
-fs.echo(b"buy milk", "/notes/todo.txt")
+fs.echo("buy milk", "/notes/todo.txt")
 print(fs.cat("/notes/todo.txt"))   # b'buy milk'
 ```
 
@@ -78,7 +79,8 @@ Data Lake. See [Backends](../guide/backends.md).
 ## The async flavor
 
 Every operation has an awaitable twin under `storix.aio`, with identical names.
-The async package is generated from the sync source, so the two never diverge.
+Storix is async-first, and the sync package is generated from that source so the
+two never diverge.
 
 ```python
 from storix.aio import Storix
@@ -86,7 +88,8 @@ from storix.aio.backends import MemoryBackend
 
 async def main():
     async with Storix(MemoryBackend()) as fs:
-        await fs.echo(b"buy milk", "/todo.txt")
+        await fs.echo("buy milk", "/todo.txt")
+        print(await fs.ls())
         print(await fs.cat("/todo.txt"))
 ```
 
