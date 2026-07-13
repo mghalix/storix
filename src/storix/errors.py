@@ -151,10 +151,11 @@ def from_os_error(exc: OSError, path: StrPathLike) -> StorageError:
 
 
 class ConfigurationError(StorageError):
-    """Storage construction was asked for something it cannot build.
+    """A backend's configuration is missing, invalid, or unsupported.
 
-    Raised by the factory for unknown providers or incomplete backend
-    configuration; the message says which fields or env vars to set.
+    Raised by the factory for unknown providers, missing fields, or unsupported
+    overrides. A backend may also raise it on first I/O when only its provider
+    can validate a lazily checked setting such as a cloud credential.
     """
 
 

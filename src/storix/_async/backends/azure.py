@@ -25,6 +25,7 @@ from storix.constants import (
 from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
+    ConfigurationError,
     DirectoryNotEmptyError,
     IsADirectoryError,
     NotADirectoryError,
@@ -86,12 +87,16 @@ def _translate(exc: AzureError, path: PurePosixPath) -> StorageError:
     mapped = _ERROR_CODE_MAP.get(code)
     if mapped is not None:
         return mapped(path)
+    if code in {'AuthenticationFailed', 'InvalidAuthenticationInfo'} or isinstance(
+        exc, ClientAuthenticationError
+    ):
+        return ConfigurationError(
+            'azure authentication failed; check account_name and credential'
+        )
     if isinstance(exc, ResourceNotFoundError):
         return PathNotFoundError(path)
     if isinstance(exc, ResourceExistsError):
         return AlreadyExistsError(path)
-    if isinstance(exc, ClientAuthenticationError):
-        return PermissionDeniedError(path)
     if isinstance(exc, HttpResponseError):
         return StorageError(f"'{path}': {exc.message}{_HNS_HINT}")
     return StorageError(f"'{path}': {exc}")

@@ -81,8 +81,10 @@ matches the argument name.
 
     Constructing an Azure session does not make a network request. Azure alone
     can validate the account and credential, so that happens on the first I/O
-    operation. Authentication failures become `PermissionDeniedError`; the
-    original Azure SDK exception remains chained for diagnosis.
+    operation. Invalid authentication configuration raises `ConfigurationError`
+    with a hint to check `account_name` and `credential`. An authenticated
+    identity that lacks permission raises `PermissionDeniedError`. The original
+    Azure SDK exception remains chained for diagnosis.
 
 Azure defaults to 4 MiB range reads and write batches, with a 32 MiB initial
 download request. These SDK buffers live in the application's memory. Tune them

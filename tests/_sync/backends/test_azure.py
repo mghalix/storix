@@ -22,6 +22,7 @@ from azure.core.exceptions import (
 from storix._sync.backends.azure import _HNS_HINT, AzureBackend, _translate
 from storix.errors import (
     AlreadyExistsError,
+    ConfigurationError,
     DirectoryNotEmptyError,
     PathNotFoundError,
     PermissionDeniedError,
@@ -50,9 +51,23 @@ def test_translate_exists():
     assert isinstance(err, AlreadyExistsError)
 
 
-def test_translate_auth():
+def test_translate_authentication_failure_as_configuration_error():
     err = _translate(ClientAuthenticationError(message='denied'), PATH)
-    assert isinstance(err, PermissionDeniedError)
+    assert isinstance(err, ConfigurationError)
+    assert 'account_name' in str(err)
+    assert 'credential' in str(err)
+
+
+def test_translate_server_authentication_failure_as_configuration_error():
+    exc = HttpResponseError(message='invalid credential')
+    exc.error_code = 'AuthenticationFailed'
+    assert isinstance(_translate(exc, PATH), ConfigurationError)
+
+
+def test_translate_authorization_failure_as_permission_denied():
+    exc = HttpResponseError(message='not allowed')
+    exc.error_code = 'AuthorizationPermissionMismatch'
+    assert isinstance(_translate(exc, PATH), PermissionDeniedError)
 
 
 def test_translate_error_code_beats_exception_type():

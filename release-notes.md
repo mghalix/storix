@@ -42,6 +42,9 @@ backend-port release. See ADR 0017.
 - The `cli` extra now declares its direct `click` dependency. The `sx` launcher
   reports an actionable install command without a traceback when the extra is
   absent, and Azure uses the same optional-extra error style.
+- Azure client authentication failures now raise `ConfigurationError` with a
+  credential hint. `PermissionDeniedError` is reserved for authorization
+  failures after authentication succeeds.
 
 ## [0.2.2] - 2026-07-12
 
