@@ -41,9 +41,11 @@ class Counting(MemoryBackend):
         Counting.du_calls += 1
         return await super().du(path)
 
-    async def read_stream(self, path):  # noqa: ANN001, ANN201
+    async def read_stream(  # noqa: ANN001, ANN201
+        self, path, *, chunk_size=None
+    ):
         Counting.read_calls += 1
-        async for chunk in super().read_stream(path):
+        async for chunk in super().read_stream(path, chunk_size=chunk_size):
             yield chunk
 
     async def make_url(self, path, *, expires_in=None):  # noqa: ANN001, ANN201

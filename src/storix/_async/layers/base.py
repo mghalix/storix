@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from storix._async._stream import validate_chunk_size
+
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
@@ -52,23 +54,62 @@ class LayerBase:
         """Return the full contents of a file."""
         return await self._inner.read(path)
 
-    async def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
-        """Stream a file's contents in chunks."""
-        async for chunk in self._inner.read_stream(path):
+    async def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        """Stream a file's contents in bounded chunks.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        async for chunk in self._inner.read_stream(path, chunk_size=chunk_size):
             yield chunk
 
     async def write(
         self,
         path: PurePosixPath,
-        data: AsyncIterator[bytes],
+        data: bytes,
         *,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write a file from a chunk stream."""
-        await self._inner.write(
-            path, data, mode=mode, content_type=content_type, metadata=metadata
+        """Write complete contents through this layer's stream path."""
+        from ..backends import generic
+
+        await generic.write(
+            self,
+            path,
+            data,
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
+        )
+
+    async def write_stream(
+        self,
+        path: PurePosixPath,
+        data: AsyncIterator[bytes],
+        *,
+        chunk_size: int | None = None,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write a file from a bounded chunk stream.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        await self._inner.write_stream(
+            path,
+            data,
+            chunk_size=chunk_size,
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
         )
 
     async def delete(self, path: PurePosixPath) -> None:

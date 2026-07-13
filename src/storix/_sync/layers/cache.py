@@ -11,6 +11,7 @@ import time
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Protocol
 
+from storix._sync._stream import validate_chunk_size
 from storix.constants import DEFAULT_CACHE_NAMESPACE, DEFAULT_URL_EXPIRY_SECONDS
 from storix.errors import PathNotFoundError
 
@@ -381,18 +382,29 @@ class CacheLayer(LayerBase):
 
     # --- mutations evict, then delegate ---
 
-    def write(
+    def write_stream(
         self,
         path: PurePosixPath,
         data: Iterator[bytes],
         *,
+        chunk_size: int | None = None,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write, then evict the affected entries."""
-        self._inner.write(
-            path, data, mode=mode, content_type=content_type, metadata=metadata
+        """Write a bounded stream, then evict the affected entries.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        self._inner.write_stream(
+            path,
+            data,
+            chunk_size=chunk_size,
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
         )
         self._evict(path)
 

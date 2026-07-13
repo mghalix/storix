@@ -27,31 +27,63 @@ class StorageBackend(Protocol):
     on this to branch portably.
 
     Parent handling: the core guarantees a parent directory exists before
-    calling ``write``/``make_dir(parents=False)``; behavior on a missing
-    parent is backend-specific and unspecified by the port.
+    calling ``write``/``write_stream``/``make_dir(parents=False)``; behavior
+    on a missing parent is backend-specific and unspecified by the port.
     """
 
     capabilities: Capabilities
     """User-observable optional features this backend supports."""
 
     def read(self, path: PurePosixPath) -> bytes:
-        """Return the full contents of a file."""
+        """Return the full contents of a file.
+
+        ``BackendBase`` derives this by collecting ``read_stream`` unless a
+        whole-object backend overrides it.
+        """
         ...
 
-    def read_stream(self, path: PurePosixPath) -> Iterator[bytes]:
-        """Stream a file's contents in chunks.
+    def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> Iterator[bytes]:
+        """Stream a file's contents in bounded chunks.
 
         Implementations are async generator functions: plain callables
         that return the iterator directly, so the declaration here
         carries no ``async`` keyword of its own.
+
+        Args:
+            path: The file to stream.
+            chunk_size: Maximum yielded chunk size. ``None`` selects the
+                backend's preferred default. Smaller native chunks may pass
+                through unchanged; chunk boundaries carry no meaning.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
         """
         ...
 
     def write(
         self,
         path: PurePosixPath,
+        data: bytes,
+        *,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write a complete in-memory payload.
+
+        ``BackendBase`` derives this by wrapping ``data`` as one chunk for
+        ``write_stream`` unless a whole-object backend overrides it.
+        """
+        ...
+
+    def write_stream(
+        self,
+        path: PurePosixPath,
         data: Iterator[bytes],
         *,
+        chunk_size: int | None = None,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
@@ -64,10 +96,14 @@ class StorageBackend(Protocol):
         passes values to a backend without the capability, so others may
         ignore them.
 
-        Metadata semantics are *replace*: a provided mapping replaces the
-        stored metadata entirely, ``{}`` clears it, and ``None`` leaves
-        existing metadata untouched on append (merge is the caller's job:
-        stat, merge, write).
+        ``chunk_size`` is the maximum target backend batch; ``None`` selects
+        the backend's preferred default. Metadata semantics are *replace*: a
+        provided mapping replaces the stored metadata entirely, ``{}`` clears
+        it, and ``None`` leaves existing metadata untouched on append (merge
+        is the caller's job: stat, merge, write).
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
         """
         ...
 

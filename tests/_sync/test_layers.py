@@ -22,7 +22,7 @@ def _astream(*chunks: bytes) -> Iterator[bytes]:
 def put(
     backend: StorageBackend, path: str, data: bytes = b'', mode: EchoMode = 'w'
 ) -> None:
-    backend.write(P(path), _astream(data), mode=mode, content_type=None)
+    backend.write_stream(P(path), _astream(data), mode=mode, content_type=None)
 
 
 @pytest.fixture
@@ -184,6 +184,8 @@ def test_metadata_layer_sidecar_is_invisible():
     assert fs.ls('/', all=True) == [P('a.txt')]
     assert not fs.exists('/.storix-meta.json')
     assert fs.du('/') == 1  # sidecar bytes excluded
+    with pytest.raises(PathNotFoundError):
+        fs.cat('/.storix-meta.json')
 
 
 def test_metadata_layer_move_rekeys_sidecar():
@@ -437,9 +439,9 @@ def test_cache_read_content_with_max_bytes_skip():
     class ReadCounter(MemoryBackend):
         reads = 0
 
-        def read_stream(self, path):
+        def read_stream(self, path, *, chunk_size=None):
             ReadCounter.reads += 1
-            yield from super().read_stream(path)
+            yield from super().read_stream(path, chunk_size=chunk_size)
 
     inner = ReadCounter()
     fs = Storix(CacheLayer(inner, read=cache(max_bytes=4)))

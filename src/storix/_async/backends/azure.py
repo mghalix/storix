@@ -16,6 +16,12 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from storix._async._stream import batch_chunks, resolve_chunk_size, split_chunks
+from storix.constants import (
+    DEFAULT_AZURE_READ_CHUNK_SIZE,
+    DEFAULT_AZURE_READ_PREFETCH_SIZE,
+    DEFAULT_AZURE_WRITE_CHUNK_SIZE,
+)
 from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
@@ -101,14 +107,47 @@ class AzureBackend(BackendBase):
     capabilities: Capabilities = Capabilities(
         content_type=True, custom_metadata=True, presigned_urls=True
     )
+    default_read_chunk_size: int = DEFAULT_AZURE_READ_CHUNK_SIZE
+    default_write_chunk_size: int = DEFAULT_AZURE_WRITE_CHUNK_SIZE
 
-    def __init__(self, container: str, *, account_name: str, credential: str) -> None:
+    def __init__(
+        self,
+        container: str,
+        *,
+        account_name: str,
+        credential: str,
+        read_chunk_size: int = DEFAULT_AZURE_READ_CHUNK_SIZE,
+        write_chunk_size: int = DEFAULT_AZURE_WRITE_CHUNK_SIZE,
+        read_prefetch_size: int = DEFAULT_AZURE_READ_PREFETCH_SIZE,
+    ) -> None:
+        """Create an ADLS Gen2 backend.
+
+        Args:
+            container: Filesystem/container anchoring port path ``/``.
+            account_name: HNS-enabled Azure Storage account name.
+            credential: SAS token or account key.
+            read_chunk_size: Default consumer and SDK range chunk size.
+            write_chunk_size: Default ``append_data`` request batch size.
+            read_prefetch_size: Size of the SDK's initial download request.
+
+        Raises:
+            ValueError: If any configured transfer size is not positive.
+        """
+        self.default_read_chunk_size = resolve_chunk_size(
+            read_chunk_size, read_chunk_size
+        )
+        self.default_write_chunk_size = resolve_chunk_size(
+            write_chunk_size, write_chunk_size
+        )
+        read_prefetch_size = resolve_chunk_size(read_prefetch_size, read_prefetch_size)
         self.container = container
         self._account_name = account_name
         self._credential = credential
         self._service = DataLakeServiceClient(
             account_url=f'https://{account_name}.dfs.core.windows.net',
             credential=credential,
+            max_chunk_get_size=self.default_read_chunk_size,
+            max_single_get_size=read_prefetch_size,
         )
         self._filesystem = self._service.get_file_system_client(container)
 
@@ -122,8 +161,15 @@ class AzureBackend(BackendBase):
         host = f'{self._account_name}.dfs.core.windows.net'
         return f'abfss://{self.container}@{host}/{self._key(path)}'
 
-    async def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
-        """Stream a file's contents in chunks."""
+    async def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        """Stream a file through the SDK with bounded consumer chunks.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
         raw = await self.stat(path)
         if raw.kind is PathKind.DIRECTORY:
             # dfs 'downloads' a directory marker as zero bytes; refuse instead
@@ -131,21 +177,27 @@ class AzureBackend(BackendBase):
         client = self._filesystem.get_file_client(self._key(path))
         try:
             download = await client.download_file()
+            async for chunk in split_chunks(download.chunks(), size):
+                yield chunk
         except AzureError as exc:
             raise _translate(exc, path) from exc
-        async for chunk in download.chunks():
-            yield chunk
 
-    async def write(
+    async def write_stream(
         self,
         path: PurePosixPath,
         data: AsyncIterator[bytes],
         *,
+        chunk_size: int | None = None,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
+        """Write batched range appends, then flush the completed file.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        size = resolve_chunk_size(chunk_size, self.default_write_chunk_size)
         offset = 0
         try:
             raw = await self.stat(path)
@@ -163,9 +215,7 @@ class AzureBackend(BackendBase):
             if creating:
                 # metadata rides along with creation - one request, not two
                 await client.create_file(metadata=dict(metadata) if metadata else None)
-            async for chunk in data:
-                if not chunk:
-                    continue
+            async for chunk in batch_chunks(data, size):
                 await client.append_data(chunk, offset=offset, length=len(chunk))
                 offset += len(chunk)
             settings = (

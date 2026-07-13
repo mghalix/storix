@@ -21,7 +21,7 @@ async def _astream(*chunks: bytes) -> AsyncIterator[bytes]:
 async def put(
     backend: StorageBackend, path: str, data: bytes = b'', mode: EchoMode = 'w'
 ) -> None:
-    await backend.write(P(path), _astream(data), mode=mode, content_type=None)
+    await backend.write_stream(P(path), _astream(data), mode=mode, content_type=None)
 
 
 @pytest.fixture
@@ -183,6 +183,8 @@ async def test_metadata_layer_sidecar_is_invisible():
     assert await fs.ls('/', all=True) == [P('a.txt')]
     assert not await fs.exists('/.storix-meta.json')
     assert await fs.du('/') == 1  # sidecar bytes excluded
+    with pytest.raises(PathNotFoundError):
+        await fs.cat('/.storix-meta.json')
 
 
 async def test_metadata_layer_move_rekeys_sidecar():
@@ -437,9 +439,9 @@ async def test_cache_read_content_with_max_bytes_skip():
     class ReadCounter(MemoryBackend):
         reads = 0
 
-        async def read_stream(self, path):
+        async def read_stream(self, path, *, chunk_size=None):
             ReadCounter.reads += 1
-            async for c in super().read_stream(path):
+            async for c in super().read_stream(path, chunk_size=chunk_size):
                 yield c
 
     inner = ReadCounter()

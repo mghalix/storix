@@ -11,13 +11,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from storix._async._compat import gather
-from storix._async._stream import collect
+from storix._async._stream import collect, ensure_chunks
 from storix.enums import PathKind
 from storix.errors import PathNotFoundError
 
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import PurePosixPath
+
+    from storix.types import EchoMode
 
     from ._proto import StorageBackend
 
@@ -25,6 +28,25 @@ if TYPE_CHECKING:
 async def read(backend: StorageBackend, path: PurePosixPath) -> bytes:
     """Collect ``read_stream`` into the full file contents."""
     return await collect(backend.read_stream(path))
+
+
+async def write(
+    backend: StorageBackend,
+    path: PurePosixPath,
+    data: bytes,
+    *,
+    mode: EchoMode,
+    content_type: str | None,
+    metadata: Mapping[str, str] | None = None,
+) -> None:
+    """Wrap complete contents as a one-item stream for ``write_stream``."""
+    await backend.write_stream(
+        path,
+        ensure_chunks(data),
+        mode=mode,
+        content_type=content_type,
+        metadata=metadata,
+    )
 
 
 async def move(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) -> None:
@@ -41,7 +63,7 @@ async def move(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) 
 async def copy(backend: StorageBackend, src: PurePosixPath, dst: PurePosixPath) -> None:
     """Copy a single file by streaming its chunks into a truncating write."""
     data = backend.read_stream(src)
-    await backend.write(dst, data, mode='w', content_type=None)
+    await backend.write_stream(dst, data, mode='w', content_type=None)
 
 
 async def copy_tree(

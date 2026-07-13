@@ -8,6 +8,7 @@ import pytest
 from storix._sync import Storix
 from storix._sync.backends.local import LocalBackend
 from storix._sync.backends.memory import MemoryBackend
+from storix.constants import DEFAULT_READ_CHUNK_SIZE
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -201,11 +202,34 @@ def test_stream_yields_content_in_chunks(fs: Storix):
     assert b''.join(chunks) == b'streamed payload'
 
 
+def test_stream_default_is_bounded_for_reference_backends(fs: Storix):
+    payload = b'x' * (DEFAULT_READ_CHUNK_SIZE + 1)
+    fs.echo(payload, '/a.bin')
+
+    chunks = list(fs.stream('/a.bin'))
+
+    assert [len(chunk) for chunk in chunks] == [DEFAULT_READ_CHUNK_SIZE, 1]
+
+
 def test_stream_concatenates_multiple_paths(fs: Storix):
     fs.echo(b'one', '/a.txt')
     fs.echo(b'two', '/b.txt')
     joined = b''.join(list(fs.stream('/a.txt', '/b.txt')))
     assert joined == b'onetwo'
+
+
+def test_stream_honors_maximum_chunk_size(fs: Storix):
+    fs.echo(b'0123456789', '/a.txt')
+    chunks = list(fs.stream('/a.txt', chunk_size=4))
+    assert b''.join(chunks) == b'0123456789'
+    assert all(0 < len(chunk) <= 4 for chunk in chunks)
+
+
+@pytest.mark.parametrize('chunk_size', [0, -1])
+def test_stream_rejects_non_positive_chunk_size(fs: Storix, chunk_size: int):
+    fs.echo(b'x', '/a.txt')
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        list(fs.stream('/a.txt', chunk_size=chunk_size))
 
 
 # --- touch ---
@@ -255,6 +279,20 @@ def test_echo_encodes_str(fs: Storix):
 def test_echo_accepts_iterable_of_chunks(fs: Storix):
     fs.echo([b'a', b'b', b'c'], '/a.txt')
     assert fs.cat('/a.txt') == b'abc'
+
+
+def test_echo_accepts_chunk_size(fs: Storix):
+    fs.echo([b'ab', b'cd', b'ef'], '/a.txt', chunk_size=4)
+    assert fs.cat('/a.txt') == b'abcdef'
+
+
+@pytest.mark.parametrize('chunk_size', [0, -1])
+def test_echo_rejects_non_positive_chunk_size_without_writing(
+    fs: Storix, chunk_size: int
+):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        fs.echo(b'x', '/a.txt', chunk_size=chunk_size)
+    assert not fs.exists('/a.txt')
 
 
 def test_echo_content_type_requires_capability(fs: Storix):

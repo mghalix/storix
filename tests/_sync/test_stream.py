@@ -6,7 +6,16 @@ from collections.abc import Iterator
 
 import pytest
 
-from storix._sync._stream import chunked, collect, ensure_chunks, iter_chunks
+from storix._sync._stream import (
+    batch_chunks,
+    chunked,
+    collect,
+    ensure_chunks,
+    iter_chunks,
+    resolve_chunk_size,
+    split_chunks,
+    validate_chunk_size,
+)
 
 
 def _astream(*chunks: bytes) -> Iterator[bytes]:
@@ -21,6 +30,75 @@ def test_collect_empty_stream():
     assert collect(_astream()) == b''
 
 
+def test_split_chunks_splits_large_upstream_chunks():
+    out = list(split_chunks(_astream(b'0123456789'), size=4))
+    assert out == [b'0123', b'4567', b'89']
+
+
+def test_split_chunks_preserves_smaller_upstream_boundaries():
+    first = b'a'
+    second = b'bc'
+    out = list(split_chunks(_astream(first, second), size=4))
+    assert out == [b'a', b'bc']
+    assert out[0] is first
+    assert out[1] is second
+
+
+def test_split_chunks_skips_empty_chunks():
+    out = list(split_chunks(_astream(b'', b'a', b''), size=4))
+    assert out == [b'a']
+
+
+@pytest.mark.parametrize('size', [0, -1])
+def test_split_chunks_rejects_non_positive_size(size: int):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        list(split_chunks(_astream(b'a'), size=size))
+
+
+def test_batch_chunks_coalesces_small_upstream_chunks():
+    out = list(batch_chunks(_astream(b'a', b'b', b'c', b'd', b'e'), size=2))
+    assert out == [b'ab', b'cd', b'e']
+
+
+def test_batch_chunks_splits_oversized_chunks():
+    out = list(batch_chunks(_astream(b'0123456789'), size=4))
+    assert out == [b'0123', b'4567', b'89']
+
+
+def test_batch_chunks_handles_boundaries_across_source_chunks():
+    out = list(batch_chunks(_astream(b'abc', b'defgh'), size=4))
+    assert out == [b'abcd', b'efgh']
+
+
+def test_batch_chunks_passes_exact_bytes_without_copying():
+    chunk = b'abcd'
+    out = list(batch_chunks(_astream(chunk), size=4))
+    assert out == [chunk]
+    assert out[0] is chunk
+
+
+def test_batch_chunks_skips_empty_chunks():
+    out = list(batch_chunks(_astream(b'', b'a', b''), size=4))
+    assert out == [b'a']
+
+
+@pytest.mark.parametrize('size', [0, -1])
+def test_batch_chunks_rejects_non_positive_size(size: int):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        list(batch_chunks(_astream(b'a'), size=size))
+
+
+@pytest.mark.parametrize('size', [0, -1])
+def test_validate_chunk_size_rejects_non_positive_size(size: int):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        validate_chunk_size(size)
+
+
+def test_resolve_chunk_size_uses_default_only_for_none():
+    assert resolve_chunk_size(None, 8) == 8
+    assert resolve_chunk_size(4, 8) == 4
+
+
 def test_chunked_exact_division():
     assert list(chunked(b'abcdef', size=2)) == [b'ab', b'cd', b'ef']
 
@@ -31,6 +109,12 @@ def test_chunked_remainder():
 
 def test_chunked_empty():
     assert list(chunked(b'', size=2)) == []
+
+
+@pytest.mark.parametrize('size', [0, -1])
+def test_chunked_rejects_non_positive_size(size: int):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        list(chunked(b'a', size=size))
 
 
 def test_chunked_accepts_bytearray_and_yields_bytes():
@@ -51,6 +135,11 @@ def test_ensure_chunks_scalars():
     assert _drain(b'raw bytes') == b'raw bytes'
     assert _drain('text encodes') == b'text encodes'
     assert _drain(bytearray(b'buffer')) == b'buffer'
+
+
+def test_ensure_chunks_keeps_scalar_as_one_source_chunk():
+    data = b'x' * 10
+    assert list(ensure_chunks(data)) == [data]
 
 
 def test_ensure_chunks_iterable_of_mixed_chunks():
@@ -75,4 +164,19 @@ def test_ensure_chunks_rejects_unsupported_items():
 
 
 def test_iter_chunks_reads_file_like_in_chunks():
-    assert b''.join(iter_chunks(io.BytesIO(b'x' * 10))) == b'x' * 10
+    assert list(iter_chunks(io.BytesIO(b'x' * 10), read_size=4)) == [
+        b'x' * 4,
+        b'x' * 4,
+        b'x' * 2,
+    ]
+
+
+def test_iter_chunks_keeps_scalar_as_one_source_chunk():
+    data = b'x' * 10
+    assert list(iter_chunks(data, read_size=4)) == [data]
+
+
+@pytest.mark.parametrize('size', [0, -1])
+def test_iter_chunks_rejects_non_positive_read_size(size: int):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        list(iter_chunks(io.BytesIO(b'x'), read_size=size))
