@@ -19,6 +19,13 @@ stream fallbacks. A cloud or filesystem backend should implement its native
 stream methods to keep memory bounded. If neither member of a pair is present,
 the base raises a clear `NotImplementedError` instead of recursing.
 
+`StorageBackend` itself is a `Protocol`, so inheritance is never required. A
+class with the complete matching method surface can be passed to `Storix` or
+returned by a registered builder through structural typing. `BackendBase` is
+still the recommended starting point because it supplies the generic operations
+and the whole-object/streaming fallbacks instead of making you implement all 17
+methods.
+
 Then register a builder so `get_storage` can construct it by name:
 
 ```python
