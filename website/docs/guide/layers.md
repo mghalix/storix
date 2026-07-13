@@ -101,3 +101,6 @@ fs.without_layer(CacheLayer).du("/big")
 
 A `SandboxLayer` is deliberately non-removable. You can always ask for less
 caching; you can never ask your way out of a security boundary.
+
+To build middleware of your own, see the runnable
+[custom layer recipe](../recipes/custom-layer.md).
