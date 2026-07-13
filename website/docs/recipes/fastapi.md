@@ -8,13 +8,17 @@ storage.
 
 - **One session, shared.** Build it in the `lifespan` and close it on shutdown,
   so setup is paid once and every request reuses it.
+- **Provision once at startup.** Create application-owned directories before
+  the app accepts requests. `mkdir(..., parents=True)` is idempotent across
+  restarts.
 - **Inject with `Depends`.** A tiny `get_fs` dependency hands the session to any
   route, which keeps handlers testable: override it with a `MemoryBackend`
   session in tests, no disk and no cloud.
 - **Stream, do not buffer.** `echo` takes an async iterator, so an upload flows
   to storage a chunk at a time and memory stays flat regardless of file size.
-- **Hand back links, not bytes.** `url()` returns a short-lived presigned link (a
-  `data:` URL on backends without native presigning, via `DataUrlLayer`).
+- **Hand back links when the provider supports them.** Azure returns a
+  short-lived presigned link. `DataUrlLayer` keeps the example portable by
+  returning an inline `data:` URL on local and memory storage.
 
 ## The full example
 
@@ -28,8 +32,18 @@ Run it:
 uv run --with "fastapi[standard]" fastapi dev samples/recipes/fastapi_di.py
 ```
 
-Then `POST /files/report.csv` with a file body, and `GET /files/report.csv` to get
-a link back.
+Then upload and retrieve a link:
+
+```bash
+curl -F "file=@report.csv" http://127.0.0.1:8000/files/report.csv
+curl http://127.0.0.1:8000/files/report.csv
+```
+
+!!! warning "Large local files"
+
+    Azure creates a presigned URL without reading the file. The portable
+    `DataUrlLayer` fallback must read and base64-encode the complete file, so use
+    it for small local or in-memory files, not large downloads.
 
 !!! tip "Testing the routes"
 

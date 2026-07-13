@@ -22,11 +22,14 @@ async def lifespan(app: FastAPI):
     # One session for the whole app. get_storage reads STORIX_* from the
     # environment, so the provider (local, memory, azure, ...) is configured, not
     # hard-coded. DataUrlLayer backfills url() so it works on any backend.
-    app.state.fs = get_storage().with_layer_missing(DataUrlLayer)
+    fs = get_storage().with_layer_missing(DataUrlLayer)
+    app.state.fs = fs
     try:
+        # Provision application-owned directories once, before requests arrive.
+        await fs.mkdir('/uploads', parents=True)
         yield
     finally:
-        await app.state.fs.close()
+        await fs.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -37,11 +40,11 @@ def get_fs(request: Request) -> Storix:
     return request.app.state.fs
 
 
-FS = Annotated[Storix, Depends(get_fs)]
+FsDep = Annotated[Storix, Depends(get_fs)]
 
 
 @app.post('/files/{name}')
-async def upload(name: str, file: UploadFile, fs: FS) -> dict[str, str]:
+async def upload(name: str, file: UploadFile, fs: FsDep) -> dict[str, str]:
     async def chunks():
         while data := await file.read(1024 * 1024):  # 1 MiB at a time
             yield data
@@ -51,6 +54,6 @@ async def upload(name: str, file: UploadFile, fs: FS) -> dict[str, str]:
 
 
 @app.get('/files/{name}')
-async def link(name: str, fs: FS) -> dict[str, str]:
+async def link(name: str, fs: FsDep) -> dict[str, str]:
     # Hand back a short-lived link instead of proxying the bytes.
     return {'url': await fs.url(f'/uploads/{name}', expires_in=600)}
