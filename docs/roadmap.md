@@ -59,7 +59,7 @@ and for individual decisions: `docs/adr/`.
 - BackendBase template-method refactor (shared stat-validate prologues)
 - docs site decision (zensical?) + honest comparison page
 
-## 0.3.0 - adoption
+## 0.4.0 - adoption
 
 Multiple ergonomic front-ends over the one core, and breadth of
 providers - the two levers that make storix promotable.
@@ -82,7 +82,7 @@ providers - the two levers that make storix promotable.
 - URI factory (`get_storage('azure://container/path')`) + entry-point
   plugin discovery
 
-## 0.4.0 - differentiators
+## 0.5.0 - differentiators
 
 - Agent story: capability-stripped sessions (a sandboxed session whose
   backend handle cannot unmask paths), audit/ObservabilityLayer,
