@@ -1495,6 +1495,7 @@ all = [
     { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "azure-storage-file-datalake" },
+    { name = "click" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -1503,6 +1504,7 @@ azure = [
     { name = "azure-storage-file-datalake" },
 ]
 cli = [
+    { name = "click" },
     { name = "rich" },
     { name = "typer" },
 ]
@@ -1538,6 +1540,7 @@ requires-dist = [
     { name = "aiofiles", marker = "extra == 'local'", specifier = ">=24.1.0" },
     { name = "aiohttp", marker = "extra == 'azure'", specifier = ">=3.9.0" },
     { name = "azure-storage-file-datalake", marker = "extra == 'azure'", specifier = ">=12.14.0" },
+    { name = "click", marker = "extra == 'cli'", specifier = ">=8.1.7" },
     { name = "loguru", marker = "extra == 'core'", specifier = ">=0.7.2" },
     { name = "pydantic", marker = "extra == 'core'", specifier = ">=2.0.0" },
     { name = "pydantic-settings", marker = "extra == 'core'", specifier = ">=2.0.0" },

@@ -41,6 +41,7 @@ azure = [
     "aiohttp>=3.9.0",
 ]
 cli = [
+    "click>=8.1.7",
     "rich>=13.0.0",
     "typer>=0.13.0",
 ]
@@ -79,7 +80,7 @@ Repository = "https://github.com/mghalix/storix"
 Issues = "https://github.com/mghalix/storix/issues"
 Changelog = "https://github.com/mghalix/storix/blob/main/release-notes.md"
 [project.scripts]
-sx = "storix.cli.app:main"
+sx = "storix.cli:main"
 #<------------------------------------------------>#
 
 #<--- tools --->#

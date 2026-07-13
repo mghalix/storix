@@ -39,6 +39,9 @@ backend-port release. See ADR 0017.
 - Azure reads no longer coalesce SDK chunks just to fill the requested output
   size, and Azure writes no longer issue one append request per tiny producer
   yield.
+- The `cli` extra now declares its direct `click` dependency. The `sx` launcher
+  reports an actionable install command without a traceback when the extra is
+  absent, and Azure uses the same optional-extra error style.
 
 ## [0.2.2] - 2026-07-12
 

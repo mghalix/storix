@@ -48,9 +48,11 @@ try:
     )
     from azure.storage.blob import ContentSettings
     from azure.storage.filedatalake.aio import DataLakeServiceClient
-except ImportError as err:  # pragma: no cover
-    _msg = "azure backend not installed - install with: uv add 'storix[azure]'"
-    raise ImportError(_msg) from err
+except ModuleNotFoundError as exc:  # pragma: no cover
+    if (exc.name or '').partition('.')[0] != 'azure':
+        raise
+    _msg = "azure extra not installed. Install it by running `uv add 'storix[azure]'`."
+    raise ImportError(_msg) from None
 
 
 if TYPE_CHECKING:
