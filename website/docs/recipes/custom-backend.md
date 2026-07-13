@@ -1,26 +1,62 @@
 # Write a custom backend
 
-A backend implements the `StorageBackend` port (about 14 methods: read, write,
-list, stat, and friends) and nothing else. The core `Storix` engine owns all the
+A backend implements the 17-method `StorageBackend` port (read, write, list,
+stat, and friends) and nothing else. The core `Storix` engine owns all the
 unix behavior, so a backend does no path logic and raises only `storix.errors`.
 That is why a new provider is just a new class, and everything above it (the CLI,
 every layer, the whole session API) works over it unchanged.
 
-The fastest way to write one is to copy `MemoryBackend`, the reference backend,
-and swap its dict for your store. Then register it so `get_storage` can build it
-by name:
+Subclass `BackendBase` to inherit generic operations. Implement the four
+structural methods (`delete`, `list_dir`, `stat`, and `make_dir`) plus at least
+one method from each I/O pair:
+
+- `read()` or `read_stream()`
+- `write()` or `write_stream()`
+
+Choose independently per direction. A simple database or dict backend can
+implement whole-object `read()` and `write()`; the base supplies compatibility
+stream fallbacks. A cloud or filesystem backend should implement its native
+stream methods to keep memory bounded. If neither member of a pair is present,
+the base raises a clear `NotImplementedError` instead of recursing.
+
+Then register a builder so `get_storage` can construct it by name:
 
 ```python
 from storix import register_backend
-from storix.backends import StorageBackend
+from storix.backends import BackendBase
 
 
-class MyBackend(StorageBackend):
-    ...  # implement the port; use storix.backends.MemoryBackend as the template
+class MyBackend(BackendBase):
+    ...  # implement six methods; MemoryBackend is the streaming template
 
 
 register_backend('myprovider', MyBackend)
 ```
+
+The streaming signatures include the backend control explicitly:
+
+```python
+def read_stream(path, *, chunk_size: int | None = None) -> Iterator[bytes]: ...
+def write_stream(
+    path,
+    data: Iterator[bytes],
+    *,
+    chunk_size: int | None = None,
+    mode: EchoMode,
+    content_type: str | None,
+    metadata: Mapping[str, str] | None = None,
+) -> None: ...
+```
+
+For reads, `chunk_size` is a maximum output size: split oversized provider
+chunks but do not delay smaller chunks to fill it. For writes, it is the target
+provider batch: combine tiny source yields and split oversized ones. `None`
+selects the backend's preferred default, while zero and negative values raise
+`ValueError`. Source iterator boundaries have no storage meaning.
+
+See the runnable
+[`samples/plugins/byo_backend.py`](https://github.com/mghalix/storix/blob/main/samples/plugins/byo_backend.py)
+for a whole-object backend that gets both streaming forms from `BackendBase`.
 
 ```python
 from storix import get_storage

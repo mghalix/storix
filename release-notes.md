@@ -1,5 +1,45 @@
 # Release Notes
 
+## Unreleased
+
+Bounded, provider-aware streaming in both directions. This is a breaking
+backend-port release. See ADR 0017.
+
+### Added
+
+- `Storix.stream(..., chunk_size=)` now exposes a consumer-facing maximum
+  chunk size. It splits oversized provider chunks without coalescing smaller
+  ones; `None` selects the backend default.
+- `Storix.echo(..., chunk_size=)` controls target write batches for every
+  accepted source shape. Tiny iterator yields are combined and oversized
+  values are split with a linear, bounded-memory stdlib implementation.
+- The backend port now has explicit whole-object and streaming pairs:
+  `read`/`read_stream` and `write`/`write_stream`. `BackendBase` derives either
+  form from the other, so a custom backend may implement native streaming or
+  the simpler whole-object form independently per direction.
+- Azure transfer settings: `read_chunk_size` (4 MiB default),
+  `write_chunk_size` (4 MiB), and `read_prefetch_size` (32 MiB), also available
+  as `STORIX_AZURE_*` configuration.
+
+### Changed (breaking)
+
+- `StorageBackend.write(path, data, ...)` now takes one complete `bytes`
+  payload. Streaming backends implement `write_stream(path, iterator, ...)`.
+- `StorageBackend.read_stream` and `write_stream` accept the keyword-only
+  `chunk_size` control. Custom backends and layers overriding either method
+  must add it and honor the port contract.
+- Explicit zero or negative chunk sizes raise stdlib `ValueError`. There is no
+  `-1` whole-file sentinel; use `cat()` for a complete read.
+
+### Fixed
+
+- Local and memory reads no longer reuse the former 100 MiB write batch, which
+  made ordinary files appear as one chunk. Generic/local defaults are now 1
+  MiB, while Azure keeps provider-appropriate 4 MiB transfer batches.
+- Azure reads no longer coalesce SDK chunks just to fill the requested output
+  size, and Azure writes no longer issue one append request per tiny producer
+  yield.
+
 ## [0.2.2] - 2026-07-12
 
 Per-op cache bypass, and public-API fixes.

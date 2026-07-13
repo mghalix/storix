@@ -77,10 +77,18 @@ known-size content. For large files, prefer `stream`.
 ### `stream`
 
 ```python
-stream(path: StrPathLike, /, *paths: StrPathLike) -> Iterator[bytes]
+stream(
+    path: StrPathLike,
+    /,
+    *paths: StrPathLike,
+    chunk_size: int | None = None,
+) -> Iterator[bytes]
 ```
 
-Read files back in chunks, so a large file never lands in memory all at once. See
+Read files back in chunks. `chunk_size` is the maximum yielded size; `None` uses
+the backend's preferred default. Smaller provider chunks pass through promptly.
+Zero or negative values raise `ValueError`. Streaming-native backends keep memory
+bounded; a whole-object custom backend's compatibility fallback does not. See
 [Reading and writing](../guide/reading-and-writing.md).
 
 ### `stat`
@@ -120,6 +128,7 @@ echo(
     path: StrPathLike,
     /,
     *,
+    chunk_size: int | None = None,
     mode: EchoMode = "w",
     content_type: str | None = None,
     metadata: Mapping[str, str] | None = None,
@@ -129,7 +138,9 @@ echo(
 Write `data` to `path`. `data` accepts native Python: `bytes`, `str`, a `Buffer`,
 an open file (`IO`), or an iterable of chunks (and an async iterable under
 `storix.aio`). `mode="a"` appends. `content_type` and `metadata` are applied where
-the backend supports them.
+the backend supports them. `chunk_size` is the maximum target backend write
+batch; `None` uses its preferred default. Tiny iterator yields are combined and
+oversized values are split. Zero or negative values raise `ValueError`.
 
 ### `touch`
 

@@ -19,8 +19,8 @@ Storix(MemoryBackend())          # in-process, disposable
 
 ## The port
 
-Every backend implements one small interface, the `StorageBackend` port (about
-14 methods: read, write, list, stat, and friends). The core `Storix` engine owns
+Every backend implements one small interface, the 17-method `StorageBackend`
+port (read, write, list, stat, and friends). The core `Storix` engine owns
 all the unix behavior (cwd, path resolution, `mv` as copy-plus-delete, and so on)
 and calls only that port. Backends do no path logic and raise only
 `storix.errors`.
@@ -54,6 +54,10 @@ STORIX_PROVIDER=azure
 STORIX_AZURE_CONTAINER=raw
 STORIX_AZURE_ACCOUNT_NAME=myaccount
 STORIX_AZURE_CREDENTIAL=...
+# optional transfer tuning (bytes):
+STORIX_AZURE_READ_CHUNK_SIZE=4194304
+STORIX_AZURE_WRITE_CHUNK_SIZE=4194304
+STORIX_AZURE_READ_PREFETCH_SIZE=33554432
 # for local:
 STORIX_LOCAL_BASE=~/data
 ```
@@ -61,6 +65,12 @@ STORIX_LOCAL_BASE=~/data
 Overrides passed to `get_storage` win over the environment, and every backend
 config field mirrors its constructor keyword, so the env key always matches the
 argument name.
+
+Azure defaults to 4 MiB range reads and write batches, with a 32 MiB initial
+download request. These SDK buffers live in the application's memory. Tune them
+at provider construction when your host or workload needs different bounds;
+use per-call `stream(chunk_size=...)` and `echo(chunk_size=...)` for consumer and
+write-batch control.
 
 ## Capabilities
 
