@@ -101,7 +101,7 @@ async def _astream(*chunks: bytes) -> AsyncIterator[bytes]:
 async def put(
     backend: StorageBackend, path: str, data: bytes = b'', mode: EchoMode = 'w'
 ) -> None:
-    await backend.write(P(path), _astream(data), mode=mode, content_type=None)
+    await backend.write_stream(P(path), _astream(data), mode=mode, content_type=None)
 
 
 async def test_root_exists_initially(backend: StorageBackend):
@@ -115,6 +115,11 @@ async def test_root_exists_initially(backend: StorageBackend):
 async def test_write_creates_and_read_round_trips(backend: StorageBackend):
     await put(backend, '/a.txt', b'hello')
     assert await backend.read(P('/a.txt')) == b'hello'
+
+
+async def test_whole_write_creates_and_round_trips(backend: StorageBackend):
+    await backend.write(P('/a.txt'), b'whole', mode='w', content_type=None)
+    assert await backend.read(P('/a.txt')) == b'whole'
 
 
 async def test_write_truncates_existing(backend: StorageBackend):
@@ -156,6 +161,40 @@ async def test_read_stream_yields_content(backend: StorageBackend):
     await put(backend, '/a.txt', b'streamed')
     chunks = [chunk async for chunk in backend.read_stream(P('/a.txt'))]
     assert b''.join(chunks) == b'streamed'
+
+
+async def test_read_stream_honors_chunk_size(backend: StorageBackend):
+    await put(backend, '/a.txt', b'0123456789')
+    chunks = [c async for c in backend.read_stream(P('/a.txt'), chunk_size=4)]
+    assert b''.join(chunks) == b'0123456789'
+    assert all(0 < len(chunk) <= 4 for chunk in chunks)
+
+
+@pytest.mark.parametrize('chunk_size', [0, -1])
+async def test_read_stream_rejects_non_positive_chunk_size(
+    backend: StorageBackend, chunk_size: int
+):
+    await put(backend, '/a.txt', b'x')
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        [
+            chunk
+            async for chunk in backend.read_stream(P('/a.txt'), chunk_size=chunk_size)
+        ]
+
+
+@pytest.mark.parametrize('chunk_size', [0, -1])
+async def test_write_stream_rejects_non_positive_chunk_size(
+    backend: StorageBackend, chunk_size: int
+):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        await backend.write_stream(
+            P('/a.txt'),
+            _astream(b'x'),
+            chunk_size=chunk_size,
+            mode='w',
+            content_type=None,
+        )
+    assert not await backend.exists(P('/a.txt'))
 
 
 # --- list_dir ---
@@ -219,7 +258,7 @@ async def test_stat_directory_size_is_zero(backend: StorageBackend):
 async def test_metadata_round_trip(backend: StorageBackend):
     if not backend.capabilities.custom_metadata:
         pytest.skip('backend does not advertise custom_metadata')
-    await backend.write(
+    await backend.write_stream(
         P('/m.txt'),
         _astream(b'x'),
         mode='w',
@@ -241,7 +280,7 @@ async def test_metadata_replace_semantics(backend: StorageBackend):
         pytest.skip('backend does not advertise custom_metadata')
 
     async def put_meta(data: bytes, mode: EchoMode, metadata: dict | None) -> None:
-        await backend.write(
+        await backend.write_stream(
             P('/m.txt'), _astream(data), mode=mode, content_type=None, metadata=metadata
         )
 

@@ -10,7 +10,7 @@ per-file size cap. Share one store or give an op its own.
         CacheLayer,
         metadata=True,                       # navigation hot path
         du=cache(ttl=60),                    # expensive tree walk
-        read=cache(ttl=30, max_bytes=8 << 20,  # content <= 8 MiB
+        read=cache(ttl=30, max_bytes=8 * 1024 * 1024,  # content <= 8 MiB
                    store=InMemoryCacheStore(maxsize=200)),
         url=cache(ttl=300),                  # presigned URLs (TTL-only)
         ttl=120,                             # default for ops without one
@@ -41,9 +41,11 @@ class Counting(MemoryBackend):
         Counting.du_calls += 1
         return await super().du(path)
 
-    async def read_stream(self, path):  # noqa: ANN001, ANN201
+    async def read_stream(  # noqa: ANN001, ANN201
+        self, path, *, chunk_size=None
+    ):
         Counting.read_calls += 1
-        async for chunk in super().read_stream(path):
+        async for chunk in super().read_stream(path, chunk_size=chunk_size):
             yield chunk
 
     async def make_url(self, path, *, expires_in=None):  # noqa: ANN001, ANN201

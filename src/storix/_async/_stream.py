@@ -1,8 +1,9 @@
-"""Byte-stream helpers for the backends and core."""
+"""Byte-stream normalization, splitting, and batching helpers."""
 
 from collections.abc import AsyncIterable, AsyncIterator, Buffer, Iterable, Iterator
+from io import BytesIO
 
-from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix.constants import DEFAULT_SOURCE_READ_SIZE
 from storix.types import AsyncDataBuffer, DataBuffer
 
 
@@ -11,12 +12,130 @@ async def collect(stream: AsyncIterator[bytes]) -> bytes:
     return b''.join([chunk async for chunk in stream])
 
 
-def chunked(data: Buffer, size: int = DEFAULT_WRITE_CHUNKSIZE) -> Iterator[bytes]:
-    """Slice any buffer into ``bytes`` chunks with a single copy per chunk.
+def validate_chunk_size(chunk_size: int | None) -> None:
+    """Validate an optional public chunk-size argument.
+
+    Args:
+        chunk_size: Requested maximum chunk size, or ``None`` for a
+            backend-selected default.
+
+    Raises:
+        ValueError: If ``chunk_size`` is zero or negative.
+    """
+    if chunk_size is not None and chunk_size <= 0:
+        msg = 'chunk_size must be positive'
+        raise ValueError(msg)
+
+
+def resolve_chunk_size(chunk_size: int | None, default: int) -> int:
+    """Resolve ``None`` to a backend default and validate the result.
+
+    Args:
+        chunk_size: Requested maximum chunk size, or ``None``.
+        default: Backend-selected size used when ``chunk_size`` is ``None``.
+
+    Returns:
+        A positive chunk size.
+
+    Raises:
+        ValueError: If the requested or default size is zero or negative.
+    """
+    resolved = default if chunk_size is None else chunk_size
+    validate_chunk_size(resolved)
+    return resolved
+
+
+async def split_chunks(stream: AsyncIterator[bytes], size: int) -> AsyncIterator[bytes]:
+    """Yield source chunks no larger than ``size`` without coalescing.
+
+    Existing chunks at or below the limit pass through without a copy.
+    Oversized ``bytes`` are sliced in C, with one required allocation per
+    output chunk. Smaller upstream boundaries remain observable.
+
+    Args:
+        stream: Source byte chunks.
+        size: Maximum output chunk size.
+
+    Raises:
+        ValueError: If ``size`` is zero or negative.
+    """
+    validate_chunk_size(size)
+    async for chunk in stream:
+        if not chunk:
+            continue
+        if len(chunk) <= size:
+            yield chunk
+            continue
+        for offset in range(0, len(chunk), size):
+            yield chunk[offset : offset + size]
+
+
+async def batch_chunks(stream: AsyncIterator[bytes], size: int) -> AsyncIterator[bytes]:
+    """Split and coalesce source chunks into efficient write batches.
+
+    Exact-sized immutable chunks pass through without copying. Oversized
+    chunks use direct ``bytes`` slicing; only small fragments are buffered
+    in ``BytesIO``. The algorithm is linear in the number of input bytes.
+
+    Args:
+        stream: Source byte chunks.
+        size: Target write-batch size; the final batch may be shorter.
+
+    Raises:
+        ValueError: If ``size`` is zero or negative.
+    """
+    validate_chunk_size(size)
+    pending = BytesIO()
+    pending_size = 0
+
+    async for chunk in stream:
+        if not chunk:
+            continue
+        offset = 0
+
+        if pending_size:
+            needed = size - pending_size
+            if len(chunk) < needed:
+                pending.write(chunk)
+                pending_size += len(chunk)
+                continue
+            pending.write(chunk if len(chunk) == needed else chunk[:needed])
+            yield pending.getvalue()
+            pending = BytesIO()
+            pending_size = 0
+            offset = needed
+
+        remaining = len(chunk) - offset
+        while remaining >= size:
+            if offset == 0 and len(chunk) == size:
+                yield chunk
+            else:
+                yield chunk[offset : offset + size]
+            offset += size
+            remaining -= size
+
+        if remaining:
+            pending.write(chunk[offset:])
+            pending_size = remaining
+
+    if pending_size:
+        yield pending.getvalue()
+
+
+def chunked(data: Buffer, size: int) -> Iterator[bytes]:
+    """Slice a buffer into ``bytes`` chunks with a single copy per chunk.
 
     The ``memoryview`` makes slicing zero-copy regardless of the input
     buffer type; ``bytes()`` performs the one copy consumers need.
+
+    Args:
+        data: Source buffer.
+        size: Maximum output chunk size.
+
+    Raises:
+        ValueError: If ``size`` is zero or negative.
     """
+    validate_chunk_size(size)
     view = memoryview(data)
 
     for i in range(0, len(view), size):
@@ -33,19 +152,24 @@ def _as_bytes(chunk: object) -> bytes:
     raise TypeError(msg)
 
 
-def iter_chunks(data: DataBuffer[str] | DataBuffer[bytes]) -> Iterator[bytes]:
+def iter_chunks(
+    data: DataBuffer[str] | DataBuffer[bytes],
+    *,
+    read_size: int = DEFAULT_SOURCE_READ_SIZE,
+) -> Iterator[bytes]:
     """Normalize any synchronous data source into a bytes-chunk iterator.
 
     Accepts scalars (str/bytes/any buffer), readable file-like objects,
     and iterables of either.
     """
+    validate_chunk_size(read_size)
     if isinstance(data, (str, Buffer)):
-        yield from chunked(_as_bytes(data))
+        yield _as_bytes(data)
         return
 
     read = getattr(data, 'read', None)
     if callable(read):
-        while chunk := read(DEFAULT_WRITE_CHUNKSIZE):
+        while chunk := read(read_size):
             yield _as_bytes(chunk)
         return
 
@@ -68,8 +192,7 @@ async def ensure_chunks(
     streams of items.
     """
     if isinstance(data, (str, Buffer)):
-        for chunk in chunked(_as_bytes(data)):
-            yield chunk
+        yield _as_bytes(data)
         return
 
     if isinstance(data, AsyncIterable):

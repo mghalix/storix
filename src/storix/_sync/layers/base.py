@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from storix._sync._stream import validate_chunk_size
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
@@ -54,22 +56,61 @@ class LayerBase:
         """Return the full contents of a file."""
         return self._inner.read(path)
 
-    def read_stream(self, path: PurePosixPath) -> Iterator[bytes]:
-        """Stream a file's contents in chunks."""
-        yield from self._inner.read_stream(path)
+    def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> Iterator[bytes]:
+        """Stream a file's contents in bounded chunks.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        yield from self._inner.read_stream(path, chunk_size=chunk_size)
 
     def write(
         self,
         path: PurePosixPath,
-        data: Iterator[bytes],
+        data: bytes,
         *,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write a file from a chunk stream."""
-        self._inner.write(
-            path, data, mode=mode, content_type=content_type, metadata=metadata
+        """Write complete contents through this layer's stream path."""
+        from ..backends import generic
+
+        generic.write(
+            self,
+            path,
+            data,
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
+        )
+
+    def write_stream(
+        self,
+        path: PurePosixPath,
+        data: Iterator[bytes],
+        *,
+        chunk_size: int | None = None,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write a file from a bounded chunk stream.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        self._inner.write_stream(
+            path,
+            data,
+            chunk_size=chunk_size,
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
         )
 
     def delete(self, path: PurePosixPath) -> None:

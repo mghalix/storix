@@ -6,6 +6,8 @@ import abc
 
 from typing import TYPE_CHECKING
 
+from storix._sync._stream import collect, resolve_chunk_size
+from storix.constants import DEFAULT_READ_CHUNK_SIZE, DEFAULT_WRITE_CHUNK_SIZE
 from storix.enums import Capability
 from storix.errors import UnsupportedOperationError
 from storix.models import Capabilities
@@ -24,31 +26,115 @@ if TYPE_CHECKING:
 class BackendBase(abc.ABC):
     """Convenience base pre-wiring the ``generic`` fallbacks.
 
-    Subclasses implement the six abstract primitives and get the rest of
-    the :class:`~storix._sync.backends.StorageBackend` contract for free;
-    backends with native fast paths override the concrete methods.
+    Subclasses implement four structural primitives plus at least one method
+    from each I/O pair (``read``/``read_stream`` and
+    ``write``/``write_stream``). The opposite form is derived generically.
+    Streaming-native backends should implement the stream methods; simple
+    whole-object backends may implement ``read`` and ``write`` instead, with
+    the documented cost that their stream fallbacks materialize full files.
+    Backends with native fast paths override the remaining concrete methods.
     Deliberately does *not* inherit the Protocol - structural typing checks
     conformance, and the core types against the Protocol only. See the
     Protocol docstrings for the semantics each method must honor.
     """
 
     capabilities: Capabilities = Capabilities()
+    default_read_chunk_size: int = DEFAULT_READ_CHUNK_SIZE
+    """Preferred read size when a caller passes ``chunk_size=None``."""
+    default_write_chunk_size: int = DEFAULT_WRITE_CHUNK_SIZE
+    """Preferred write batch when a caller passes ``chunk_size=None``."""
 
-    @abc.abstractmethod
-    def read_stream(self, path: PurePosixPath) -> Iterator[bytes]:
-        """Stream a file's contents in chunks."""
+    def _overrides(self, name: str) -> bool:
+        """Whether the concrete backend overrides ``name`` from this base."""
+        return getattr(type(self), name) is not getattr(BackendBase, name)
 
-    @abc.abstractmethod
+    def read(self, path: PurePosixPath) -> bytes:
+        """Return full contents, collecting a native stream by default.
+
+        Raises:
+            NotImplementedError: If neither read method is implemented.
+        """
+        if not self._overrides('read_stream'):
+            msg = f'{type(self).__name__} must implement read() or read_stream()'
+            raise NotImplementedError(msg)
+        return generic.read(self, path)
+
+    def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> Iterator[bytes]:
+        """Split a whole-object read into consumer-sized chunks.
+
+        This compatibility fallback materializes the full file. Override it
+        whenever the provider supports bounded streaming.
+
+        Raises:
+            NotImplementedError: If neither read method is implemented.
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        if not self._overrides('read'):
+            msg = f'{type(self).__name__} must implement read() or read_stream()'
+            raise NotImplementedError(msg)
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
+        data = self.read(path)
+        for offset in range(0, len(data), size):
+            yield data[offset : offset + size]
+
     def write(
         self,
         path: PurePosixPath,
-        data: Iterator[bytes],
+        data: bytes,
         *,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
+        """Write complete contents through a native stream by default.
+
+        Raises:
+            NotImplementedError: If neither write method is implemented.
+        """
+        if not self._overrides('write_stream'):
+            msg = f'{type(self).__name__} must implement write() or write_stream()'
+            raise NotImplementedError(msg)
+        generic.write(
+            self,
+            path,
+            data,
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
+        )
+
+    def write_stream(
+        self,
+        path: PurePosixPath,
+        data: Iterator[bytes],
+        *,
+        chunk_size: int | None = None,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Collect a chunk stream for a whole-object write implementation.
+
+        This compatibility fallback materializes the full payload. Override it
+        whenever the provider supports bounded streaming.
+
+        Raises:
+            NotImplementedError: If neither write method is implemented.
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        if not self._overrides('write'):
+            msg = f'{type(self).__name__} must implement write() or write_stream()'
+            raise NotImplementedError(msg)
+        resolve_chunk_size(chunk_size, self.default_write_chunk_size)
+        self.write(
+            path,
+            collect(data),
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
+        )
 
     @abc.abstractmethod
     def delete(self, path: PurePosixPath) -> None:
@@ -65,10 +151,6 @@ class BackendBase(abc.ABC):
     @abc.abstractmethod
     def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
         """Create a directory (``parents=True`` behaves like mkdir -p)."""
-
-    def read(self, path: PurePosixPath) -> bytes:
-        """Return the full contents of a file."""
-        return generic.read(self, path)
 
     def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
         """Move a file or directory tree (fallback: copy then delete)."""

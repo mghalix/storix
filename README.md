@@ -39,6 +39,8 @@ them, the way FastAPI is a layer over the web rather than a new web server.
 ```bash
 uv add storix            # local filesystem + in-memory
 uv add "storix[azure]"   # + Azure Data Lake Gen2 (HNS accounts)
+uv add "storix[cli]"     # + the sx command-line interface
+uv add "storix[all]"     # all optional features
 ```
 
 ## Quick look
@@ -47,13 +49,14 @@ uv add "storix[azure]"   # + Azure Data Lake Gen2 (HNS accounts)
 from storix import Storix
 from storix.backends import LocalBackend
 
-fs = Storix(LocalBackend('~/data'))     # '/' is anchored at ~/data
+fs = Storix(LocalBackend('~/storix-data'))  # '/' is anchored at ~/storix-data
 
 fs.mkdir('/docs')
-fs.echo(b'hello, storix!', '/docs/readme.txt')
+fs.echo('hello, storix!', '/docs/readme.txt')
 print(fs.cat('/docs/readme.txt'))       # b'hello, storix!'
 
 fs.cd('/docs')                          # a session has a cwd, like a shell
+fs.mkdir('/archive')
 fs.mv('readme.txt', '/archive')         # the last argument is the destination
 ```
 
@@ -71,7 +74,8 @@ async with get_storage('azure') as fs:
 ## Highlights
 
 - **Unix semantics, everywhere.** `ls`/`cd`/`cat`/`du`/`mv` with a real session
-  and cwd, identical across local, memory, and cloud. There is an `sx` shell too.
+  and cwd, identical across local, memory, and cloud. The `cli` extra adds an
+  `sx` shell too.
 - **Python-first and streaming.** `echo` takes `bytes`, `str`, an iterator, or an
   async iterator, so large files move through bounded memory instead of loading
   whole.

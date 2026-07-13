@@ -9,6 +9,8 @@ win over the environment.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from storix import Storix, get_storage
@@ -28,7 +30,15 @@ class Settings(BaseSettings):
     storage_base: str = '~/app-data'
 
 
-def from_settings() -> Storix:
-    settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    """Build application settings once per process."""
+    return Settings()
+
+
+@lru_cache
+def get_fs() -> Storix:
+    """Build one shared storage session from the application settings."""
+    settings = get_settings()
     # Overrides beat the environment; each key mirrors the backend's kwarg.
     return get_storage('local', base=settings.storage_base)

@@ -2,6 +2,8 @@ import pytest
 
 from typer.testing import CliRunner
 
+import storix.cli as cli_entry
+
 from storix import Storix
 from storix.backends import MemoryBackend
 from storix.cli import app as cli
@@ -18,6 +20,34 @@ def fresh_session() -> None:
 
 def run(*args: str):
     return runner.invoke(cli.app, list(args))
+
+
+def test_entrypoint_reports_missing_cli_extra(monkeypatch):
+    def import_missing_cli(_name: str):
+        error = ModuleNotFoundError(name='click')
+        raise error
+
+    monkeypatch.setattr(cli_entry, 'import_module', import_missing_cli)
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli_entry.main()
+
+    assert str(exc_info.value) == (
+        "cli extra not installed. Install it by running `uv add 'storix[cli]'`."
+    )
+
+
+def test_entrypoint_does_not_mask_application_import_errors(monkeypatch):
+    def import_broken_app(_name: str):
+        error = ModuleNotFoundError(name='application_dependency')
+        raise error
+
+    monkeypatch.setattr(cli_entry, 'import_module', import_broken_app)
+
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        cli_entry.main()
+
+    assert exc_info.value.name == 'application_dependency'
 
 
 def test_mkdir_touch_ls_round_trip():

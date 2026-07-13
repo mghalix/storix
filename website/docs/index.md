@@ -31,13 +31,14 @@ over them, the way FastAPI is a layer over the web rather than a new web server.
 from storix import Storix
 from storix.backends import LocalBackend
 
-fs = Storix(LocalBackend("~/data"))     # '/' is anchored at ~/data
+fs = Storix(LocalBackend("~/storix-data"))  # '/' is anchored at ~/storix-data
 
 fs.mkdir("/docs")
-fs.echo(b"hello, storix!", "/docs/readme.txt")
+fs.echo("hello, storix!", "/docs/readme.txt")
 print(fs.cat("/docs/readme.txt"))       # b'hello, storix!'
 
 fs.cd("/docs")                          # a session has a cwd, like a shell
+fs.mkdir("/archive")
 fs.mv("readme.txt", "/archive")         # the last argument is the destination
 ```
 
@@ -48,6 +49,8 @@ fs.mv("readme.txt", "/archive")         # the last argument is the destination
     ```bash
     uv add storix            # local filesystem + in-memory
     uv add "storix[azure]"   # + Azure Data Lake Gen2 (HNS accounts)
+    uv add "storix[cli]"     # + the sx command-line interface
+    uv add "storix[all]"     # all optional features
     ```
 
 === "pip"
@@ -55,6 +58,8 @@ fs.mv("readme.txt", "/archive")         # the last argument is the destination
     ```bash
     pip install storix
     pip install "storix[azure]"
+    pip install "storix[cli]"
+    pip install "storix[all]"
     ```
 
 New here? Start with the [Introduction](get-started/introduction.md), or jump
@@ -63,7 +68,8 @@ straight to the [Quickstart](get-started/quickstart.md).
 ## Highlights
 
 - **Unix semantics, everywhere.** `ls`/`cd`/`cat`/`du`/`mv` with a real session
-  and cwd, identical across local, memory, and cloud. There is even an `sx` shell.
+  and cwd, identical across local, memory, and cloud. The `cli` extra adds an
+  `sx` shell.
 - **Python-first and streaming.** `echo` takes native Python: `bytes`, `str`, an
   `Iterator[bytes]`, or an `AsyncIterator[bytes]`. Large files move through
   bounded memory instead of being loaded whole. See

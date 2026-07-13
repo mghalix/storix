@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from storix import pathops
+from storix._async._stream import validate_chunk_size
 from storix.errors import PathError, PermissionDeniedError
 from storix.types import StorixPath
 
@@ -81,10 +82,19 @@ class SandboxLayer:
         except PathError as exc:
             raise self._rescope(exc) from None
 
-    async def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
-        """Stream a file's contents in chunks."""
+    async def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        """Stream a file's contents in bounded chunks.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
         try:
-            async for chunk in self._inner.read_stream(self.to_real(path)):
+            async for chunk in self._inner.read_stream(
+                self.to_real(path), chunk_size=chunk_size
+            ):
                 yield chunk
         except PathError as exc:
             raise self._rescope(exc) from None
@@ -92,17 +102,45 @@ class SandboxLayer:
     async def write(
         self,
         path: PurePosixPath,
-        data: AsyncIterator[bytes],
+        data: bytes,
         *,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write a file from a chunk stream."""
+        """Write complete contents under sandbox translation."""
         try:
             await self._inner.write(
                 self.to_real(path),
                 data,
+                mode=mode,
+                content_type=content_type,
+                metadata=metadata,
+            )
+        except PathError as exc:
+            raise self._rescope(exc) from None
+
+    async def write_stream(
+        self,
+        path: PurePosixPath,
+        data: AsyncIterator[bytes],
+        *,
+        chunk_size: int | None = None,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write a file from a bounded chunk stream.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        try:
+            await self._inner.write_stream(
+                self.to_real(path),
+                data,
+                chunk_size=chunk_size,
                 mode=mode,
                 content_type=content_type,
                 metadata=metadata,

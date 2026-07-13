@@ -10,7 +10,10 @@ backends.
 from storix import Storix, SandboxLayer
 from storix.backends import LocalBackend
 
-backend = LocalBackend("/srv/data")
+backend = LocalBackend("~/storix-data")
+host = Storix(backend)
+host.mkdir("/tenant-42", parents=True)
+
 fs = Storix(SandboxLayer(backend, root="/tenant-42"))
 ```
 
@@ -18,8 +21,12 @@ You can also add layers fluently, which returns a new session and leaves the
 original untouched:
 
 ```python
-fs = Storix(LocalBackend("/srv/data")).with_layer(SandboxLayer, root="/tenant-42")
+fs = host.with_layer(SandboxLayer, root="/tenant-42")
 ```
+
+The sandbox root must exist before the layer is composed. This is deliberate:
+constructing a layer does not mutate its backend, and provisioning remains an
+explicit operation on the unsandboxed session.
 
 ## Sandbox: chroot as middleware
 
@@ -30,9 +37,13 @@ never leaks. A sandboxed session simply cannot see or reach anything above its
 root, which makes it a real security boundary, not a convenience.
 
 ```python
-fs = Storix(SandboxLayer(LocalBackend("/srv/data"), root="/tenant-42"))
-fs.cat("/../secrets.txt")   # raises PathNotFoundError, not a jailbreak
+host.echo("outside the tenant", "/secrets.txt")
+fs.touch("hi.txt")
+fs.cat("../secrets.txt")  # raises PathNotFoundError, not a jailbreak
 ```
+
+The real `/secrets.txt` exists outside `/tenant-42`. The `..` is clamped at the
+sandbox root, so the lookup stays inside the tenant and cannot reach it.
 
 ## Cache: read-through, opt-in per operation
 
@@ -47,13 +58,17 @@ from storix import CacheLayer, cache, get_storage
 fs = get_storage("azure").with_layer(
     CacheLayer,
     du=cache(ttl=60),                 # opt in; the tree walk is the big win
-    read=cache(max_bytes=8 << 20),    # content, capped per file
+    read=cache(max_bytes=8 * 1024 * 1024),  # content, capped at 8 MiB per file
 )
 ```
 
-The store is pluggable (a cashews-shaped protocol), so the in-memory default
-swaps for Redis or disk with no adapter. Correctness assumes you are the only
-writer; pass a `ttl` to bound staleness.
+The store protocol deliberately matches
+[Cashews](https://github.com/Krukov/cashews), so a `cashews.Cache` plugs into the
+async flavor with no adapter and can use Redis or disk underneath. The raw
+[redis-py](https://redis.io/docs/latest/develop/clients/redis-py/) client has a
+different API; use it through Cashews or provide a small adapter. Correctness
+assumes you are the only writer; pass a `ttl` to bound staleness. The
+[cache recipe](../recipes/caching.md) covers both Cashews and raw redis-py.
 
 ## Portable capabilities
 
@@ -86,3 +101,6 @@ fs.without_layer(CacheLayer).du("/big")
 
 A `SandboxLayer` is deliberately non-removable. You can always ask for less
 caching; you can never ask your way out of a security boundary.
+
+To build middleware of your own, see the runnable
+[custom layer recipe](../recipes/custom-layer.md).

@@ -62,7 +62,7 @@ class StorixPath(PurePosixPath):
 os.PathLike.register(StorixPath)
 
 type StrPathLike = os.PathLike[str] | str
-type StorageProvider = Literal['local', 'azure']
+type StorageProvider = Literal['local', 'memory', 'azure']
 type EchoMode = Literal['w', 'a']
 
 type DataBuffer[AnyStr: (str, bytes)] = (

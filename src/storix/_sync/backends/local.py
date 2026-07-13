@@ -16,7 +16,7 @@ import stat as stat_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from storix.constants import DEFAULT_WRITE_CHUNKSIZE
+from storix._sync._stream import batch_chunks, resolve_chunk_size
 from storix.enums import PathKind
 from storix.errors import PathNotFoundError, from_os_error
 from storix.models import Entry, RawStat
@@ -68,35 +68,48 @@ class LocalBackend(BackendBase):
         """``file://`` URI of the real on-disk location."""
         return self._to_os(path).as_uri()
 
-    def read_stream(self, path: PurePosixPath) -> Iterator[bytes]:
-        """Stream a file's contents in chunks."""
+    def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> Iterator[bytes]:
+        """Stream a file's contents in bounded chunks.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
         try:
             handle = open(self._to_os(path), 'rb')  # noqa: SIM115, PTH123
         except OSError as exc:
             raise from_os_error(exc, path) from exc
         try:
-            while chunk := handle.read(DEFAULT_WRITE_CHUNKSIZE):
+            while chunk := handle.read(size):
                 yield chunk
         finally:
             handle.close()
 
-    def write(
+    def write_stream(
         self,
         path: PurePosixPath,
         data: Iterator[bytes],
         *,
+        chunk_size: int | None = None,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
+        """Write a file from a bounded chunk stream.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
         del content_type, metadata  # capabilities not advertised; never sent
+        size = resolve_chunk_size(chunk_size, self.default_write_chunk_size)
         try:
             handle = open(self._to_os(path), 'wb' if mode == 'w' else 'ab')  # noqa: SIM115, PTH123
         except OSError as exc:
             raise from_os_error(exc, path) from exc
         try:
-            handle.writelines(data)
+            handle.writelines(batch_chunks(data, size))
         finally:
             handle.close()
 

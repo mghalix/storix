@@ -1,7 +1,7 @@
 """Five minutes of storix, sync flavor (async twin: quickstart_async.py).
 
 Runs fully in memory - no disk touched. Swap MemoryBackend for
-LocalBackend('~/data') or AzureBackend(...) and nothing else changes.
+LocalBackend('~/storix-data') or AzureBackend(...) and nothing else changes.
 """
 
 from storix import Storix

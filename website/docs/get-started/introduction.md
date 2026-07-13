@@ -19,7 +19,7 @@ A `Storix` session is like a shell logged into one machine:
 - Every operation raises a typed error on failure. Nothing returns `False` and
   hopes you check it.
 
-Underneath, the session talks to a small `StorageBackend` port (about 14
+Underneath, the session talks to a small `StorageBackend` port (17
 methods). Backends implement that port and nothing else. They do no path logic
 and speak only in storix errors, so the core stays identical across all of them.
 

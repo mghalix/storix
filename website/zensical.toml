@@ -32,6 +32,7 @@ nav = [
     { "Cache with Redis or disk" = "recipes/caching.md" },
     { "Test with storix" = "recipes/testing.md" },
     { "Write a custom backend" = "recipes/custom-backend.md" },
+    { "Write a custom layer" = "recipes/custom-layer.md" },
   ] },
   { "Reference" = [
     { "Storix session" = "reference/storix.md" },

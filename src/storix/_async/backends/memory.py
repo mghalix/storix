@@ -6,7 +6,7 @@ import dataclasses
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, override
 
-from storix._async._stream import chunked, collect
+from storix._async._stream import chunked, collect, resolve_chunk_size
 from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
@@ -50,10 +50,11 @@ class _Node:
 class MemoryBackend(BackendBase):
     """Dict-backed reference backend.
 
-    Implements only the six primitives, so every generic fallback is
-    exercised through it - it is the reference for port semantics and the
-    conformance suite's fastest vehicle. Directories are real nodes
-    (``data=None``), the root is pre-seeded, timestamps are UTC-aware.
+    Implements the streaming I/O and four structural primitives, so every
+    other generic fallback is exercised through it. It is the reference for
+    port semantics and the conformance suite's fastest vehicle. Directories
+    are real nodes (``data=None``), the root is pre-seeded, timestamps are
+    UTC-aware.
     Supports custom metadata, making it the credential-free test vehicle
     for the capability.
     """
@@ -75,27 +76,40 @@ class MemoryBackend(BackendBase):
         return (p for p in list(self._nodes) if p.parent == path and p != path)
 
     @override
-    async def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
-        """Stream a file's contents in chunks."""
+    async def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        """Stream a file's contents in bounded chunks.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
         node = self._get(path)
         data = node.data
         if data is None:
             raise IsADirectoryError(path)
 
-        for chunk in chunked(data):
+        for chunk in chunked(data, size):
             yield chunk
 
     @override
-    async def write(
+    async def write_stream(
         self,
         path: PurePosixPath,
         data: AsyncIterator[bytes],
         *,
+        chunk_size: int | None = None,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write a file from a chunk stream ('w' truncates, 'a' appends)."""
+        """Write a file from a bounded chunk stream.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        resolve_chunk_size(chunk_size, self.default_write_chunk_size)
         payload = await collect(data)
         now = utcnow()
         node = self._nodes.get(path)

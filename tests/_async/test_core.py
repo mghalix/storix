@@ -6,6 +6,7 @@ import pytest
 from storix._async import Storix
 from storix._async.backends.local import LocalBackend
 from storix._async.backends.memory import MemoryBackend
+from storix.constants import DEFAULT_READ_CHUNK_SIZE
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -199,11 +200,34 @@ async def test_stream_yields_content_in_chunks(fs: Storix):
     assert b''.join(chunks) == b'streamed payload'
 
 
+async def test_stream_default_is_bounded_for_reference_backends(fs: Storix):
+    payload = b'x' * (DEFAULT_READ_CHUNK_SIZE + 1)
+    await fs.echo(payload, '/a.bin')
+
+    chunks = [chunk async for chunk in fs.stream('/a.bin')]
+
+    assert [len(chunk) for chunk in chunks] == [DEFAULT_READ_CHUNK_SIZE, 1]
+
+
 async def test_stream_concatenates_multiple_paths(fs: Storix):
     await fs.echo(b'one', '/a.txt')
     await fs.echo(b'two', '/b.txt')
     joined = b''.join([c async for c in fs.stream('/a.txt', '/b.txt')])
     assert joined == b'onetwo'
+
+
+async def test_stream_honors_maximum_chunk_size(fs: Storix):
+    await fs.echo(b'0123456789', '/a.txt')
+    chunks = [chunk async for chunk in fs.stream('/a.txt', chunk_size=4)]
+    assert b''.join(chunks) == b'0123456789'
+    assert all(0 < len(chunk) <= 4 for chunk in chunks)
+
+
+@pytest.mark.parametrize('chunk_size', [0, -1])
+async def test_stream_rejects_non_positive_chunk_size(fs: Storix, chunk_size: int):
+    await fs.echo(b'x', '/a.txt')
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        [chunk async for chunk in fs.stream('/a.txt', chunk_size=chunk_size)]
 
 
 # --- touch ---
@@ -253,6 +277,20 @@ async def test_echo_encodes_str(fs: Storix):
 async def test_echo_accepts_iterable_of_chunks(fs: Storix):
     await fs.echo([b'a', b'b', b'c'], '/a.txt')
     assert await fs.cat('/a.txt') == b'abc'
+
+
+async def test_echo_accepts_chunk_size(fs: Storix):
+    await fs.echo([b'ab', b'cd', b'ef'], '/a.txt', chunk_size=4)
+    assert await fs.cat('/a.txt') == b'abcdef'
+
+
+@pytest.mark.parametrize('chunk_size', [0, -1])
+async def test_echo_rejects_non_positive_chunk_size_without_writing(
+    fs: Storix, chunk_size: int
+):
+    with pytest.raises(ValueError, match='chunk_size must be positive'):
+        await fs.echo(b'x', '/a.txt', chunk_size=chunk_size)
+    assert not await fs.exists('/a.txt')
 
 
 async def test_echo_content_type_requires_capability(fs: Storix):

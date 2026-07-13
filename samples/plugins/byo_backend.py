@@ -33,16 +33,19 @@ from storix.types import EchoMode
 from storix.utils.time import utcnow
 
 
-# --- 1. A backend: implement the six primitives; the core does the rest ---
-#     (subclass BackendBase to inherit read/move/copy/du/exists/... for free)
+# --- 1. A backend: implement six methods; the core does the rest ---
+#     Choose whole-object or streaming I/O per direction. This dict naturally
+#     stores whole files, so read()/write() are the honest, simplest choice.
 
 
 class DictBackend(BackendBase):
     """A trivially small backend over a flat dict - the whole port surface.
 
     Real backends (S3, GCS, SFTP, a database) look exactly like this:
-    six methods translating port paths to native calls. Everything else -
-    the unix commands, streaming, concurrency - is provided by Storix.
+    six methods translating port paths to native calls. BackendBase derives
+    read_stream()/write_stream() for this whole-object store, and derives the
+    remaining port operations too. A provider with native streaming should
+    implement read_stream()/write_stream() instead.
     """
 
     def __init__(self, *, label: str = 'dict') -> None:
@@ -53,28 +56,27 @@ class DictBackend(BackendBase):
     def _exists(self, key: str) -> bool:
         return key in self._files or key in self._dirs
 
-    async def read_stream(self, path: PurePosixPath) -> AsyncIterator[bytes]:
+    async def read(self, path: PurePosixPath) -> bytes:
         key = str(path)
         if key in self._dirs:
             raise IsADirectoryError(path)
         if key not in self._files:
             raise PathNotFoundError(path)
-        yield self._files[key]
+        return self._files[key]
 
     async def write(
         self,
         path: PurePosixPath,
-        data: AsyncIterator[bytes],
+        data: bytes,
         *,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        payload = b''.join([chunk async for chunk in data])
         key = str(path)
         if mode == 'a':
-            payload = self._files.get(key, b'') + payload
-        self._files[key] = payload
+            data = self._files.get(key, b'') + data
+        self._files[key] = data
 
     async def delete(self, path: PurePosixPath) -> None:
         key = str(path)

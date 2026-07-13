@@ -4,6 +4,7 @@ import pytest
 
 from storix._async import Storix, get_storage
 from storix._async.backends.local import LocalBackend
+from storix._async.backends.memory import MemoryBackend
 from storix.errors import ConfigurationError, StorageError
 
 
@@ -35,9 +36,54 @@ def test_env_selects_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     assert isinstance(get_storage().backend, LocalBackend)
 
 
+def test_memory_provider_builds_zero_config():
+    assert isinstance(get_storage('memory').backend, MemoryBackend)
+
+
+def test_env_selects_memory_provider(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv('STORIX_PROVIDER', 'memory')
+    assert isinstance(get_storage().backend, MemoryBackend)
+
+
+def test_memory_provider_rejects_configuration_overrides():
+    with pytest.raises(ConfigurationError, match='accepts no configuration'):
+        get_storage('memory', unexpected=True)
+
+
 def test_azure_from_kwargs_builds_without_network():
     fs = get_storage('azure', container='raw', account_name='acct', credential='token')
     assert fs.backend.container == 'raw'
+
+
+def test_azure_transfer_overrides_reach_backend_and_sdk():
+    fs = get_storage(
+        'azure',
+        container='raw',
+        account_name='acct',
+        credential='token',
+        read_chunk_size=1_234,
+        write_chunk_size=5_678,
+        read_prefetch_size=9_012,
+    )
+    backend = fs.backend
+    assert backend.default_read_chunk_size == 1_234
+    assert backend.default_write_chunk_size == 5_678
+    assert backend._service._config.max_chunk_get_size == 1_234
+    assert backend._service._config.max_single_get_size == 9_012
+
+
+@pytest.mark.parametrize(
+    'field', ['read_chunk_size', 'write_chunk_size', 'read_prefetch_size']
+)
+def test_azure_transfer_overrides_must_be_positive(field: str):
+    kwargs = {
+        'container': 'raw',
+        'account_name': 'acct',
+        'credential': 'token',
+        field: 0,
+    }
+    with pytest.raises(ValueError):
+        get_storage('azure', **kwargs)
 
 
 def test_azure_missing_config_raises_helpfully(
@@ -71,9 +117,7 @@ def test_keyword_provider_is_rejected_not_swallowed():
 def test_available_providers_lists_builtins_and_plugins():
     from storix._async.factory import available_providers, register_backend
 
-    assert set(available_providers()) >= {'local', 'azure'}
-
-    from storix._async.backends.memory import MemoryBackend
+    assert set(available_providers()) >= {'local', 'memory', 'azure'}
 
     register_backend('unit-avail', lambda **_: MemoryBackend())
     try:

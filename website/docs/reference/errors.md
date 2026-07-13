@@ -28,7 +28,7 @@ StorageError                         # base for everything storix raises
 │   └── DirectoryNotEmptyError       # also an OSError
 ├── UnsupportedOperationError        # backend lacks the requested capability
 ├── NonRemovableLayerError           # without_layer() asked to strip a boundary
-└── ConfigurationError               # the factory cannot build what was asked
+└── ConfigurationError               # backend configuration is invalid
 ```
 
 ## Notes
@@ -41,5 +41,7 @@ StorageError                         # base for everything storix raises
   `presigned_urls`).
 - `NonRemovableLayerError` is raised by `without_layer` when a matched layer sets
   `removable = False`, notably `SandboxLayer`.
+- `ConfigurationError` covers factory configuration and settings that a lazy
+  provider can validate only on first I/O, such as malformed Azure credentials.
 - `from_os_error(exc, path)` translates a raw `OSError` into this taxonomy; it is
   the boundary helper filesystem-backed backends use.

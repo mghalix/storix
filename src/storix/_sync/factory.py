@@ -26,6 +26,9 @@ class _AzureOverrides(TypedDict, total=False):
     container: str
     account_name: str
     credential: str
+    read_chunk_size: int
+    write_chunk_size: int
+    read_prefetch_size: int
 
 
 def _build_local(**overrides: Any) -> StorageBackend:
@@ -33,6 +36,17 @@ def _build_local(**overrides: Any) -> StorageBackend:
 
     cfg = LocalConfig(**overrides)
     return LocalBackend(cfg.base)
+
+
+def _build_memory(**overrides: Any) -> StorageBackend:
+    if overrides:
+        fields = ', '.join(sorted(overrides))
+        msg = f'memory backend accepts no configuration overrides: {fields}'
+        raise ConfigurationError(msg)
+
+    from .backends.memory import MemoryBackend
+
+    return MemoryBackend()
 
 
 def _build_azure(**overrides: Any) -> StorageBackend:
@@ -57,6 +71,9 @@ def _build_azure(**overrides: Any) -> StorageBackend:
         cfg.container,
         account_name=cfg.account_name,
         credential=cfg.credential,
+        read_chunk_size=cfg.read_chunk_size,
+        write_chunk_size=cfg.write_chunk_size,
+        read_prefetch_size=cfg.read_prefetch_size,
     )
 
 
@@ -64,6 +81,7 @@ def _build_azure(**overrides: Any) -> StorageBackend:
 # arbitrary names (the whole point of register_backend)
 _BUILDERS: dict[str, Callable[..., StorageBackend]] = {
     'local': _build_local,
+    'memory': _build_memory,
     'azure': _build_azure,
 }
 
@@ -93,6 +111,8 @@ def available_providers() -> tuple[str, ...]:
 def get_storage(
     provider: Literal['local'], /, **overrides: Unpack[_LocalOverrides]
 ) -> Storix: ...
+@overload
+def get_storage(provider: Literal['memory'], /) -> Storix: ...
 @overload
 def get_storage(
     provider: Literal['azure'], /, **overrides: Unpack[_AzureOverrides]

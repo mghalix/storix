@@ -33,3 +33,12 @@ discovery. The registry is str-keyed (per flavor) so third-party
 providers register arbitrary names; `get_storage(provider=...)` as a
 keyword is rejected (positional-only) so it never silently becomes a
 config override.
+
+## Update (2026-07-13): zero-config memory provider
+
+Memory is a built-in provider and therefore belongs in the factory even though
+it has no settings model. `get_storage('memory')` and
+`STORIX_PROVIDER=memory` create a fresh `MemoryBackend`; configuration
+overrides are rejected explicitly. The `provider` parameter remains a provider
+name. Preconstructed and custom backend instances continue to enter through
+`Storix(backend)`.

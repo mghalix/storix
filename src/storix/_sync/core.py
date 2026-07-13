@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Self
 
 from storix import pathops
 from storix._sync._compat import gather
-from storix._sync._stream import ensure_chunks
+from storix._sync._stream import ensure_chunks, validate_chunk_size
 from storix._sync.backends import generic
 from storix.enums import Capability, PathKind
 from storix.errors import (
@@ -323,16 +323,36 @@ class Storix:
         parts = gather(*(self._backend.read(target) for target in targets))
         return b''.join(parts)
 
-    def stream(self, path: StrPathLike, /, *paths: StrPathLike) -> Iterator[bytes]:
+    def stream(
+        self,
+        path: StrPathLike,
+        /,
+        *paths: StrPathLike,
+        chunk_size: int | None = None,
+    ) -> Iterator[bytes]:
         """Stream file contents in chunks - the streaming form of ``cat``.
 
-        Multiple paths concatenate in order, chunk by chunk, in constant
-        memory however large the files: exactly what unix cat does to a
-        pipe. Feeds straight into e.g. FastAPI's ``StreamingResponse``.
-        Range reads (``head -c``/seek) are a planned port extension.
+        Multiple paths concatenate in order, chunk by chunk. Streaming-native
+        backends use bounded memory however large the files; a whole-object
+        backend fallback may materialize a file before splitting it. Feeds
+        straight into e.g. FastAPI's ``StreamingResponse``. Range reads
+        (``head -c``/seek) are a planned port extension.
+
+        Args:
+            path: The first (or only) file to stream.
+            paths: Further files, concatenated after ``path`` in order.
+            chunk_size: Maximum yielded chunk size. ``None`` selects each
+                backend's preferred default. Smaller native chunks may pass
+                through unchanged; chunk boundaries carry no meaning.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+            PathNotFoundError: If any requested path does not exist.
+            IsADirectoryError: If any requested path is a directory.
         """
+        validate_chunk_size(chunk_size)
         for target in [self._resolve(p) for p in (path, *paths)]:
-            yield from self._backend.read_stream(target)
+            yield from self._backend.read_stream(target, chunk_size=chunk_size)
 
     def stat(self, path: StrPathLike | None = None) -> FileProperties:
         """Return the user-facing properties of a path."""
@@ -426,9 +446,7 @@ class Storix:
             self._ensure_parent(target)
         gather(
             *(
-                self._backend.write(
-                    target, ensure_chunks(b''), mode='a', content_type=None
-                )
+                self._backend.write(target, b'', mode='a', content_type=None)
                 for target in targets
             )
         )
@@ -439,6 +457,7 @@ class Storix:
         path: StrPathLike,
         /,
         *,
+        chunk_size: int | None = None,
         mode: EchoMode = 'w',
         content_type: str | None = None,
         metadata: Mapping[str, str] | None = None,
@@ -446,19 +465,38 @@ class Storix:
         """Write data into a file, creating it if missing.
 
         ``mode='w'`` truncates, ``mode='a'`` appends. Accepts str/bytes,
-        readable file-like objects, and (async) iterables of either.
+        readable file-like objects, and (async) iterables of either. Source
+        boundaries are normalized into efficient backend write batches.
         ``content_type`` and ``metadata`` require the matching backend
         capability.
+
+        Args:
+            data: Complete contents or a lazy source producing them.
+            path: Destination file.
+            chunk_size: Maximum target write-batch size. ``None`` selects the
+                backend's preferred default.
+            mode: ``'w'`` to replace or ``'a'`` to append.
+            content_type: Optional media type for capable backends.
+            metadata: Optional replacement metadata for capable backends.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+            UnsupportedOperationError: If requested metadata or content type
+                is not supported by the backend stack.
+            PathNotFoundError: If the destination parent does not exist.
+            IsADirectoryError: If the destination is a directory.
         """
+        validate_chunk_size(chunk_size)
         if content_type is not None:
             self._ensure_capability(Capability.CONTENT_TYPE)
         if metadata is not None:
             self._ensure_capability(Capability.CUSTOM_METADATA)
         target = self._resolve(path)
         self._ensure_parent(target)
-        self._backend.write(
+        self._backend.write_stream(
             target,
             ensure_chunks(data),
+            chunk_size=chunk_size,
             mode=mode,
             content_type=content_type,
             metadata=metadata,

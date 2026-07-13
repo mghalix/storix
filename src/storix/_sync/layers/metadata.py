@@ -9,7 +9,7 @@ import dataclasses
 
 from typing import TYPE_CHECKING
 
-from storix._sync._stream import ensure_chunks
+from storix._sync._stream import validate_chunk_size
 from storix.enums import Capability, PathKind
 from storix.errors import IsADirectoryError, PathNotFoundError
 from storix.serialization import json_dumpb, json_loadb
@@ -79,23 +79,33 @@ class MetadataLayer(LayerBase):
     def _save(self, table: dict[str, dict[str, str]]) -> None:
         if table:
             payload = self._serialize(table)
-            self._inner.write(
-                self._SIDECAR, ensure_chunks(payload), mode='w', content_type=None
-            )
+            self._inner.write(self._SIDECAR, payload, mode='w', content_type=None)
         elif self._inner.exists(self._SIDECAR):
             self._inner.delete(self._SIDECAR)
 
-    def write(
+    def write_stream(
         self,
         path: PurePosixPath,
         data: Iterator[bytes],
         *,
+        chunk_size: int | None = None,
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
     ) -> None:
-        """Write content, then maintain the sidecar per port semantics."""
-        self._inner.write(path, data, mode=mode, content_type=content_type)
+        """Write content, then maintain the sidecar per port semantics.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        self._inner.write_stream(
+            path,
+            data,
+            chunk_size=chunk_size,
+            mode=mode,
+            content_type=content_type,
+        )
         key = str(path)
         if metadata is None and mode == 'a':
             return  # None preserves on append
@@ -117,17 +127,35 @@ class MetadataLayer(LayerBase):
         stored = table.get(str(path))
         return dataclasses.replace(raw, metadata=dict(stored) if stored else None)
 
+    def read(self, path: PurePosixPath) -> bytes:
+        """Read file contents while keeping the sidecar unreadable.
+
+        Raises:
+            PathNotFoundError: If ``path`` is the hidden sidecar or is missing.
+        """
+        if path == self._SIDECAR:
+            raise PathNotFoundError(path)
+        return self._inner.read(path)
+
     def exists(self, path: PurePosixPath) -> bool:
         """Whether anything lives at ``path`` (the sidecar reads absent)."""
         if path == self._SIDECAR:
             return False
         return self._inner.exists(path)
 
-    def read_stream(self, path: PurePosixPath) -> Iterator[bytes]:
-        """Stream a file's contents (the sidecar is not readable)."""
+    def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> Iterator[bytes]:
+        """Stream file contents while keeping the sidecar unreadable.
+
+        Raises:
+            PathNotFoundError: If ``path`` is the hidden sidecar or is missing.
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
         if path == self._SIDECAR:
             raise PathNotFoundError(path)
-        yield from self._inner.read_stream(path)
+        yield from self._inner.read_stream(path, chunk_size=chunk_size)
 
     def list_dir(self, path: PurePosixPath) -> Iterator[Entry]:
         """Yield children, hiding the sidecar from its parent directory."""

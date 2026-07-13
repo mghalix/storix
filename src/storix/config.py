@@ -8,8 +8,14 @@ read from the environment and a local ``.env`` file.
 
 from typing import ClassVar
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from storix.constants import (
+    DEFAULT_AZURE_READ_CHUNK_SIZE,
+    DEFAULT_AZURE_READ_PREFETCH_SIZE,
+    DEFAULT_AZURE_WRITE_CHUNK_SIZE,
+)
 from storix.types import StorageProvider
 
 
@@ -49,3 +55,12 @@ class AzureConfig(BaseSettings):
 
     credential: str | None = None
     """SAS token or account key; required."""
+
+    read_chunk_size: int = Field(default=DEFAULT_AZURE_READ_CHUNK_SIZE, gt=0)
+    """Default consumer and SDK range chunk size in bytes."""
+
+    write_chunk_size: int = Field(default=DEFAULT_AZURE_WRITE_CHUNK_SIZE, gt=0)
+    """Default append-request batch size in bytes."""
+
+    read_prefetch_size: int = Field(default=DEFAULT_AZURE_READ_PREFETCH_SIZE, gt=0)
+    """Initial SDK download request size in bytes."""
