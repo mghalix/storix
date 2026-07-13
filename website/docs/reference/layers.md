@@ -54,7 +54,8 @@ InMemoryCacheStore(*, maxsize: int | None = None)
 ```
 
 The pluggable store protocol and its in-memory default (optional `maxsize` for LRU
-eviction). A `cashews.Cache` satisfies the protocol directly.
+eviction). A `cashews.Cache` directly satisfies the async flavor. The sync
+flavor requires synchronous implementations of the same four methods.
 
 ## `DataUrlLayer`, `MetadataLayer`
 

@@ -32,13 +32,13 @@ _MISS: Any = object()
 
 
 class CacheStore(Protocol):
-    """Cashews-shaped async cache backend for ``CacheLayer``.
+    """Cashews-shaped cache backend for ``CacheLayer``.
 
-    Four coroutine methods; the in-memory default ships. Pass any object
-    that provides them for a shared/persistent cache - a ``cashews.Cache``
-    fits directly. Return types are intentionally loose (``Any``) so real
-    caches (whose ``set``/``delete`` return bool/int) satisfy it
-    structurally with no adapter.
+    Four methods; the async flavor awaits them and the sync flavor calls
+    them directly. The in-memory default ships. Pass any object that provides
+    them for a shared or persistent cache. A ``cashews.Cache`` fits the async
+    flavor directly. Return types are intentionally loose (``Any``) so real
+    caches (whose ``set``/``delete`` return bool/int) satisfy it structurally.
     """
 
     async def get(self, key: str, default: Any = None) -> Any:

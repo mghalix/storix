@@ -91,7 +91,9 @@ Configurable read-through caching, in the library and the `sx` CLI.
   (ADR 0014)
 - Pluggable `CacheStore` - a cashews-shaped async protocol
   (`get`/`set`/`delete`/`delete_match`) with loose returns, so a
-  `cashews.Cache` (Redis, disk, ...) satisfies it with no adapter. Ships
+  `cashews.Cache` (Redis, disk, ...) satisfies the async flavor with no
+  adapter. The sync flavor uses synchronous implementations of the same four
+  methods. Ships
   `InMemoryCacheStore` (optional `maxsize` LRU) as the default. New
   exports: `CacheLayer`, `CacheOp`, `cache`, `CacheStore`,
   `InMemoryCacheStore`.

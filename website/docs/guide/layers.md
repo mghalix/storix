@@ -63,11 +63,12 @@ fs = get_storage("azure").with_layer(
 ```
 
 The store protocol deliberately matches
-[Cashews](https://github.com/Krukov/cashews), so a `cashews.Cache` plugs in with
-no adapter and can use Redis or disk underneath. The raw
+[Cashews](https://github.com/Krukov/cashews), so a `cashews.Cache` plugs into the
+async flavor with no adapter and can use Redis or disk underneath. The raw
 [redis-py](https://redis.io/docs/latest/develop/clients/redis-py/) client has a
 different API; use it through Cashews or provide a small adapter. Correctness
-assumes you are the only writer; pass a `ttl` to bound staleness.
+assumes you are the only writer; pass a `ttl` to bound staleness. The
+[cache recipe](../recipes/caching.md) covers both Cashews and raw redis-py.
 
 ## Portable capabilities
 
