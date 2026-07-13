@@ -1,6 +1,6 @@
 # Release Notes
 
-## Unreleased
+## ## [0.3.0] - 2026-07-14.
 
 Bounded, provider-aware streaming in both directions. This is a breaking
 backend-port release. See ADR 0017.
