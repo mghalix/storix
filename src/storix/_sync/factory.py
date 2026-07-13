@@ -26,6 +26,9 @@ class _AzureOverrides(TypedDict, total=False):
     container: str
     account_name: str
     credential: str
+    read_chunk_size: int
+    write_chunk_size: int
+    read_prefetch_size: int
 
 
 def _build_local(**overrides: Any) -> StorageBackend:
@@ -57,6 +60,9 @@ def _build_azure(**overrides: Any) -> StorageBackend:
         cfg.container,
         account_name=cfg.account_name,
         credential=cfg.credential,
+        read_chunk_size=cfg.read_chunk_size,
+        write_chunk_size=cfg.write_chunk_size,
+        read_prefetch_size=cfg.read_prefetch_size,
     )
 
 

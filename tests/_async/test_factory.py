@@ -40,6 +40,37 @@ def test_azure_from_kwargs_builds_without_network():
     assert fs.backend.container == 'raw'
 
 
+def test_azure_transfer_overrides_reach_backend_and_sdk():
+    fs = get_storage(
+        'azure',
+        container='raw',
+        account_name='acct',
+        credential='token',
+        read_chunk_size=1_234,
+        write_chunk_size=5_678,
+        read_prefetch_size=9_012,
+    )
+    backend = fs.backend
+    assert backend.default_read_chunk_size == 1_234
+    assert backend.default_write_chunk_size == 5_678
+    assert backend._service._config.max_chunk_get_size == 1_234
+    assert backend._service._config.max_single_get_size == 9_012
+
+
+@pytest.mark.parametrize(
+    'field', ['read_chunk_size', 'write_chunk_size', 'read_prefetch_size']
+)
+def test_azure_transfer_overrides_must_be_positive(field: str):
+    kwargs = {
+        'container': 'raw',
+        'account_name': 'acct',
+        'credential': 'token',
+        field: 0,
+    }
+    with pytest.raises(ValueError):
+        get_storage('azure', **kwargs)
+
+
 def test_azure_missing_config_raises_helpfully(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
