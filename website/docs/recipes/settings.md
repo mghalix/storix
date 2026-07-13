@@ -25,8 +25,9 @@ fs = get_storage()   # provider and credentials come from the environment
 
 ## From your app's settings
 
-To keep storage config next to the rest of your configuration, wrap it in your
-own `BaseSettings` and pass overrides, which win over the environment:
+To keep storage config next to the rest of your configuration, use the common
+cached `get_settings()` pattern and derive one shared storage session from it.
+Explicit overrides win over the environment:
 
 ```python
 --8<-- "samples/recipes/settings.py"
@@ -36,3 +37,7 @@ Overrides map one-to-one onto a backend's constructor keywords, so `base=` is a
 `LocalBackend` option, `container=` an `AzureBackend` option, and so on. Azure's
 transfer sizes must be positive; its defaults are 4 MiB for range reads and
 write batches, plus a 32 MiB initial download request.
+
+The cached `get_fs()` is a process-level resource. Close it from your
+application's shutdown hook. The [FastAPI recipe](fastapi.md) shows the same
+lifetime explicitly with `lifespan`.
