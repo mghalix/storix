@@ -43,7 +43,7 @@ FS = Annotated[Storix, Depends(get_fs)]
 @app.post('/files/{name}')
 async def upload(name: str, file: UploadFile, fs: FS) -> dict[str, str]:
     async def chunks():
-        while data := await file.read(1 << 20):  # 1 MiB at a time
+        while data := await file.read(1024 * 1024):  # 1 MiB at a time
             yield data
 
     await fs.echo(chunks(), f'/uploads/{name}')  # streamed, bounded memory

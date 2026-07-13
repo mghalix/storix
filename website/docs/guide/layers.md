@@ -58,7 +58,7 @@ from storix import CacheLayer, cache, get_storage
 fs = get_storage("azure").with_layer(
     CacheLayer,
     du=cache(ttl=60),                 # opt in; the tree walk is the big win
-    read=cache(max_bytes=8 << 20),    # content, capped per file
+    read=cache(max_bytes=8 * 1024 * 1024),  # content, capped at 8 MiB per file
 )
 ```
 

@@ -41,7 +41,8 @@ layer's namespace.
 cache(*, ttl: float | None = None, store: CacheStore | None = None, max_bytes: int | None = None) -> CacheOp
 ```
 
-Build a per-operation spec: `du=cache(ttl=60)`, `read=cache(max_bytes=8 << 20)`.
+Build a per-operation spec: `du=cache(ttl=60)`,
+`read=cache(max_bytes=8 * 1024 * 1024)`.
 
 ### `CacheStore`, `InMemoryCacheStore`
 

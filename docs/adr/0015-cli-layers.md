@@ -19,7 +19,7 @@ keys on `locate()`, so it stays correct under the sandbox):
   the safest thing a storage CLI can offer (no stray `rm -r` across a
   whole container).
 - `--cache [--cache-ttl N]` -> `CacheLayer(metadata=True, du=True,
-  read=cache(max_bytes=8<<20))`. metadata+du+read is the CLI default:
+  read=cache(max_bytes=8 * 1024 * 1024))`. metadata+du+read is the CLI default:
   `du` is the headline win with no cross-session staleness (own writes
   self-evict), `read` is bounded by the cap.
 

@@ -20,6 +20,6 @@ fs = get_storage('azure').with_layer(
     CacheLayer,
     store=store,  # a cashews.Cache satisfies the CacheStore protocol as-is
     du=cache(ttl=60),
-    read=cache(max_bytes=8 << 20),
+    read=cache(max_bytes=8 * 1024 * 1024),
     environment='prod',
 )

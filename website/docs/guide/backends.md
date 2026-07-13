@@ -50,6 +50,7 @@ fs = get_storage("local", base="~/storix-data")  # explicit typed override
 fs = get_storage("memory")      # zero-config, in-process, disposable
 fs = get_storage("azure")       # reads STORIX_AZURE_* from the environment
 
+# Or provide the Azure settings explicitly (replace these placeholders first):
 fs = get_storage(
     "azure",
     container="raw",
