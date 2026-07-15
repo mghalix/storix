@@ -30,3 +30,9 @@ mechanism serves any future capability/layer pair. Cost: users meet a
 functional idiom (a factory returning a factory) - documented with
 examples. Rejected: per-layer `only_if=`/`enabled=` flags (spreads the
 same conditional across every layer's constructor).
+
+## Amended by 0018
+The `when_missing(capability, layer)` signature shown here is superseded:
+the combinator now infers the capability from the layer's `provides`
+(`when_missing(layer, *args, **kwargs)`), matching `with_layer_missing`.
+The combinator-over-flags decision itself stands.

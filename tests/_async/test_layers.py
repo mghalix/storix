@@ -117,9 +117,8 @@ async def test_layers_compose(jailed: tuple[MemoryBackend, SandboxLayer]):
 
 def test_when_missing_wraps_only_capability_poor_backends():
     from storix._async.layers import DataUrlLayer, when_missing
-    from storix.enums import Capability
 
-    build = when_missing(Capability.PRESIGNED_URLS, DataUrlLayer)
+    build = when_missing(DataUrlLayer)  # capability inferred from provides
 
     # memory lacks presigned_urls -> wrapped and upgraded
     wrapped = build(MemoryBackend())
@@ -129,6 +128,13 @@ def test_when_missing_wraps_only_capability_poor_backends():
     # a backend that already has it -> returned untouched (zero overhead)
     native = DataUrlLayer(MemoryBackend())  # now advertises presigned_urls
     assert build(native) is native
+
+
+def test_when_missing_rejects_layers_without_provides():
+    from storix._async.layers import LayerBase, when_missing
+
+    with pytest.raises(ValueError, match='provides'):
+        when_missing(LayerBase)
 
 
 async def test_with_layer_missing_infers_capability_and_prefers_native():
