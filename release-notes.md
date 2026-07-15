@@ -1,6 +1,40 @@
 # Release Notes
 
-## ## [0.3.0] - 2026-07-14.
+## [0.4.0] - 2026-07-15
+
+`when_missing` infers its capability from the layer. Breaking combinator
+signature. See ADR 0018.
+
+### Changed (breaking)
+
+- The free `when_missing` combinator infers the gated capability from the
+  layer's `provides` ClassVar and drops the explicit first argument, matching
+  `with_layer_missing`. It now forwards constructor args to the layer, so the
+  conditional case no longer needs `functools.partial`. Migration is
+  mechanical: delete the leading capability argument.
+
+  ```python
+  # was
+  when_missing(Capability.PRESIGNED_URLS, DataUrlLayer)
+  # now
+  when_missing(DataUrlLayer)
+
+  # constructor kwargs forward directly (no functools.partial):
+  when_missing(MetadataLayer, serialize=dumps, deserialize=loads)
+  ```
+
+  It raises `ValueError` if the layer declares no `provides` (nothing to
+  infer, use it unconditionally instead). `functools.partial` stays the shape
+  for unconditional layers in a `layers=` list.
+
+### Added
+
+- `LayerFactory` (the ParamSpec layer-factory protocol behind `with_layer` and
+  now `when_missing`) is a public export from `storix` and `storix.aio`, beside
+  `BoundLayer`, so integrators writing their own layer helpers can name the
+  type.
+
+## [0.3.0] - 2026-07-14
 
 Bounded, provider-aware streaming in both directions. This is a breaking
 backend-port release. See ADR 0017.

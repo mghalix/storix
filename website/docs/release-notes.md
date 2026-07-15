@@ -1,0 +1,1 @@
+--8<-- "release-notes.md"
