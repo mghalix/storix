@@ -52,6 +52,9 @@ path works across providers, zero overhead where unneeded.
   capability moved onto the layer rather than the call. The
   `when_missing(capability, factory)` combinator remains for `layers=`
   and the rare gate-on-a-different-capability case.
+  (Amended by 0018: the combinator now infers the capability from the
+  layer's `provides`, dropping the explicit argument; the
+  gate-on-a-different-capability case is unbundled to an inline closure.)
 - `PassthroughLayer` -> `LayerBase` (subclassing base; a bare instance is
   a harmless passthrough). `DataUrlLayer`, `MetadataLayer` ship as
   concrete capability-backfilling layers; a bundled layer that adds a

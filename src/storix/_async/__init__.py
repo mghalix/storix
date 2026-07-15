@@ -1,4 +1,4 @@
-from .core import BoundLayer, Storix
+from .core import BoundLayer, LayerFactory, Storix
 from .factory import available_providers, get_storage, register_backend
 from .layers import (
     CacheLayer,
@@ -23,6 +23,7 @@ __all__ = (
     'DataUrlLayer',
     'InMemoryCacheStore',
     'LayerBase',
+    'LayerFactory',
     'MetadataLayer',
     'SandboxLayer',
     'Storix',

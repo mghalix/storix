@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import copy
 
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, ParamSpec, Protocol, Self
 
 from storix import pathops
 from storix._sync._compat import gather
@@ -28,19 +28,24 @@ from storix.types import StorixPath
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Mapping
     from contextlib import AbstractContextManager
-    from typing import ParamSpec, Protocol
 
     from storix._sync.backends import StorageBackend
     from storix.types import DataBuffer, EchoMode, StrPathLike
 
-    P = ParamSpec('P')
 
-    class LayerFactory(Protocol[P]):
-        """A layer class/factory: backend first, then its own params."""
+P = ParamSpec('P')
 
-        def __call__(
-            self, backend: StorageBackend, /, *args: P.args, **kwargs: P.kwargs
-        ) -> StorageBackend: ...
+
+class LayerFactory(Protocol[P]):
+    """A layer class/factory: backend first, then its own params.
+
+    Public so integrators writing their own layer helpers can name the
+    type; it appears in the ``when_missing`` signature.
+    """
+
+    def __call__(
+        self, backend: StorageBackend, /, *args: P.args, **kwargs: P.kwargs
+    ) -> StorageBackend: ...
 
 
 # a fully-bound layer (the layers= list, and what with_layer produces):
@@ -163,16 +168,12 @@ class Storix:
         native. Raises ``ValueError`` if the layer declares no
         ``provides`` (nothing to infer - use ``with_layer``).
         """
-        capability = getattr(layer, 'provides', None)
-        if capability is None:
-            msg = (
-                f'{getattr(layer, "__name__", layer)!r} declares no `provides` '
-                f'capability to infer; use with_layer() instead'
-            )
-            raise ValueError(msg)
-        if self._backend.capabilities.supports(capability):
+        from .layers.native import when_missing
+
+        wrapped = when_missing(layer, *args, **kwargs)(self._backend)
+        if wrapped is self._backend:  # native: skipped, no new session
             return self
-        return type(self)(layer(self._backend, *args, **kwargs), home=self._home)
+        return type(self)(wrapped, home=self._home)
 
     def without_layer(self, *layers: type) -> Self:
         """Return a *new* session with the given layer types bypassed.

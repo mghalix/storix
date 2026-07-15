@@ -13,5 +13,7 @@ cousins; FastAPI keeps the same knowledge as narrative docs
 project is design-heavy and may distill narrative docs from them later.
 
 Decisions 0001-0013 were made during the 0.2.0 rework (2026-07-10/11);
-0014-0016 cover 0.2.1/0.2.2 polish (2026-07-11/12), and 0017 records
-the breaking bidirectional streaming boundary (2026-07-13).
+0014-0016 cover 0.2.1/0.2.2 polish (2026-07-11/12), 0017 records the
+breaking bidirectional streaming boundary (2026-07-13), and 0018 makes
+the `when_missing` combinator infer its capability (2026-07-15,
+amends 0013/0008).
