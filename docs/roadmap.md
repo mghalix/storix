@@ -54,7 +54,8 @@ and for individual decisions: `docs/adr/`.
   assumption (ADR 0014/0015)
 - Range reads: `read_stream(start=, length=)` port extension ->
   `fs.stream`/`head`/`tail`; needed for video seeking / HTTP Range
-- `tree`, `find`, `wc` on the new core; `glob`
+- `tree`, `find`, `wc` on the new core; `glob`; `ls`/`find` kind
+  filters (dirs-only / files-only)
 - `echo(atomic=True)` (write-temp-then-move); `progress=` callbacks
 - BackendBase template-method refactor (shared stat-validate prologues)
 - docs site decision (zensical?) + honest comparison page
@@ -64,6 +65,9 @@ and for individual decisions: `docs/adr/`.
 Multiple ergonomic front-ends over the one core, and breadth of
 providers - the two levers that make storix promotable.
 
+- [x] `when_missing` infers its capability from the layer's `provides`,
+  dropping the explicit argument and forwarding constructor args - the
+  pre-construction twin of `with_layer_missing` (breaking; ADR 0018)
 - `storix.pathlike`: pathlib-flavored adapter over the same core
   (the cloudpathlib audience)
 - Stateless flat facade (working name `Boring[Storix]` / `storix.flat`):
