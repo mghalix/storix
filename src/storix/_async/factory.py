@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, Unpack, overload
 
-from storix.config import AzureConfig, LocalConfig, StorixSettings
+from storix.config import (
+    AzureConfig,
+    GcsConfig,
+    LocalConfig,
+    S3Config,
+    StorixSettings,
+)
 from storix.errors import ConfigurationError
 
 from .core import Storix
@@ -27,6 +33,23 @@ class _AzureOverrides(TypedDict, total=False):
     read_chunk_size: int
     write_chunk_size: int
     read_prefetch_size: int
+
+
+class _S3Overrides(TypedDict, total=False):
+    bucket: str
+    region: str
+    access_key_id: str
+    secret_access_key: str
+    endpoint: str
+    root: str
+
+
+class _GcsOverrides(TypedDict, total=False):
+    bucket: str
+    credential: str
+    credential_path: str
+    endpoint: str
+    root: str
 
 
 def _build_local(**overrides: Any) -> StorageBackend:
@@ -75,12 +98,55 @@ def _build_azure(**overrides: Any) -> StorageBackend:
     )
 
 
+def _build_s3(**overrides: Any) -> StorageBackend:
+    # lazy: the backend's engine is an optional dependency (storix[s3])
+    from .backends.s3 import S3Backend
+
+    cfg = S3Config(**overrides)
+    if cfg.bucket is None:
+        msg = (
+            's3 backend is missing configuration: bucket - set '
+            'STORIX_S3_BUCKET or pass it to get_storage()'
+        )
+        raise ConfigurationError(msg)
+    return S3Backend(
+        cfg.bucket,
+        region=cfg.region,
+        access_key_id=cfg.access_key_id,
+        secret_access_key=cfg.secret_access_key,
+        endpoint=cfg.endpoint,
+        root=cfg.root,
+    )
+
+
+def _build_gcs(**overrides: Any) -> StorageBackend:
+    # lazy: the backend's engine is an optional dependency (storix[gcs])
+    from .backends.gcs import GcsBackend
+
+    cfg = GcsConfig(**overrides)
+    if cfg.bucket is None:
+        msg = (
+            'gcs backend is missing configuration: bucket - set '
+            'STORIX_GCS_BUCKET or pass it to get_storage()'
+        )
+        raise ConfigurationError(msg)
+    return GcsBackend(
+        cfg.bucket,
+        credential=cfg.credential,
+        credential_path=cfg.credential_path,
+        endpoint=cfg.endpoint,
+        root=cfg.root,
+    )
+
+
 # keyed by str, not the built-in Literal: third-party providers register
 # arbitrary names (the whole point of register_backend)
 _BUILDERS: dict[str, Callable[..., StorageBackend]] = {
     'local': _build_local,
     'memory': _build_memory,
     'azure': _build_azure,
+    's3': _build_s3,
+    'gcs': _build_gcs,
 }
 
 
@@ -114,6 +180,14 @@ def get_storage(provider: Literal['memory'], /) -> Storix: ...
 @overload
 def get_storage(
     provider: Literal['azure'], /, **overrides: Unpack[_AzureOverrides]
+) -> Storix: ...
+@overload
+def get_storage(
+    provider: Literal['s3'], /, **overrides: Unpack[_S3Overrides]
+) -> Storix: ...
+@overload
+def get_storage(
+    provider: Literal['gcs'], /, **overrides: Unpack[_GcsOverrides]
 ) -> Storix: ...
 @overload
 def get_storage(provider: str, /, **overrides: Any) -> Storix: ...  # plugins

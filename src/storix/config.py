@@ -40,6 +40,55 @@ class LocalConfig(BaseSettings):
     """Base directory anchoring the filesystem (created if missing)."""
 
 
+class S3Config(BaseSettings):
+    """``STORIX_S3_*`` settings for the Amazon S3 backend."""
+
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+        env_prefix='STORIX_S3_', env_file='.env', extra='ignore'
+    )
+
+    bucket: str | None = None
+    """Bucket anchoring the session; required."""
+
+    region: str | None = None
+    """Bucket region; defaults to the standard AWS environment/config chain."""
+
+    access_key_id: str | None = None
+    """Static access key; omitted means the standard AWS credential chain."""
+
+    secret_access_key: str | None = None
+    """Secret for ``access_key_id``."""
+
+    endpoint: str | None = None
+    """Custom endpoint URL for S3-compatible stores (MinIO, R2, ...)."""
+
+    root: str = '/'
+    """Key prefix anchoring the session's ``/`` inside the bucket."""
+
+
+class GcsConfig(BaseSettings):
+    """``STORIX_GCS_*`` settings for the Google Cloud Storage backend."""
+
+    model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
+        env_prefix='STORIX_GCS_', env_file='.env', extra='ignore'
+    )
+
+    bucket: str | None = None
+    """Bucket anchoring the session; required."""
+
+    credential: str | None = None
+    """Service-account JSON as a string; omitted means Google's default chain."""
+
+    credential_path: str | None = None
+    """Path to a service-account JSON file."""
+
+    endpoint: str | None = None
+    """Custom endpoint URL for GCS-compatible stores and emulators."""
+
+    root: str = '/'
+    """Key prefix anchoring the session's ``/`` inside the bucket."""
+
+
 class AzureConfig(BaseSettings):
     """``STORIX_AZURE_*`` settings for the ADLS Gen2 backend."""
 
