@@ -1,5 +1,33 @@
 # Release Notes
 
+## [0.4.1] - 2026-07-16
+
+Transfer progress as composable observability events, with documentation,
+typing, and project presentation improvements.
+
+### Added
+
+- `ObservabilityLayer` wraps streaming reads and writes and emits a cumulative
+  `TransferEvent` for each transferred chunk. Its sink may be synchronous or
+  asynchronous, and omitting the sink leaves the layer as a pure passthrough.
+- `ObservabilityLayer` and `TransferEvent` are exported from the sync, async,
+  and top-level public APIs.
+- The documentation includes an observability guide, API reference, and a
+  runnable Rich progress-bar recipe.
+
+### Changed
+
+- Storix dataclass DTOs now share the `@model` house-style decorator, keeping
+  them consistently frozen, slotted, and keyword-only without changing their
+  public behavior.
+- The README and documentation site use the refreshed Storix brand kit,
+  including dark/light banners, favicon, and header logo variants.
+
+### Fixed
+
+- Layer re-composition and Click command annotations now pass the configured
+  static type checks without changing runtime behavior.
+
 ## [0.4.0] - 2026-07-15
 
 `when_missing` infers its capability from the layer. Breaking combinator
