@@ -12,7 +12,9 @@ CHUNK_SIZE: Final[int] = 64 * 1024
 
 
 def main() -> None:
-    payload = b'\0' * (64 * 1024 * 1024)  # you produced the source: the total is yours
+    payload = b'\0' * (
+        64 * 1024 * 1024 * 50
+    )  # you produced the source: the total is yours
     chunks = (payload[i : i + CHUNK_SIZE] for i in range(0, len(payload), CHUNK_SIZE))
 
     with Progress() as progress:
