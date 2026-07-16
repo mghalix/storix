@@ -1,5 +1,6 @@
 ---
 title: Storix
+social_preview: true
 hide:
   - toc
 ---

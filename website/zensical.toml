@@ -45,6 +45,7 @@ nav = [
 ]
 
 [project.theme]
+custom_dir = "overrides"
 logo = "assets/logo.png"
 favicon = "assets/favicon.png"
 features = [
