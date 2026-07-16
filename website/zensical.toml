@@ -30,6 +30,7 @@ nav = [
     { "FastAPI" = "recipes/fastapi.md" },
     { "Configure from settings" = "recipes/settings.md" },
     { "Cache with Redis or disk" = "recipes/caching.md" },
+    { "Progress bars" = "recipes/progress.md" },
     { "Test with storix" = "recipes/testing.md" },
     { "Write a custom backend" = "recipes/custom-backend.md" },
     { "Write a custom layer" = "recipes/custom-layer.md" },
@@ -44,6 +45,7 @@ nav = [
 ]
 
 [project.theme]
+custom_dir = "overrides"
 logo = "assets/logo.png"
 favicon = "assets/favicon.png"
 features = [

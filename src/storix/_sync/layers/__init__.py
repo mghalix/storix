@@ -4,6 +4,7 @@ from .base import LayerBase
 from .cache import CacheLayer, CacheOp, CacheStore, InMemoryCacheStore, cache
 from .metadata import MetadataLayer
 from .native import when_missing
+from .observability import ObservabilityLayer, TransferEvent
 from .sandbox import SandboxLayer
 from .url import DataUrlLayer
 
@@ -16,7 +17,9 @@ __all__ = (
     'InMemoryCacheStore',
     'LayerBase',
     'MetadataLayer',
+    'ObservabilityLayer',
     'SandboxLayer',
+    'TransferEvent',
     'cache',
     'when_missing',
 )

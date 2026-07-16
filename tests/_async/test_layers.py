@@ -601,6 +601,42 @@ async def test_cache_clear_drops_only_this_namespace():
     assert not any(k.startswith('storix:prod:') for k in store._data)
 
 
+# --- ObservabilityLayer ---
+
+
+async def test_observability_layer_emits_cumulative_transfer_events():
+    from storix._async.layers import ObservabilityLayer, TransferEvent
+
+    events: list[TransferEvent] = []
+    layer = ObservabilityLayer(MemoryBackend(), sink=events.append)
+
+    await layer.write_stream(
+        P('/a.bin'), _astream(b'12345', b'678'), mode='w', content_type=None
+    )
+    # cumulative per pulled chunk, ending at the known payload size
+    assert [e.transferred for e in events] == [5, 8]
+    assert all(e.op == 'write' and e.path == P('/a.bin') for e in events)
+
+    events.clear()
+    data = b''.join([c async for c in layer.read_stream(P('/a.bin'))])
+    assert data == b'12345678'
+    assert events[-1].transferred == 8
+    assert all(e.op == 'read' and e.path == P('/a.bin') for e in events)
+
+
+async def test_observability_layer_awaits_an_async_sink():
+    from storix._async.layers import ObservabilityLayer, TransferEvent
+
+    events: list[TransferEvent] = []
+
+    async def sink(event: TransferEvent) -> None:
+        events.append(event)
+
+    layer = ObservabilityLayer(MemoryBackend(), sink=sink)
+    await layer.write_stream(P('/a.bin'), _astream(b'abc'), mode='w', content_type=None)
+    assert [e.transferred for e in events] == [3]
+
+
 # --- without_layer / uncached ---
 
 

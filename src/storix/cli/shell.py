@@ -102,7 +102,7 @@ def start_shell(fs: Storix | None = None) -> None:
         _dispatch(command, argv)
 
 
-def _dispatch(command: click.BaseCommand, argv: list[str]) -> None:
+def _dispatch(command: click.Command, argv: list[str]) -> None:
     """Feed one line to the shared Click parser, swallowing its exits."""
     try:
         command.main(argv, prog_name='', standalone_mode=False)

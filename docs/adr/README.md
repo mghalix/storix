@@ -14,6 +14,9 @@ project is design-heavy and may distill narrative docs from them later.
 
 Decisions 0001-0013 were made during the 0.2.0 rework (2026-07-10/11);
 0014-0016 cover 0.2.1/0.2.2 polish (2026-07-11/12), 0017 records the
-breaking bidirectional streaming boundary (2026-07-13), and 0018 makes
-the `when_missing` combinator infer its capability (2026-07-15,
-amends 0013/0008).
+breaking bidirectional streaming boundary (2026-07-13), 0018 makes the
+`when_missing` combinator infer its capability (2026-07-15, amends
+0013/0008), and 0019-0020 add the ObservabilityLayer (transfer-event
+progress, 0.4.1) and the opendal-first external backend adapter
+(0.4.2), both 2026-07-16. 0021 records the versioning policy
+(0.x shift-down: breaking->minor, feature/fix->patch; 2026-07-16).

@@ -1,0 +1,122 @@
+"""ObservabilityLayer: transfer events counted at the stream boundary."""
+
+from __future__ import annotations
+
+import inspect
+
+from typing import TYPE_CHECKING
+
+from storix._async._stream import validate_chunk_size
+from storix._dto import dto
+
+from .base import LayerBase
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable, Mapping
+    from pathlib import PurePosixPath
+    from typing import Any, Literal
+
+    from storix.types import EchoMode
+
+    from ..backends import StorageBackend
+
+
+@dto
+class TransferEvent:
+    """One chunk of transfer progress (see :class:`ObservabilityLayer`)."""
+
+    op: Literal['read', 'write']
+    """Which direction the bytes moved."""
+
+    path: PurePosixPath
+    """The file being transferred, as this layer sees it."""
+
+    transferred: int
+    """Cumulative bytes so far; the consumer owns the total."""
+
+
+class ObservabilityLayer(LayerBase):
+    """Emit a :class:`TransferEvent` per chunk through the stream port.
+
+    Wraps ``read_stream``/``write_stream`` and counts bytes at the pull
+    boundary, so the count tracks backend-acked bytes to within one
+    in-flight chunk on any backend (ADR 0019). storix emits only what it
+    honestly knows - cumulative bytes; the consumer owns the total (it
+    produced the source) and computes any percentage from it.
+
+    The ``sink`` may be sync or async; a coroutine result is awaited per
+    event. With no sink the layer is a pure passthrough. Compose it
+    outermost so it counts the full logical transfer::
+
+        fs.with_layer(ObservabilityLayer, sink=on_event)
+    """
+
+    def __init__(
+        self,
+        backend: StorageBackend,
+        *,
+        sink: Callable[[TransferEvent], Any] | None = None,
+    ) -> None:
+        super().__init__(backend)
+        self._sink = sink
+
+    async def _count(
+        self,
+        op: Literal['read', 'write'],
+        path: PurePosixPath,
+        stream: AsyncIterator[bytes],
+        sink: Callable[[TransferEvent], Any],
+    ) -> AsyncIterator[bytes]:
+        """Yield ``stream`` unchanged, emitting one event per chunk."""
+        transferred = 0
+        async for chunk in stream:
+            transferred += len(chunk)
+            result = sink(TransferEvent(op=op, path=path, transferred=transferred))
+            if inspect.iscoroutine(result):
+                # '_ =' keeps the unasync render lint-clean: stripping
+                # 'await ' would otherwise leave a bare expression (B018)
+                _ = await result
+            yield chunk
+
+    async def read_stream(
+        self, path: PurePosixPath, *, chunk_size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        """Stream a file's contents, emitting an event per chunk.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        stream = self._inner.read_stream(path, chunk_size=chunk_size)
+        if self._sink is not None:
+            stream = self._count('read', path, stream, self._sink)
+        async for chunk in stream:
+            yield chunk
+
+    async def write_stream(
+        self,
+        path: PurePosixPath,
+        data: AsyncIterator[bytes],
+        *,
+        chunk_size: int | None = None,
+        mode: EchoMode,
+        content_type: str | None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> None:
+        """Write a chunk stream, emitting an event per pulled chunk.
+
+        Raises:
+            ValueError: If ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        if self._sink is not None:
+            data = self._count('write', path, data, self._sink)
+        await self._inner.write_stream(
+            path,
+            data,
+            chunk_size=chunk_size,
+            mode=mode,
+            content_type=content_type,
+            metadata=metadata,
+        )

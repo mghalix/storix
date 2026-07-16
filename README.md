@@ -1,11 +1,8 @@
 <p align="center">
-  <img src="./.github/assets/storix-banner.png" alt="storix" width="100%">
-</p>
-
-<h1 align="center">Storix</h1>
-
-<p align="center">
-  <b>Storage for Unix lovers.</b>
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/mghalix/storix/main/.github/assets/storix-banner-light.png">
+    <img src="https://raw.githubusercontent.com/mghalix/storix/main/.github/assets/storix-banner.png" alt="Storix - Storage for Unix lovers." style="width: 100%; max-width: 880px;">
+  </picture>
 </p>
 
 <p align="center">

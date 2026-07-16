@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import copy
 
-from typing import TYPE_CHECKING, ParamSpec, Protocol, Self
+from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
 
 from storix import pathops
 from storix._async._compat import gather
@@ -200,7 +200,10 @@ class Storix:
         for lyr in reversed(chain):
             if isinstance(lyr, layers):
                 continue
-            clone = copy.copy(lyr)  # shallow: only the wrapped backend changes
+            # shallow copy: only the wrapped backend changes. The chain walk
+            # is duck-typed on '_inner', so the port type cannot carry the
+            # attribute; Any reflects that honestly.
+            clone = cast('Any', copy.copy(lyr))
             clone._inner = rebuilt  # noqa: SLF001 - core owns layer re-composition
             rebuilt = clone
         new = type(self)(rebuilt, home=self._home)

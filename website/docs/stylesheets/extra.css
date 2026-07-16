@@ -1,5 +1,31 @@
 /* Storix docs: small theme tweaks. */
 
+/* Landing banner: match the active documentation color scheme. */
+.brand-banner {
+  max-width: 900px;
+  margin: 0 auto 1.5rem;
+}
+.brand-banner__image {
+  display: block;
+  width: 100%;
+  border-radius: 0.5rem;
+}
+.brand-banner__image--light {
+  display: none;
+}
+[data-md-color-scheme="default"] .brand-banner__image--dark {
+  display: none;
+}
+[data-md-color-scheme="default"] .brand-banner__image--light {
+  display: block;
+}
+[data-md-color-scheme="slate"] .brand-banner__image--dark {
+  display: block;
+}
+[data-md-color-scheme="slate"] .brand-banner__image--light {
+  display: none;
+}
+
 /* Minimalist heading anchor, like FastAPI: subtle, appears on hover. */
 .md-typeset .headerlink {
   font-size: 0.7em;

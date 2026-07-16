@@ -29,6 +29,13 @@ alias but mypy's support is unreliable, and we run both.
 **Trigger:** adopt when ~5+ dataclass models exist and per-class option
 drift becomes plausible. At two models the explicit line is clearer.
 
+**Status:** adopted in 0.4.1 as `storix._dto.dto`. The fifth house-style
+DTO (`TransferEvent`, ADR 0019) hit the trigger; `_Op` in the cache layer had
+already drifted (it lacked `kw_only`), proving the point. Shipped as `@dto`
+in a private module rather than the sketched `@model` in `storix.models`:
+"model" in storix means the validated pydantic surface (`StorixBaseModel`),
+and an un-underscored helper in a public module becomes de-facto public API.
+
 ## Test-kind markers (`integration`, `e2e`)
 
 **What:** test *location* mirrors the source tree; test *kind* is expressed
@@ -113,3 +120,42 @@ per-path resolution - decide). ~150 lines plus conformance edge cases.
 **Trigger:** owner interest confirmed; sized as its own feature (0.2.x
 candidate, post CLI-rewrite) rather than a pre-release add-on. Until
 then a plain dict of sessions covers most multi-container work.
+
+## Result-returning "Gate" (errors as values)
+
+**What:** a functor over a `Storix` session that rewrites every operation's
+return type from `T` to `Result[T, E]` (safe-result / returns-style), so
+callers `.map`/`.unwrap_or` instead of writing try/except, which pays off most
+in concurrent fan-out (`gather` over per-item Results). Distinct from a Layer
+(backend -> backend, same interface): a Gate changes the interface, so it is a
+terminal transform on the session, not a `layers=` entry.
+
+**The finding that gates the whole idea:** Result gives *call-site enforcement*
+(callers cannot ignore an `Err`), not *definition-site accuracy*. Python has no
+checked exceptions, so nothing verifies a method's declared `E` matches what its
+body actually raises, the same drift a `Raises:` docstring has. So a Gate does
+not remove the need to get the error set right; it relocates an unverified
+promise into a type and adds downstream checking.
+
+A *mechanical* whole-session Gate can only do one blanket catch, and today that
+catch would lie: `validate_chunk_size` raises a bare `ValueError`
+(`_stream.py`), outside the `StorageError` taxonomy, so a
+`Result[T, StorageError]` wrapper leaks it as a raw exception.
+
+**Prerequisite / the real decision:** make `StorageError` the single *closed*
+channel for every handleable error (migrate the stray bare `ValueError`s into
+the taxonomy). Then `E` is uniformly `StorageError`, a mechanical
+`except StorageError` wrap is honest and exhaustive-for-handleable, non-domain
+errors (bugs, `KeyboardInterrupt`) correctly propagate, and `.map`/`.unwrap_or`
+work on the uniform type. ADR 0004 already points here ("every failure raises",
+`StorageError` is the base); this finishes the job.
+
+**Lean:** once `E` is uniformly `StorageError`, a bespoke Gate abstraction is
+likely overkill, `returns.future.future_safe(StorageError)` or a ~5-line wrapper
+gets the same result. Prefer that over generating a parallel Result-API across
+~30 ops in two flavors, unless a concrete call site proves the wrapper too
+painful.
+
+**Trigger:** deferred behind backend breadth (adoption comes first). Revisit
+only after closing the taxonomy; that migration is the gating work, not the
+Gate itself.

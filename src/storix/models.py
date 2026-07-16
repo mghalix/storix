@@ -1,4 +1,3 @@
-import dataclasses
 import datetime as dt
 
 from collections.abc import Mapping
@@ -6,6 +5,7 @@ from typing import ClassVar, NamedTuple, Self
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
+from storix._dto import dto
 from storix.enums import Capability, PathKind
 
 
@@ -27,7 +27,7 @@ class Entry(NamedTuple):
     """Size in bytes when the listing provides it for free; else None."""
 
 
-@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+@dto
 class RawStat:
     """Raw stat facts a backend reports for a path.
 
@@ -56,7 +56,7 @@ class RawStat:
     """Custom key/value metadata when the backend supports it; else None."""
 
 
-@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+@dto
 class Capabilities:
     """User-observable optional features a backend supports.
 

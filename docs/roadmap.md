@@ -39,6 +39,23 @@ and for individual decisions: `docs/adr/`.
   export; `CacheOp`/`CacheStore`/`InMemoryCacheStore` added to `__all__`
   of both flavors (ADR 0016)
 
+## 0.4.1 - 0.4.3 (next)
+
+Three backward-compatible features, so patches (0.4.0 is published;
+versions are monotonic, there is no going back to fill 0.2.x/0.3.x).
+Ship bundled as 0.4.1 or as successive patches:
+
+- 0.4.1 `ObservabilityLayer` (v0: transfer events): a port-wrapping layer
+  that counts read/write bytes at the pull boundary and emits
+  `TransferEvent`s to a consumer-supplied sink - progress bars for `sx`
+  and library consumers with zero core churn. The consumer owns the total
+  (a percentage needs one; storix only knows bytes-so-far). First slice of
+  the audit story (op-level events later), not a throwaway (ADR 0019)
+- 0.4.2 `OpendalBackend`: first external adapter, async-native + presign,
+  spike-gated (ADR 0020)
+- 0.4.3 `sx` UX: prompt_toolkit autocomplete + upload/download progress
+  bars over the ObservabilityLayer
+
 ## 0.2.x - polish
 
 - `MountLayer`: unix-style multi-container compositor (designed, see
@@ -76,9 +93,11 @@ providers - the two levers that make storix promotable.
   object-store mental model for users unfamiliar with the unix metaphor.
   A thin front-end over the same engine, not a new one; widens the
   audience without diluting the identity (naming TBD)
-- `FsspecBackend` / `OpendalBackend`: one adapter each = every provider
-  those ecosystems support (S3, GCS, SFTP...) plus their maturity and
-  speed - storix stays the DX layer, like FastAPI over Starlette
+- `FsspecBackend` (opendal adapter lands first, in 0.4.2, ADR 0020): the
+  second ecosystem adapter, chosen for reach into the data crowd
+  (pandas/dask) and the inverse `AbstractFileSystem` lever - one adapter =
+  every provider fsspec supports (S3, GCS, SFTP...). storix stays the DX
+  layer, like FastAPI over Starlette
 - fsspec-compatible *interface* (storix *implementing* `AbstractFileSystem`,
   the inverse of `FsspecBackend`): lets the data ecosystem
   (pandas/pyarrow/polars/dask) read storix paths. Big adoption lever,
@@ -89,8 +108,9 @@ providers - the two levers that make storix promotable.
 ## 0.5.0 - differentiators
 
 - Agent story: capability-stripped sessions (a sandboxed session whose
-  backend handle cannot unmask paths), audit/ObservabilityLayer,
-  possible MCP server
+  backend handle cannot unmask paths), possible MCP server, and the audit
+  increment of the `ObservabilityLayer` (op-start/end/error events; the
+  transfer-event v0 shipped in 0.2.3, ADR 0019)
 - Staged-write transactions (`with fs.transaction():` - all-or-nothing
   for new writes, honestly scoped)
 
@@ -100,28 +120,5 @@ providers - the two levers that make storix promotable.
   (aiohttp sessions); measure before building
 - Competing with fsspec/opendal on backend count or raw throughput
 
-## Release & CI (automation)
-
-CI (`.github/workflows/ci.yml`) runs lint + format + codegen-drift +
-tests on 3.12/3.13 for every push to main/dev and every PR.
-
-Releases are automated (`.github/workflows/release.yml`) so the manual
-dance is never needed again - the flow mirrors pydantic/FastAPI:
-
-1. bump `version` in pyproject.toml on a branch; PR into `dev`, then `dev` -> `main`;
-2. on `main`: `git tag v0.2.0 && git push origin v0.2.0`;
-3. the tag fires the workflow: it checks the tag matches the package
-   version, `uv build`s, publishes to PyPI via **Trusted Publishing**
-   (OIDC - no token stored anywhere), and cuts the GitHub release with
-   generated notes.
-
-**One-time setup (do once on pypi.org):** project -> Settings ->
-Publishing -> add a *Trusted Publisher*: owner `mghalix`, repo `storix`,
-workflow `release.yml`, and set **Environment name** to `pypi` (it
-matches `environment: pypi` in the workflow). After that, tagging is
-the entire release.
-
-**Manual fallback** (first release, or if CI is down):
-`uv build` -> `uv publish` (needs `UV_PUBLISH_TOKEN` / a PyPI token) ->
-`git tag v0.2.0 && git push origin v0.2.0` -> `gh release create v0.2.0
---generate-notes`.
+(Release process and versioning policy live in AGENTS.md "Releasing"
+and ADR 0021, not here - the roadmap is plans only.)
