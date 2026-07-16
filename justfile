@@ -73,3 +73,7 @@ docs:
 # Build the docs site into website/site.
 docs-build:
     cd website && uvx zensical build --strict
+
+# Install generated brand assets. Optionally pass a source directory.
+brand *args:
+    ./scripts/brand {{ args }}

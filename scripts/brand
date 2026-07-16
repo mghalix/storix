@@ -1,0 +1,328 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly PROJECT="storix"
+readonly REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly DEFAULT_SOURCE="${HOME:?HOME must be set}/Downloads/${PROJECT}"
+readonly LEGACY_SOURCE="${HOME}/Downloads"
+
+usage() {
+    printf 'Usage: %s [source-directory]\n' "${0##*/}"
+    printf '       BRAND_SOURCE_DIR=/path/to/assets %s\n' "${0##*/}"
+}
+
+if (( $# > 1 )); then
+    usage >&2
+    exit 2
+fi
+
+expand_tilde() {
+    local path="$1"
+
+    case "${path}" in
+        "~") printf '%s\n' "${HOME}" ;;
+        "~/"*) printf '%s/%s\n' "${HOME}" "${path:2}" ;;
+        *) printf '%s\n' "${path}" ;;
+    esac
+}
+
+legacy_mode=false
+if (( $# == 1 )); then
+    source_dir="$(expand_tilde "$1")"
+elif [[ -n "${BRAND_SOURCE_DIR:-}" ]]; then
+    source_dir="$(expand_tilde "${BRAND_SOURCE_DIR}")"
+elif [[ -d "${DEFAULT_SOURCE}" ]]; then
+    source_dir="${DEFAULT_SOURCE}"
+else
+    source_dir="${LEGACY_SOURCE}"
+    legacy_mode=true
+fi
+source_dir="${source_dir%/}"
+
+if [[ "${source_dir}" == "${LEGACY_SOURCE}" ]]; then
+    legacy_mode=true
+fi
+if [[ ! -d "${source_dir}" ]]; then
+    printf 'Brand source directory does not exist: %s\n' "${source_dir}" >&2
+    exit 1
+fi
+if ! command -v magick >/dev/null 2>&1; then
+    printf 'ImageMagick 7 is required (missing: magick).\n' >&2
+    exit 1
+fi
+
+newest_for_base() {
+    local base="$1"
+    local path name regex modified
+    local newest_path=""
+    local newest_modified=""
+
+    regex="^${base}([[:space:]]*\\([0-9]+\\))?\\.(png|jpg|jpeg)$"
+    while IFS= read -r -d '' path; do
+        name="${path##*/}"
+        if [[ "${name,,}" =~ ${regex} ]]; then
+            modified="$(stat -c '%y' "${path}")"
+            if [[ -z "${newest_modified}" || "${modified}" > "${newest_modified}" ]]; then
+                newest_modified="${modified}"
+                newest_path="${path}"
+            fi
+        fi
+    done < <(find "${source_dir}" -maxdepth 1 -type f -print0)
+
+    [[ -n "${newest_path}" ]] || return 1
+    printf '%s\n' "${newest_path}"
+}
+
+find_asset() {
+    local stem="$1"
+    local match=""
+
+    if [[ "${legacy_mode}" == false ]]; then
+        match="$(newest_for_base "${stem}" || true)"
+    fi
+    if [[ -z "${match}" ]]; then
+        match="$(newest_for_base "${PROJECT}-${stem}" || true)"
+    fi
+
+    [[ -n "${match}" ]] || return 1
+    printf '%s\n' "${match}"
+}
+
+has_alpha() {
+    local alpha
+    alpha="$(magick identify -format '%A' "$1")"
+    [[ "${alpha}" == "True" || "${alpha}" == "Blend" ]]
+}
+
+key_alpha_chroma() {
+    local input="$1"
+    local output="$2"
+    local work
+    work="$(mktemp -d "${tmp_dir}/chroma.XXXXXX")"
+
+    magick "${input}" \
+        \( -clone 0 -colorspace HCL -channel G -separate +channel -level 3%,35% \) \
+        \( -clone 0 -colorspace gray -level 48%,80% \) \
+        \( -clone 1 -clone 2 -compose Lighten -composite \) \
+        -delete 1,2 -alpha off -compose CopyOpacity -composite \
+        "${work}/keyed.png"
+
+    magick "${work}/keyed.png" \
+        \( +clone -alpha extract -level 68%,92% -morphology Erode Disk:1 -blur 0x0.6 \) \
+        -alpha off -compose CopyOpacity -composite "${work}/core.png"
+
+    magick "${work}/core.png" \
+        -channel RGBA -blur 0x12 -channel A -evaluate multiply 0.6 +channel \
+        "${work}/glow.png"
+
+    magick "${work}/glow.png" "${work}/core.png" -compose Over -composite \
+        -trim +repage "${output}"
+    rm -rf "${work}"
+}
+
+key_alpha_dark_checker() {
+    local input="$1"
+    local output="$2"
+    local opening="${3:-2}"
+    local width height seed_x seed_y closing work
+    work="$(mktemp -d "${tmp_dir}/dark.XXXXXX")"
+    closing=$(( opening / 2 ))
+    if (( closing < 1 )); then
+        closing=1
+    fi
+    read -r width height < <(magick identify -format '%w %h\n' "${input}")
+    seed_x=$(( width / 2 ))
+    seed_y=$(( height / 2 ))
+
+    # Keep both saturated artwork and low-luminance graphite, then isolate
+    # the connected object at canvas center so JPEG checker artifacts vanish.
+    magick "${input}" \
+        \( -clone 0 -colorspace HCL -channel G -separate +channel -threshold 5% \) \
+        \( -clone 0 -colorspace gray -threshold 22% -negate \) \
+        \( -clone 1 -clone 2 -compose Lighten -composite -threshold 50% \) \
+        -delete 0,1,2 "${work}/mask-raw.png"
+
+    magick "${work}/mask-raw.png" \
+        -fill 'gray(50%)' -opaque white \
+        -fill white -draw "color ${seed_x},${seed_y} floodfill" \
+        -threshold 99% "${work}/mask-center.png"
+
+    magick "${work}/mask-center.png" -alpha off \
+        -morphology Open "Disk:${opening}" -morphology Close "Disk:${closing}" \
+        -blur 0x0.8 -level 8%,92% "${work}/mask-clean.png"
+
+    magick "${input}" "${work}/mask-clean.png" \
+        -alpha off -compose CopyOpacity -composite \
+        -trim +repage "${output}"
+    rm -rf "${work}"
+}
+
+key_transparent() {
+    local input="$1"
+    local output="$2"
+    local mode="${3:-chroma}"
+    local opening="${4:-2}"
+
+    if has_alpha "${input}"; then
+        magick "${input}" -trim +repage "${output}"
+    elif [[ "${mode}" == "dark-checker" ]]; then
+        key_alpha_dark_checker "${input}" "${output}" "${opening}"
+    else
+        key_alpha_chroma "${input}" "${output}"
+    fi
+}
+
+process_banner() {
+    local input="$1"
+    local output="$2"
+    local width height crop_width crop_height offset_x offset_y
+    read -r width height < <(magick identify -format '%w %h\n' "${input}")
+
+    if (( width > height * 3 )); then
+        crop_width=$(( height * 3 ))
+        crop_height="${height}"
+    else
+        crop_height=$(( width / 3 ))
+        crop_width=$(( crop_height * 3 ))
+    fi
+    offset_x=$(( (width - crop_width) / 2 ))
+    offset_y=$(( (height - crop_height) / 2 ))
+
+    magick "${input}" \
+        -crop "${crop_width}x${crop_height}+${offset_x}+${offset_y}" +repage \
+        -strip -define png:compression-level=9 "${output}"
+}
+
+process_social_preview() {
+    local input="$1"
+    local output="$2"
+    local width height output_bytes changed_pixels
+    read -r width height < <(magick identify -format '%w %h\n' "${input}")
+    if (( width < 640 || height < 320 )); then
+        printf 'Social preview is smaller than GitHub minimum guidance: %s\n' \
+            "${input}" >&2
+        return 1
+    fi
+
+    if (( width != 1280 || height != 640 )); then
+        printf 'Preserving approved social preview dimensions: %sx%s ' \
+            "${width}" "${height}"
+        printf '(GitHub recommends 1280x640).\n'
+    fi
+
+    # The generator owns the approved composition. Convert its decoded pixels
+    # to PNG without cropping, resizing, retouching, or altering the artwork.
+    magick "${input}" -define png:compression-level=9 "${output}"
+    changed_pixels="$(
+        magick compare -metric AE "${input}" "${output}" null: 2>&1 || true
+    )"
+    if [[ "${changed_pixels}" != '0 (0)' ]]; then
+        printf 'Social preview conversion changed pixels: %s\n' \
+            "${changed_pixels}" >&2
+        return 1
+    fi
+
+    output_bytes="$(stat -c '%s' "${output}")"
+    if (( output_bytes >= 1000000 )); then
+        printf 'Converted social preview must be under 1 MB: %s bytes\n' \
+            "${output_bytes}" >&2
+        return 1
+    fi
+}
+
+install_copy() {
+    local source="$1"
+    shift
+    local destination
+    for destination in "$@"; do
+        install -m 0644 "${source}" "${destination}"
+        printf 'Installed %s\n' "${destination#"${REPO_ROOT}/"}"
+    done
+}
+
+mkdir -p "${REPO_ROOT}/.github/assets" "${REPO_ROOT}/website/docs/assets"
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "${tmp_dir}"' EXIT
+
+logo_input="$(find_asset logo || true)"
+banner_input="$(find_asset banner || true)"
+banner_light_input="$(find_asset banner-light || true)"
+favicon_input="$(find_asset favicon || true)"
+docs_logo_input="$(find_asset docs-header-logo || true)"
+social_input="$(find_asset github-social-preview || true)"
+
+logo_keyed=""
+if [[ -n "${logo_input}" ]]; then
+    printf 'Using logo: %s\n' "${logo_input}"
+    logo_keyed="${tmp_dir}/logo-keyed.png"
+    key_transparent "${logo_input}" "${logo_keyed}" dark-checker
+    magick "${logo_keyed}" -resize '778x778>' -background none -gravity center \
+        -extent 1024x1024 -strip "${tmp_dir}/storix-icon.png"
+    install_copy "${tmp_dir}/storix-icon.png" \
+        "${REPO_ROOT}/.github/assets/storix-icon.png"
+else
+    printf 'Skipping logo: no matching input.\n'
+fi
+
+if [[ -n "${docs_logo_input}" ]]; then
+    printf 'Using docs header logo: %s\n' "${docs_logo_input}"
+    docs_logo_keyed="${tmp_dir}/docs-logo-keyed.png"
+    key_transparent "${docs_logo_input}" "${docs_logo_keyed}" dark-checker
+elif [[ -n "${logo_keyed}" ]]; then
+    printf 'Deriving docs header logo from the master logo.\n'
+    docs_logo_keyed="${logo_keyed}"
+else
+    docs_logo_keyed=""
+fi
+if [[ -n "${docs_logo_keyed}" ]]; then
+    magick "${docs_logo_keyed}" -resize '194x194>' -background none -gravity center \
+        -extent 256x256 -strip "${tmp_dir}/docs-logo.png"
+    install_copy "${tmp_dir}/docs-logo.png" \
+        "${REPO_ROOT}/website/docs/assets/logo.png"
+else
+    printf 'Skipping docs header logo: no matching input or master logo.\n'
+fi
+
+if [[ -n "${favicon_input}" ]]; then
+    printf 'Using favicon: %s\n' "${favicon_input}"
+    key_transparent "${favicon_input}" "${tmp_dir}/favicon-keyed.png" dark-checker 8
+    magick "${tmp_dir}/favicon-keyed.png" -resize '236x236>' \
+        -background none -gravity center -extent 256x256 -strip \
+        "${tmp_dir}/favicon.png"
+    install_copy "${tmp_dir}/favicon.png" \
+        "${REPO_ROOT}/website/docs/assets/favicon.png"
+else
+    printf 'Skipping favicon: no matching input.\n'
+fi
+
+if [[ -n "${banner_input}" ]]; then
+    printf 'Using dark banner: %s\n' "${banner_input}"
+    process_banner "${banner_input}" "${tmp_dir}/banner.png"
+    install_copy "${tmp_dir}/banner.png" \
+        "${REPO_ROOT}/.github/assets/storix-banner.png" \
+        "${REPO_ROOT}/website/docs/assets/storix-banner.png"
+else
+    printf 'Skipping dark banner: no matching input.\n'
+fi
+
+if [[ -n "${banner_light_input}" ]]; then
+    printf 'Using light banner: %s\n' "${banner_light_input}"
+    process_banner "${banner_light_input}" "${tmp_dir}/banner-light.png"
+    install_copy "${tmp_dir}/banner-light.png" \
+        "${REPO_ROOT}/.github/assets/storix-banner-light.png" \
+        "${REPO_ROOT}/website/docs/assets/storix-banner-light.png"
+else
+    printf 'Skipping light banner: no matching input.\n'
+fi
+
+if [[ -n "${social_input}" ]]; then
+    printf 'Using GitHub social preview: %s\n' "${social_input}"
+    process_social_preview "${social_input}" "${tmp_dir}/github-social-preview.png"
+    install_copy "${tmp_dir}/github-social-preview.png" \
+        "${REPO_ROOT}/.github/assets/github-social-preview.png"
+else
+    printf 'Skipping GitHub social preview: no matching input.\n'
+fi
+
+printf 'Brand installation complete. Source: %s\n' "${source_dir}"

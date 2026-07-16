@@ -6,11 +6,10 @@ hide:
 
 # Storix { .hidden }
 
-<p align="center">
-  <img src="assets/storix-banner.png" alt="Storix" style="width: 100%; max-width: 720px;">
-</p>
-
-<p align="center"><strong>Storage for Unix lovers.</strong></p>
+<div class="brand-banner">
+  <img class="brand-banner__image brand-banner__image--dark" src="assets/storix-banner.png" alt="Storix - Storage for Unix lovers.">
+  <img class="brand-banner__image brand-banner__image--light" src="assets/storix-banner-light.png" alt="Storix - Storage for Unix lovers.">
+</div>
 
 <p align="center">
 One unix-flavored filesystem API over any storage: local disk, in-memory,
