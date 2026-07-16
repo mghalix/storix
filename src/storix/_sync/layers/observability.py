@@ -8,8 +8,8 @@ import inspect
 
 from typing import TYPE_CHECKING
 
+from storix._dto import dto
 from storix._sync._stream import validate_chunk_size
-from storix.models import model
 
 from .base import LayerBase
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from ..backends import StorageBackend
 
 
-@model
+@dto
 class TransferEvent:
     """One chunk of transfer progress (see :class:`ObservabilityLayer`)."""
 

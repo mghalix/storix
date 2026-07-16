@@ -17,7 +17,7 @@ typing, and project presentation improvements.
 
 ### Changed
 
-- Storix dataclass DTOs now share the `@model` house-style decorator, keeping
+- Storix dataclass DTOs now share the `@dto` house-style decorator, keeping
   them consistently frozen, slotted, and keyword-only without changing their
   public behavior.
 - The README and documentation site use the refreshed Storix brand kit,

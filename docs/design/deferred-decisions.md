@@ -29,9 +29,12 @@ alias but mypy's support is unreliable, and we run both.
 **Trigger:** adopt when ~5+ dataclass models exist and per-class option
 drift becomes plausible. At two models the explicit line is clearer.
 
-**Status:** adopted in 0.4.1 as `storix.models.model`. The fifth house-style
+**Status:** adopted in 0.4.1 as `storix._dto.dto`. The fifth house-style
 DTO (`TransferEvent`, ADR 0019) hit the trigger; `_Op` in the cache layer had
-already drifted (it lacked `kw_only`), proving the point.
+already drifted (it lacked `kw_only`), proving the point. Shipped as `@dto`
+in a private module rather than the sketched `@model` in `storix.models`:
+"model" in storix means the validated pydantic surface (`StorixBaseModel`),
+and an un-underscored helper in a public module becomes de-facto public API.
 
 ## Test-kind markers (`integration`, `e2e`)
 

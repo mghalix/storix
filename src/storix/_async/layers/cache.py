@@ -9,9 +9,9 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Protocol
 
 from storix._async._stream import validate_chunk_size
+from storix._dto import dto
 from storix.constants import DEFAULT_CACHE_NAMESPACE, DEFAULT_URL_EXPIRY_SECONDS
 from storix.errors import PathNotFoundError
-from storix.models import model
 
 from .base import LayerBase
 
@@ -101,7 +101,7 @@ class InMemoryCacheStore:
             self._data.pop(key, None)
 
 
-@model
+@dto
 class CacheOp:
     """Per-operation cache settings. Fields default to the layer's.
 
@@ -125,7 +125,7 @@ def cache(
     return CacheOp(ttl=ttl, store=store, max_bytes=max_bytes)
 
 
-@model
+@dto
 class _Op:
     """A resolved (enabled) operation: concrete store + settings."""
 
