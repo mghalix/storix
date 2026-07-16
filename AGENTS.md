@@ -33,6 +33,34 @@ Integration tests are opt-in; the default pytest config deselects them
 (`just gen`, `just check`, `just lint`, `just fmt`, `just release`); `just check`
 is the full push gate (lint + format + codegen drift + tests).
 
+## Releasing
+
+Versioning follows ADR 0021 (0.x shift-down): a breaking public API change
+bumps the MINOR (0.4.0 -> 0.5.0); a backward-compatible feature or a bug fix
+bumps the PATCH (0.4.0 -> 0.4.1). In 0.x, MINOR is the breaking-change dial.
+Published versions are immutable and monotonic: never tag a version <= the
+latest published one.
+
+CI (`.github/workflows/ci.yml`) runs lint + format + codegen-drift + tests on
+3.12/3.13 for every push to main/dev and every PR.
+
+Releases are automated (`.github/workflows/release.yml`), mirroring
+pydantic/FastAPI:
+
+1. bump `version` in pyproject.toml on a branch; PR into `dev`, then `dev` -> `main`;
+2. on `main`: `git tag v0.4.1 && git push origin v0.4.1`;
+3. the tag fires the workflow: it checks the tag matches the package version,
+   `uv build`s, publishes to PyPI via Trusted Publishing (OIDC, no stored token),
+   and cuts the GitHub release with generated notes.
+
+One-time PyPI setup: project -> Settings -> Publishing -> add a Trusted Publisher
+(owner `mghalix`, repo `storix`, workflow `release.yml`, Environment name
+`pypi`). After that, tagging is the entire release.
+
+Manual fallback: `uv build` -> `uv publish` (needs `UV_PUBLISH_TOKEN`) ->
+`git tag vX.Y.Z && git push origin vX.Y.Z` -> `gh release create vX.Y.Z
+--generate-notes`.
+
 ## Architecture (the big picture)
 
 Hexagonal: one core engine over one small port.
