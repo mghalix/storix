@@ -70,6 +70,31 @@ different API; use it through Cashews or provide a small adapter. Correctness
 assumes you are the only writer; pass a `ttl` to bound staleness. The
 [cache recipe](../recipes/caching.md) covers both Cashews and raw redis-py.
 
+## Progress: transfer events, not callbacks
+
+`ObservabilityLayer` turns the byte streams into progress. Every chunk that
+moves through `read_stream`/`write_stream` emits a `TransferEvent` (`op`,
+`path`, cumulative `transferred`) to the sink you attach; the sink may be
+sync or async:
+
+```python
+from storix import ObservabilityLayer, get_storage
+
+fs = get_storage("local").with_layer(ObservabilityLayer, sink=print)
+fs.echo(chunks, "/upload.bin")
+# TransferEvent(op='write', path=StorixPath('/upload.bin'), transferred=65536)
+# TransferEvent(op='write', path=StorixPath('/upload.bin'), transferred=131072)
+# ...
+```
+
+The events deliberately carry no total and no percentage. A total is never
+storix's to know: an arbitrary write stream has no knowable end. It is the
+caller's knowledge of their own source (a local file's `stat().st_size`, an
+HTTP upload's `Content-Length`), so you supply the total and do the division.
+With no sink the layer is a pure passthrough. Compose it outermost so it
+counts the full logical transfer. The
+[progress bars recipe](../recipes/progress.md) drives a real bar from it.
+
 ## Portable capabilities
 
 Some layers backfill a capability a backend lacks, so one code path spans

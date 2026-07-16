@@ -57,6 +57,29 @@ The pluggable store protocol and its in-memory default (optional `maxsize` for L
 eviction). A `cashews.Cache` directly satisfies the async flavor. The sync
 flavor requires synchronous implementations of the same four methods.
 
+## `ObservabilityLayer`
+
+```python
+ObservabilityLayer(backend, *, sink: Callable[[TransferEvent], Any] | None = None)
+```
+
+Emit a `TransferEvent` to `sink` for every chunk that moves through
+`read_stream`/`write_stream`. The sink may be sync or async (a coroutine
+result is awaited per event). With no sink the layer is a pure passthrough.
+Removable; compose it outermost so it counts the full logical transfer.
+
+### `TransferEvent`
+
+```python
+class TransferEvent:        # frozen, slotted, keyword-only
+    op: Literal["read", "write"]
+    path: PurePosixPath
+    transferred: int        # cumulative bytes for this transfer
+```
+
+storix never invents a total: you produced the source, so you own the total
+and any percentage. See the [progress bars recipe](../recipes/progress.md).
+
 ## `DataUrlLayer`, `MetadataLayer`
 
 ```python
