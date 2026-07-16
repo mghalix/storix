@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import fnmatch
 import time
 
@@ -14,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 from storix._sync._stream import validate_chunk_size
 from storix.constants import DEFAULT_CACHE_NAMESPACE, DEFAULT_URL_EXPIRY_SECONDS
 from storix.errors import PathNotFoundError
+from storix.models import model
 
 from .base import LayerBase
 
@@ -103,7 +103,7 @@ class InMemoryCacheStore:
             self._data.pop(key, None)
 
 
-@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+@model
 class CacheOp:
     """Per-operation cache settings. Fields default to the layer's.
 
@@ -127,7 +127,7 @@ def cache(
     return CacheOp(ttl=ttl, store=store, max_bytes=max_bytes)
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
+@model
 class _Op:
     """A resolved (enabled) operation: concrete store + settings."""
 

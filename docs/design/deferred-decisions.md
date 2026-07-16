@@ -29,6 +29,10 @@ alias but mypy's support is unreliable, and we run both.
 **Trigger:** adopt when ~5+ dataclass models exist and per-class option
 drift becomes plausible. At two models the explicit line is clearer.
 
+**Status:** adopted in 0.4.1 as `storix.models.model`. The fifth house-style
+DTO (`TransferEvent`, ADR 0019) hit the trigger; `_Op` in the cache layer had
+already drifted (it lacked `kw_only`), proving the point.
+
 ## Test-kind markers (`integration`, `e2e`)
 
 **What:** test *location* mirrors the source tree; test *kind* is expressed

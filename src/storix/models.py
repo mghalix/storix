@@ -2,11 +2,29 @@ import dataclasses
 import datetime as dt
 
 from collections.abc import Mapping
-from typing import ClassVar, NamedTuple, Self
+from typing import ClassVar, NamedTuple, Self, dataclass_transform
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
 from storix.enums import Capability, PathKind
+
+
+@dataclass_transform(frozen_default=True, kw_only_default=True)
+def model[T](cls: type[T]) -> type[T]:
+    """Storix house-style model: a frozen, slotted, keyword-only dataclass.
+
+    One decorator instead of a repeated ``@dataclasses.dataclass(frozen=True,
+    slots=True, kw_only=True)`` on every DTO, so the options cannot drift
+    per class (ADR 0012). ``slots=True`` rebuilds the class, so the result
+    is a new class, not ``cls`` mutated.
+
+    Args:
+        cls: The class to rebuild as a house-style dataclass.
+
+    Returns:
+        The frozen, slotted, keyword-only dataclass built from ``cls``.
+    """
+    return dataclasses.dataclass(frozen=True, slots=True, kw_only=True)(cls)
 
 
 class Entry(NamedTuple):
@@ -27,7 +45,7 @@ class Entry(NamedTuple):
     """Size in bytes when the listing provides it for free; else None."""
 
 
-@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+@model
 class RawStat:
     """Raw stat facts a backend reports for a path.
 
@@ -56,7 +74,7 @@ class RawStat:
     """Custom key/value metadata when the backend supports it; else None."""
 
 
-@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+@model
 class Capabilities:
     """User-observable optional features a backend supports.
 

@@ -8,7 +8,9 @@ Status: accepted
   forces narrowing at every loop for a bug class the walk structure
   already prevents; `is_dir` is the discriminant.
 - **@model dataclass_transform decorator** - deferred until ~5+ models
-  (deferred-decisions.md has the implementation).
+  (deferred-decisions.md has the implementation). Adopted in 0.4.1 as
+  `storix.models.model`: the fifth house-style DTO (TransferEvent,
+  ADR 0019) hit the trigger.
 - **tests/unit|integration dirs** - rejected: location mirrors source,
   *kind* is a pytest marker (`-m integration`).
 - **exist_ok on mkdir** - rejected: unix -p already means both things;

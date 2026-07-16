@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import dataclasses
 import inspect
 
 from typing import TYPE_CHECKING
 
 from storix._async._stream import validate_chunk_size
+from storix.models import model
 
 from .base import LayerBase
 
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from ..backends import StorageBackend
 
 
-@dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
+@model
 class TransferEvent:
     """One chunk of transfer progress (see :class:`ObservabilityLayer`)."""
 
