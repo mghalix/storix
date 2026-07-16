@@ -30,6 +30,7 @@ nav = [
     { "FastAPI" = "recipes/fastapi.md" },
     { "Configure from settings" = "recipes/settings.md" },
     { "Cache with Redis or disk" = "recipes/caching.md" },
+    { "S3 and GCS" = "recipes/object-stores.md" },
     { "Progress bars" = "recipes/progress.md" },
     { "Test with storix" = "recipes/testing.md" },
     { "Write a custom backend" = "recipes/custom-backend.md" },

@@ -1,6 +1,6 @@
 # Backends
 
-A backend is what a session actually reads and writes. Storix ships three, and
+A backend is what a session actually reads and writes. Storix ships five, and
 the same session code runs over any of them.
 
 | Backend | Import | Use it for |
@@ -8,6 +8,8 @@ the same session code runs over any of them.
 | `LocalBackend` | `storix.backends.LocalBackend` | real files on disk, anchored at a base directory |
 | `MemoryBackend` | `storix.backends.MemoryBackend` | tests and scratch work; nothing touches disk |
 | `AzureBackend` | `storix.backends.AzureBackend` | Azure Data Lake Gen2 (hierarchical namespace accounts) |
+| `S3Backend` | `storix.backends.S3Backend` | Amazon S3, and S3-compatible stores (MinIO, R2) via `endpoint` (`s3` extra) |
+| `GcsBackend` | `storix.backends.GcsBackend` | Google Cloud Storage (`gcs` extra) |
 
 ```python
 from storix import Storix
@@ -72,6 +74,15 @@ STORIX_AZURE_WRITE_CHUNK_SIZE=4194304
 STORIX_AZURE_READ_PREFETCH_SIZE=33554432
 # for local:
 STORIX_LOCAL_BASE=~/storix-data
+# for s3 (region/keys optional: the standard AWS chain fills the gaps):
+STORIX_S3_BUCKET=my-bucket
+STORIX_S3_REGION=us-east-1
+STORIX_S3_ACCESS_KEY_ID=...
+STORIX_S3_SECRET_ACCESS_KEY=...
+STORIX_S3_ENDPOINT=http://localhost:9000   # only for MinIO/R2-style stores
+# for gcs:
+STORIX_GCS_BUCKET=my-bucket
+STORIX_GCS_CREDENTIAL_PATH=/path/to/service-account.json
 ```
 
 Settings are read from the process environment and a `.env` file in the current
@@ -79,6 +90,14 @@ working directory. Overrides passed to `get_storage` win over both, and every
 backend config field mirrors its constructor keyword, so the env key always
 matches the argument name. Memory is zero-configuration and has no
 `STORIX_MEMORY_*` settings.
+
+```python
+fs = get_storage("s3", bucket="my-bucket", region="us-east-1")
+fs = get_storage("gcs", bucket="my-bucket")
+```
+
+See the [S3 and GCS](../recipes/object-stores.md) recipe for working
+configurations, MinIO included.
 
 !!! note "Azure validates on first I/O"
 
@@ -102,6 +121,10 @@ custom metadata; local disk cannot. Storix makes those differences explicit
 rather than silent: a backend advertises `capabilities`, and asking for one it
 lacks raises `UnsupportedOperationError` naming the missing capability instead of
 quietly dropping your argument.
+
+`S3Backend` and `GcsBackend` both advertise `presigned_urls`, `custom_metadata`,
+and `content_type`, so presigned URLs and metadata round-trips work natively on
+either.
 
 ```python
 azure = get_storage("azure")
