@@ -23,6 +23,7 @@ from storix._sync.layers import (
     CacheLayer,
     DataUrlLayer,
     MetadataLayer,
+    ObservabilityLayer,
     SandboxLayer,
 )
 from storix.errors import (
@@ -44,10 +45,13 @@ from storix.types import EchoMode
         'metadata',
         'dataurl',
         'cache',
+        'observability',
         pytest.param('azure', marks=pytest.mark.integration),
     ]
 )
-def backend(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[StorageBackend]:
+def backend(  # noqa: PLR0911 - one early return per backend param
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> Iterator[StorageBackend]:
     if request.param == 'memory':
         yield MemoryBackend()
         return
@@ -72,6 +76,10 @@ def backend(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[StorageB
         # the whole conformance suite proves cache eviction is correct:
         # every write-then-read must return fresh data, not a stale hit
         yield CacheLayer(MemoryBackend())
+        return
+    if request.param == 'observability':
+        # no sink set: the layer must be a pure passthrough
+        yield ObservabilityLayer(MemoryBackend())
         return
 
     account = os.environ.get('ADLSG2_ACCOUNT_NAME')
