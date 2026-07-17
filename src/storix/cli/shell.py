@@ -25,7 +25,6 @@ from .state import (
     cache_layer,
     current_fs,
     layer_summary,
-    list_entries,
     use_fs,
 )
 
@@ -91,8 +90,9 @@ class _ShellCompleter(Completer):
         fragment = word.rpartition('/')[2]
         parent = word[: len(word) - len(fragment)]  # '' or ends with '/'
         try:
-            entries = list_entries(
-                current_fs(), parent or None, all=fragment.startswith('.')
+            entries = sorted(
+                current_fs().scandir(parent or None, all=fragment.startswith('.')),
+                key=lambda entry: entry.name,
             )
         except Exception:  # noqa: BLE001 - completion must never break the prompt
             return

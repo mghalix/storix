@@ -24,7 +24,7 @@ from .state import icons_enabled
 if TYPE_CHECKING:
     from typing import Literal
 
-    from storix.models import Entry
+    from storix.models import DirEntry
 
     type DirState = Literal['closed', 'full', 'empty']
 
@@ -40,7 +40,7 @@ def _icon_table() -> dict[str, Any]:
     return tomllib.loads(text)
 
 
-def entry_decor(entry: Entry, *, dir_state: DirState = 'closed') -> tuple[str, str]:
+def entry_decor(entry: DirEntry, *, dir_state: DirState = 'closed') -> tuple[str, str]:
     """The (icon, rich style) pair for a directory-listing entry.
 
     Files match by exact name first (``Makefile``), then extension, then
@@ -69,7 +69,7 @@ def entry_decor(entry: Entry, *, dir_state: DirState = 'closed') -> tuple[str, s
 
 
 def entry_label(
-    entry: Entry, *, slash: bool = True, dir_state: DirState = 'closed'
+    entry: DirEntry, *, slash: bool = True, dir_state: DirState = 'closed'
 ) -> Text:
     """A styled, icon-prefixed name for an entry (markup-safe)."""
     icon, style = entry_decor(entry, dir_state=dir_state)

@@ -21,7 +21,7 @@ from storix.errors import (
     PathNotFoundError,
     UnsupportedOperationError,
 )
-from storix.models import FileProperties
+from storix.models import DirEntry, FileProperties
 from storix.types import StorixPath
 
 
@@ -335,6 +335,86 @@ class Storix:
 
     # --- read ---
 
+    def scandir(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        all: bool = False,
+    ) -> Iterator[DirEntry]:
+        """Lazily list a directory as rich entries (after ``os.scandir``).
+
+        Yields a :class:`~storix.models.DirEntry` per child - name,
+        absolute path, kind, and any size the listing carried for free -
+        in backend order, unsorted (sorting would force the whole
+        directory to materialize; a caller sorts if it wants to, as ``sx``
+        does for display). Mirrors ``ls`` semantics otherwise: listing a
+        file yields that one entry, and hidden (dot-prefixed) entries are
+        excluded unless ``all`` is set. The lazy, rich sibling of ``ls``
+        (names only) and ``iterdir`` (lazy names).
+
+        Args:
+            path: Directory (or file) to list; the session cwd when None.
+            all: Include hidden (dot-prefixed) entries.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+        """
+        target = self._resolve(path)
+        raw = self._backend.stat(target)
+        if raw.kind is PathKind.FILE:
+            yield DirEntry(name=target.name, path=target, kind=raw.kind, size=raw.size)
+            return
+        for entry in self._backend.list_dir(target):
+            if not all and pathops.is_hidden(entry.name):
+                continue
+            yield DirEntry(
+                name=entry.name,
+                path=target / entry.name,
+                kind=PathKind.DIRECTORY if entry.is_dir else PathKind.FILE,
+                size=entry.size,
+            )
+
+    def iterdir(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        all: bool = False,
+    ) -> Iterator[StorixPath]:
+        """Lazily list a directory as absolute paths (after ``Path.iterdir``).
+
+        The lazy-names sibling of ``ls`` and sugar over ``scandir``: yields
+        absolute, session-resolved :class:`StorixPath`s in backend order,
+        hidden entries excluded unless ``all`` is set.
+
+        Args:
+            path: Directory (or file) to list; the session cwd when None.
+            all: Include hidden (dot-prefixed) entries.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+        """
+        for entry in self.scandir(path, all=all):
+            yield entry.path
+
+    def is_empty(self, path: StrPathLike | None = None) -> bool:
+        """Whether a directory holds no entries at all (hidden included).
+
+        Pulls only the first entry from the listing and stops - one round
+        trip, no full read. Counts *any* entry, including hidden ones: a
+        directory holding only a dotfile is not empty (``rmdir`` would fail
+        on it), so this ignores the hidden filter ``ls``/``scandir`` apply.
+
+        Args:
+            path: Directory to test; the session cwd when None.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+            NotADirectoryError: If ``path`` is a file.
+        """
+        for _ in self._backend.list_dir(self._resolve(path)):
+            return False
+        return True
+
     def ls(
         self,
         path: StrPathLike | None = None,
@@ -344,19 +424,14 @@ class Storix:
     ) -> list[StorixPath]:
         """List a directory (hidden entries excluded unless ``all=True``).
 
-        Like unix ls, listing a file returns the file itself.
+        Like unix ls, listing a file returns the file itself. Names only;
+        for each entry's kind and size use ``scandir``, and for a lazy
+        stream of names use ``iterdir``.
         """
-        target = self._resolve(path)
-        raw = self._backend.stat(target)
-        if raw.kind is PathKind.FILE:
-            return [target if abs else StorixPath(target.name)]
-
-        names = [entry.name for entry in self._backend.list_dir(target)]
-        if not all:
-            names = [name for name in names if not pathops.is_hidden(name)]
-        if abs:
-            return [target / name for name in names]
-        return [StorixPath(name) for name in names]
+        return [
+            entry.path if abs else StorixPath(entry.name)
+            for entry in self.scandir(path, all=all)
+        ]
 
     def cat(self, path: StrPathLike, /, *paths: StrPathLike) -> bytes:
         """Read one or more files, concatenated in argument order."""

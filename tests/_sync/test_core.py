@@ -9,6 +9,7 @@ from storix._sync import Storix
 from storix._sync.backends.local import LocalBackend
 from storix._sync.backends.memory import MemoryBackend
 from storix.constants import DEFAULT_READ_CHUNK_SIZE
+from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -17,7 +18,7 @@ from storix.errors import (
     PathNotFoundError,
     UnsupportedOperationError,
 )
-from storix.models import FileProperties
+from storix.models import DirEntry, FileProperties
 
 
 @pytest.fixture(params=['memory', 'local'])
@@ -180,6 +181,90 @@ def test_ls_on_file_returns_the_file(fs: Storix):
 def test_ls_missing_raises(fs: Storix):
     with pytest.raises(PathNotFoundError):
         fs.ls('/nope')
+
+
+# --- scandir / iterdir / is_empty ---
+
+
+def test_scandir_yields_rich_entries(fs: Storix):
+    fs.mkdir('/docs')
+    fs.echo(b'hello', '/a.txt')
+
+    entries = {e.name: e for e in fs.scandir('/')}
+
+    assert entries.keys() == {'docs', 'a.txt'}
+    docs = entries['docs']
+    assert isinstance(docs, DirEntry)
+    assert docs.kind is PathKind.DIRECTORY
+    assert docs.is_dir and not docs.is_file
+    assert docs.path == P('/docs')
+    a = entries['a.txt']
+    assert a.kind is PathKind.FILE
+    assert a.is_file and not a.is_dir
+    assert a.path == P('/a.txt')
+    assert a.size == 5
+
+
+def test_scandir_returns_a_lazy_iterator(fs: Storix):
+    from collections.abc import Iterator
+
+    # a generator, not a materialized list: nothing is read until iterated
+    assert isinstance(fs.scandir('/'), Iterator)
+
+
+def test_scandir_hides_dotfiles_unless_all(fs: Storix):
+    fs.touch('/a.txt', '/.env')
+
+    visible = {e.name for e in fs.scandir('/')}
+    every = {e.name for e in fs.scandir('/', all=True)}
+
+    assert visible == {'a.txt'}
+    assert every == {'a.txt', '.env'}
+
+
+def test_scandir_on_file_yields_the_file(fs: Storix):
+    fs.echo(b'hi', '/a.txt')
+
+    entries = list(fs.scandir('/a.txt'))
+
+    assert len(entries) == 1
+    assert entries[0].name == 'a.txt'
+    assert entries[0].path == P('/a.txt')
+    assert entries[0].is_file
+
+
+def test_iterdir_yields_absolute_paths(fs: Storix):
+    fs.mkdir('/docs')
+    fs.touch('/a.txt')
+
+    paths = list(fs.iterdir('/'))
+    scanned = [e.path for e in fs.scandir('/')]
+
+    assert paths == scanned  # iterdir is scandir's paths
+    assert {str(p) for p in paths} == {'/docs', '/a.txt'}
+
+
+def test_is_empty_true_on_empty_dir(fs: Storix):
+    fs.mkdir('/empty')
+    assert fs.is_empty('/empty') is True
+
+
+def test_is_empty_false_on_populated_dir(fs: Storix):
+    fs.mkdir('/docs')
+    fs.touch('/docs/a.txt')
+    assert fs.is_empty('/docs') is False
+
+
+def test_is_empty_false_on_dotfile_only_dir(fs: Storix):
+    fs.mkdir('/docs')
+    fs.touch('/docs/.env')
+    # a dir holding only a hidden file is not empty (rmdir would fail on it)
+    assert fs.is_empty('/docs') is False
+
+
+def test_is_empty_missing_raises(fs: Storix):
+    with pytest.raises(PathNotFoundError):
+        fs.is_empty('/nope')
 
 
 # --- cat ---

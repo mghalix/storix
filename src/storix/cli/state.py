@@ -17,18 +17,14 @@ from storix import (
     SandboxLayer,
     cache as cache_op,
     get_storage,
-    pathops,
 )
-from storix.enums import PathKind
 from storix.errors import StorageError
-from storix.models import Entry
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from storix import Storix
-    from storix.types import StrPathLike
 
 
 _CLI_READ_CAP: Final[int] = 8 * 1024 * 1024
@@ -240,48 +236,3 @@ def layer_summary(fs: Storix) -> str | None:
         elif isinstance(layer, MetadataLayer):
             parts.append('metadata via sidecars')
     return ' · '.join(parts) if parts else None
-
-
-def has_children(fs: Storix, path: StrPathLike) -> bool | None:
-    """Whether a directory holds anything, or None when unknown.
-
-    Costs one listing (stopped at the first entry), so callers should ask
-    only when the answer changes what the user sees. None means the
-    question could not be answered - a vanished or unreadable directory -
-    so a caller renders the neutral form rather than claiming either way.
-    """
-    try:
-        return next(iter(fs.backend.list_dir(fs.resolve(path))), None) is not None
-    except StorageError:
-        return None
-
-
-def list_entries(
-    fs: Storix, path: str | None = None, *, all: bool = False
-) -> list[Entry]:
-    """Sorted directory entries with kind info, straight from the port.
-
-    ``fs.ls`` flattens the port's ``Entry`` DTO into bare paths; the CLI
-    needs ``is_dir`` (and any free ``size``) to decorate output without a
-    stat call per entry, so it asks the backend stack directly. Mirrors
-    ``ls`` semantics: listing a file returns the file itself, and hidden
-    entries are excluded unless ``all`` is set.
-
-    Args:
-        fs: The session to list through (its full layer stack applies).
-        path: Directory (or file) to list; the session cwd when None.
-        all: Include hidden (dot-prefixed) entries.
-
-    Raises:
-        StorageError: Propagated from the backend (e.g. a missing path).
-    """
-    target = fs.resolve(path)
-    raw = fs.backend.stat(target)
-    if raw.kind is PathKind.FILE:
-        return [Entry(target.name, is_dir=False, size=raw.size)]
-    entries = (
-        entry
-        for entry in fs.backend.list_dir(target)
-        if all or not pathops.is_hidden(entry.name)
-    )
-    return sorted(entries, key=lambda entry: entry.name)

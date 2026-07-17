@@ -44,10 +44,8 @@ from .state import (
     build_base,
     build_session,
     current_fs,
-    has_children,
     icons_enabled,
     layer_summary,
-    list_entries,
     set_icons,
     use_fs,
 )
@@ -57,7 +55,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from storix import Storix
-    from storix.models import Entry
+    from storix.models import DirEntry
     from storix.types import StorixPath
 
     from .render import DirState
@@ -82,16 +80,21 @@ def _die(cmd: str, exc: Exception) -> NoReturn:
 # --- listing / navigation ---
 
 
-def _dir_state(fs: Storix, base: StorixPath, entry: Entry) -> DirState:
+def _dir_state(fs: Storix, base: StorixPath, entry: DirEntry) -> DirState:
     """The folder glyph state for a flat-listing entry.
 
     A listing does not say whether a directory holds anything, so the
     honest default is the neutral 'closed' folder. When ``dir_contents``
     is on, look - one listing per subdirectory - so empty reads as empty.
+    A vanished or unreadable subdirectory falls back to the neutral glyph.
     """
     if not entry.is_dir or not (icons_enabled() and load_prefs().dir_contents):
         return 'closed'
-    return dir_state_of(populated=has_children(fs, base / entry.name))
+    try:
+        populated = not fs.is_empty(base / entry.name)
+    except StorageError:
+        populated = None
+    return dir_state_of(populated=populated)
 
 
 @app.command()
@@ -110,7 +113,7 @@ def ls(
     fs = _fs()
     base = fs.resolve(path)
     try:
-        entries = list_entries(fs, path, all=all_)
+        entries = sorted(fs.scandir(path, all=all_), key=lambda e: e.name)
         if time_sort and len(entries) > 1:
             # listings carry no mtime, so -t costs one stat per entry
             mtimes = {e.name: fs.backend.stat(base / e.name).modified for e in entries}
@@ -120,7 +123,7 @@ def ls(
     if reverse:
         entries.reverse()
 
-    def label(entry) -> Text:  # noqa: ANN001 - Entry, kept local to ls
+    def label(entry) -> Text:  # noqa: ANN001 - DirEntry, kept local to ls
         return entry_label(entry, dir_state=_dir_state(fs, base, entry))
 
     if not long:
@@ -170,13 +173,13 @@ def tree(
     fs = _fs()
     dirs, files = 1, 0  # unix tree counts the root directory
 
-    def children_of(target: str) -> list[Entry]:
+    def children_of(target: str) -> list[DirEntry]:
         try:
-            return list_entries(fs, target, all=all_)
+            return sorted(fs.scandir(target, all=all_), key=lambda e: e.name)
         except StorageError as exc:
             _die('tree', exc)
 
-    def walk(children: list[Entry], target: str, prefix: str = '') -> None:
+    def walk(children: list[DirEntry], target: str, prefix: str = '') -> None:
         nonlocal dirs, files
         for i, child in enumerate(children):
             last = i == len(children) - 1
