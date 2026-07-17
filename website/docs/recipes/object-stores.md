@@ -1,11 +1,12 @@
-# S3 and GCS
+# S3, GCS, and Azure Blob
 
-`S3Backend` and `GcsBackend` run the whole storix surface (sessions, layers,
-capabilities, the conformance-tested port semantics) over the two big object
-stores. Explicit, typed constructors; no provider SDK vocabulary to learn.
+`S3Backend`, `GcsBackend`, and `AzureBlobBackend` run the whole storix surface
+(sessions, layers, capabilities, the conformance-tested port semantics) over
+the big object stores. Explicit, typed constructors; no provider SDK
+vocabulary to learn.
 
 ```bash
-uv add "storix[s3]"    # or "storix[gcs]"
+uv add "storix[s3]"    # or "storix[gcs]", "storix[azblob]"
 ```
 
 ## S3
@@ -63,6 +64,29 @@ fs = get_storage(
 
 Omitting the credential resolves through Google's application default
 credentials, so on GCE/GKE the bucket alone is usually enough.
+
+## Azure Blob (flat accounts)
+
+One `azure` provider covers both account kinds: it detects whether the
+account has hierarchical namespaces and builds `AzureBackend` (HNS) or
+`AzureBlobBackend` (flat) accordingly. You never have to know which one you
+have:
+
+```python
+fs = get_storage(
+    "azure",
+    container="raw",
+    account_name="myaccount",
+    credential="<SAS token or account key>",
+)
+```
+
+On the blob side, use a SAS token as the credential when you need `url()`: a
+bare account key cannot mint presigned URLs there. Pass `kind="blob"` (or
+`"adls"`) explicitly when detection cannot run - container-scoped SAS,
+anonymous public containers, or emulators like
+[Azurite](https://learn.microsoft.com/azure/storage/common/storage-use-azurite)
+via `endpoint="http://127.0.0.1:10000/devstoreaccount1"`.
 
 ## Scoping a session to a prefix
 

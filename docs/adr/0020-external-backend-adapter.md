@@ -85,9 +85,17 @@ opendal's async/sync primitives differ per flavor; write both `_async` and
 
 Amendment (2026-07-16, post-review): the adapter is an INTERNAL engine, not
 the public surface. Users see typed per-provider facades - `S3Backend`,
-`GcsBackend` - that subclass the engine with explicit, documented
+`GcsBackend`, `AzureBlobBackend` (flat-namespace companion to the native
+`AzureBackend`) - that subclass the engine with explicit, documented
 constructors, Azure-grade env config (`STORIX_S3_*`, `STORIX_GCS_*`), and
-provider-named extras (`storix[s3]`, `storix[gcs]`). opendal and its
+provider-named extras (`storix[s3]`, `storix[gcs]`, `storix[azblob]`). The
+blob facade shares the `azure` provider and the one `STORIX_AZURE_*` schema:
+the default `kind=auto` detects hierarchical namespaces with one
+account-properties request (cached per account per process; detection
+results only, never user assertions) and picks the surface;
+`kind=adls|blob` skips the probe (container-scoped SAS, anonymous,
+emulators, running event loops). One schema, no account-kind knowledge
+required. opendal and its
 service/option vocabulary never appear in the public API or docs. The facades
 are flavor-neutral (an `__init__` and a `locate` override), so they run
 through `unasync`; only the engine twins are hand-written. A new service is a
