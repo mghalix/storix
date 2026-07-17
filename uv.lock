@@ -1570,6 +1570,12 @@ gcs = [
 local = [
     { name = "aiofiles" },
 ]
+minio = [
+    { name = "opendal" },
+]
+r2 = [
+    { name = "opendal" },
+]
 s3 = [
     { name = "opendal" },
 ]
@@ -1608,11 +1614,13 @@ requires-dist = [
     { name = "storix", extras = ["azadls", "azblob"], marker = "extra == 'azure'" },
     { name = "storix", extras = ["core", "local"] },
     { name = "storix", extras = ["local", "azure", "s3", "gcs", "cli"], marker = "extra == 'all'" },
+    { name = "storix", extras = ["s3"], marker = "extra == 'minio'" },
+    { name = "storix", extras = ["s3"], marker = "extra == 'r2'" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.13.0" },
     { name = "wrapt", marker = "extra == 'core'", specifier = ">=2.0.1" },
     { name = "zensical", specifier = "==0.0.50" },
 ]
-provides-extras = ["core", "local", "azadls", "azblob", "azure", "s3", "gcs", "cli", "all"]
+provides-extras = ["core", "local", "azadls", "azblob", "azure", "s3", "r2", "minio", "gcs", "cli", "all"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -31,6 +31,11 @@ CLI. See ADR 0022.
   silently ignored.
 - `ls -t` (sort by modification time) and `-r` (reverse); `tree -a`; `du -h`;
   `--icons/--no-icons`.
+- CLI preferences `provider` (which backend `sx` opens by default, overriding
+  `STORIX_PROVIDER` for the CLI only, with `-p` still winning) and
+  `dir_contents` (whether flat listings check emptiness).
+- `r2` and `minio` install extras, aliases for `s3`, whose API both stores
+  speak. Installing for the store you use no longer requires knowing that.
 
 ### Changed
 
@@ -54,12 +59,20 @@ CLI. See ADR 0022.
 
 ### Fixed
 
-- Directory icons no longer imply contents they have not checked: flat
-  listings use a closed folder, while `tree`, which enumerates children
-  anyway, shows an open folder for populated directories and an outline for
-  empty ones.
+- Directory icons tell the truth about emptiness. Flat listings now check
+  (`dir_contents`, on by default), so an empty folder reads as empty and a
+  populated one as populated, rather than every directory sharing one glyph.
+  `tree` already knew, for free.
+- `sx` verifies a sandbox root before jailing the session. A missing root
+  used to surface later, correctly rescoped and unreadable, as
+  `PathNotFoundError: path '/' does not exist` - inside the jail the missing
+  root *is* `/`. The check names the real root and the provider while it
+  still can.
 - Well-known filenames (`Makefile`, `Dockerfile`, `pyproject.toml`,
   `.gitignore`, ...) get their own icon instead of the generic file glyph.
+- The shell prompt is just the working directory again. The backend name and
+  layer stack, which grow with every layer, moved to a bottom toolbar where
+  they stay visible without prefixing every command.
 
 ## [0.4.2] - 2026-07-16
 

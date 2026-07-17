@@ -5,9 +5,9 @@
 # Lookup order: exact [name] match, then [ext], then the [file] default.
 
 [dir]
-icon = "\uf07b"  # nf-fa-folder: closed (flat listings)
-open = "\uf07c"  # nf-fa-folder_open: tree, has children
-empty = "\uf114"  # nf-fa-folder_o: tree, known empty
+icon = "\uf07b"  # nf-fa-folder: contents not looked at
+full = "\uf07c"  # nf-fa-folder_open: known to hold something
+empty = "\uf114"  # nf-fa-folder_o: known empty (hollow)
 style = "bold blue"
 
 [file]

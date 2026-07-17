@@ -94,6 +94,17 @@ The cache is where a long shell session pays off: `du` on a cloud tree costs
 one full walk, and every repeat is free until you `refresh`. It is opt-in
 because silently caching a live bucket hides other writers' uploads.
 
+The sandbox root must already exist. `sx` checks it before jailing the
+session, because afterwards the jail cannot say otherwise: inside it, the
+missing root *is* `/`, and every command would fail with the unreadable
+`path '/' does not exist`.
+
+```console
+$ sx --sandbox /videos ls
+sx: sandbox root /videos does not exist on AzureBlobBackend (create it
+first, or point --sandbox / the config layer elsewhere)
+```
+
 ## Configuration
 
 Preferences and an always-on layer stack persist in a config file, so you do
@@ -107,20 +118,39 @@ not retype flags. Sources, strongest first:
 4. your personal defaults: `~/.config/storix/config.toml`
 5. built-in defaults
 
-```toml
-# ~/.config/storix/config.toml
-[cli]
-icons = true
+=== "storix.toml"
 
-# every sx session gets the read-through cache - handy against cloud
-# providers, where a repeated ls or du is a real round trip
-[[cli.layers]]
-name = "cache"
-ttl = 300
-```
+    ```toml
+    [cli]
+    icons = true
+    provider = 'azure'    # which backend sx opens by default
+    # every sx session gets the read-through cache - handy against cloud
+    # providers, where a repeated ls or du is a real round trip
+    layers = [{ name = "cache", ttl = 300 }]
+    ```
 
-In `pyproject.toml` the same tables live under `[tool.storix.cli]` and
-`[[tool.storix.cli.layers]]`.
+=== "pyproject.toml"
+
+    ```toml
+    [tool.storix.cli]
+    icons = true
+    provider = 'azure'
+    layers = [{ name = "cache", ttl = 300 }]
+    ```
+
+=== "one table per layer"
+
+    ```toml
+    # the same stack, if you prefer a table per layer over inline tables;
+    # TOML treats the two forms as identical
+    [cli]
+    icons = true
+    provider = 'azure'
+
+    [[cli.layers]]
+    name = "cache"
+    ttl = 300
+    ```
 
 Layers apply in listed order, each wrapping the previous, so the last entry
 is outermost. The available names mirror the flags: `cache` (options: `ttl`,
@@ -136,21 +166,39 @@ cwd:     /
 layers:  cache ls/stat/du/cat via InMemoryCacheStore
 ```
 
-Only CLI preferences and the layer stack live here. Connection config stays
-shared with the library at `STORIX_*` / `[tool.storix]`, and the library
-never auto-applies a layer stack: in code you opt in explicitly with
-`with_layer()`.
+`provider` is the one connection key that lives here, because "which
+backend do I explore by default" is a habit of yours, not of your code:
+setting `STORIX_PROVIDER` would drag your application's library sessions
+onto the same backend. *How* to connect (credentials, account names, base
+directories) stays shared with the library at `STORIX_*` / `[tool.storix]`,
+and the library never auto-applies a layer stack: in code you opt in
+explicitly with `with_layer()`.
 
-That split is enforced, not assumed. An unknown key, or a connection setting
-put here by mistake, exits with the fix named rather than being silently
+That split is enforced, not assumed. An unknown key, or a credential put
+here by mistake, exits with the fix named rather than being silently
 ignored:
 
 ```console
 $ sx ls
-sx: 'provider' is not a CLI preference - it is connection config, shared
-with the library. Set it via STORIX_PROVIDER (env or .env).
+sx: 'account_name' is not a CLI preference - it is connection config,
+shared with the library. Set it via STORIX_AZURE_* (env or .env).
 ```
 
-So to point `sx` at a provider by default, set `STORIX_PROVIDER=azure` in
-your environment or a `.env` file, which the library reads too. Use
-`sx -p azure` for a one-off.
+### Preferences
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `icons` | `true` | Nerd Font glyphs in listings (`--icons/--no-icons`) |
+| `provider` | unset | Backend `sx` opens by default (`-p` still wins) |
+| `dir_contents` | `true` | Show whether a directory is empty in flat listings |
+| `layers` | `[]` | The always-on layer stack, innermost first |
+
+!!! note "What `dir_contents` costs"
+
+    A plain listing says which entries are directories, never whether they
+    hold anything, so `ls` looks: one extra listing per subdirectory, which
+    on an object store is a round trip each. That is what lets an empty
+    folder read as empty rather than every folder looking alike. A cache
+    layer absorbs the repeats; set `dir_contents = false` to trade the
+    distinction for a single request per `ls`. `tree` is unaffected - it
+    already reads every directory it draws.

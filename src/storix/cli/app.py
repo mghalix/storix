@@ -26,20 +26,30 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from storix import ObservabilityLayer, get_storage
+from storix import ObservabilityLayer
 from storix.errors import StorageError
 
-from .render import console, entry_label, err, human_size
+from .config import load_prefs
+from .render import (
+    console,
+    dir_state_of,
+    entry_label,
+    err,
+    human_size,
+)
 from .state import (
     _fs,
     _session,
     apply_layers,
     base_backend,
+    build_base,
+    build_session,
     current_fs,
+    has_children,
+    icons_enabled,
     layer_summary,
     list_entries,
     set_icons,
-    stack_from_prefs,
     use_fs,
 )
 
@@ -49,6 +59,9 @@ if TYPE_CHECKING:
 
     from storix import Storix
     from storix.models import Entry
+    from storix.types import StorixPath
+
+    from .render import DirState
 
 
 __all__ = ['app', 'current_fs', 'main', 'use_fs']
@@ -68,6 +81,18 @@ def _die(cmd: str, exc: Exception) -> NoReturn:
 
 
 # --- listing / navigation ---
+
+
+def _dir_state(fs: Storix, base: StorixPath, entry: Entry) -> DirState:
+    """The folder glyph state for a flat-listing entry.
+
+    A listing does not say whether a directory holds anything, so the
+    honest default is the neutral 'closed' folder. When ``dir_contents``
+    is on, look - one listing per subdirectory - so empty reads as empty.
+    """
+    if not entry.is_dir or not (icons_enabled() and load_prefs().dir_contents):
+        return 'closed'
+    return dir_state_of(populated=has_children(fs, base / entry.name))
 
 
 @app.command()
@@ -96,8 +121,11 @@ def ls(
     if reverse:
         entries.reverse()
 
+    def label(entry) -> Text:  # noqa: ANN001 - Entry, kept local to ls
+        return entry_label(entry, dir_state=_dir_state(fs, base, entry))
+
     if not long:
-        cells = [entry_label(entry) for entry in entries]
+        cells = [label(entry) for entry in entries]
         console.print(Columns(cells, padding=(0, 2))) if cells else None
         return
 
@@ -114,7 +142,7 @@ def ls(
                 size = fs.stat(base / entry.name).size
             size_text = Text(human_size(size), style='green')
         kind = Text('d' if entry.is_dir else '-', style='dim')
-        table.add_row(kind, size_text, entry_label(entry))
+        table.add_row(kind, size_text, label(entry))
     console.print(table)
 
 
@@ -159,7 +187,7 @@ def tree(
                 inner = f'{target}/{child.name}'
                 sub = children_of(inner)
                 label = entry_label(
-                    child, slash=False, dir_state='open' if sub else 'empty'
+                    child, slash=False, dir_state='full' if sub else 'empty'
                 )
                 console.print(Text(f'{prefix}{branch}') + label)
                 walk(sub, inner, prefix + ('    ' if last else '│   '))
@@ -513,13 +541,13 @@ def _main(
     # persistent session (so cwd survives across shell commands); layer
     # flags replace the configured [[cli.layers]] stack for the invocation
     if provider_ is not None or cache or sandbox is not None:
-        base = get_storage(provider_) if provider_ is not None else get_storage()
         if cache or sandbox is not None:
+            base = build_base(provider_)
             _session.fs = apply_layers(
                 base, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
             )
         else:
-            _session.fs = stack_from_prefs(base)
+            _session.fs = build_session(provider_)
 
     if ctx.invoked_subcommand is None or interactive:
         from .shell import start_shell

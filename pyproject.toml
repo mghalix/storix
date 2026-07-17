@@ -53,6 +53,14 @@ azure = [
 s3 = [
     "opendal>=0.47.0",
 ]
+r2 = [
+    # Cloudflare R2 speaks the S3 API; the alias saves knowing that
+    "storix[s3]",
+]
+minio = [
+    # MinIO speaks the S3 API; the alias saves knowing that
+    "storix[s3]",
+]
 gcs = [
     "opendal>=0.47.0",
 ]

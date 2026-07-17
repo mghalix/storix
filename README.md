@@ -36,7 +36,7 @@ them, the way FastAPI is a layer over the web rather than a new web server.
 ```bash
 uv add storix            # local filesystem + in-memory
 uv add "storix[azure]"   # + all of Azure Storage (ADLS Gen2 + Blob)
-uv add "storix[s3]"      # + Amazon S3 (and MinIO, R2, ...)
+uv add "storix[s3]"      # + Amazon S3 (r2 / minio alias it)
 uv add "storix[gcs]"     # + Google Cloud Storage
 uv add "storix[cli]"     # + the sx command-line interface
 uv add "storix[all]"     # all optional features
@@ -91,10 +91,8 @@ layer stack persist in `~/.config/storix/config.toml`, a project
 ```toml
 [tool.storix.cli]
 icons = true
-
-[[tool.storix.cli.layers]]
-name = "cache"      # every sx session gets the read-through cache
-ttl = 300
+provider = 'azure'                          # what sx opens by default
+layers = [{ name = "cache", ttl = 300 }]    # every session, read-through
 ```
 
 ## Highlights

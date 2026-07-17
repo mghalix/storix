@@ -135,9 +135,9 @@ def test_apply_layers_composition_and_lookup():
     from storix import CacheLayer, SandboxLayer
     from storix.cli.state import apply_layers, cache_layer, layer_summary
 
-    fs = apply_layers(
-        Storix(MemoryBackend()), cache=True, cache_ttl=None, sandbox='/jail'
-    )
+    base = Storix(MemoryBackend())
+    base.mkdir('/jail')  # a sandbox root must exist: sx verifies it up front
+    fs = apply_layers(base, cache=True, cache_ttl=None, sandbox='/jail')
     # sandbox innermost, cache outermost
     assert isinstance(fs.backend, CacheLayer)
     assert isinstance(fs.backend._inner, SandboxLayer)
@@ -158,18 +158,15 @@ def test_apply_layers_none_is_passthrough():
     assert layer_summary(fs) is None
 
 
-def test_prompt_label_shows_base_backend_not_the_layer():
-    from storix.cli.state import apply_layers, base_backend, prompt_label
+def test_base_backend_surfaces_the_provider_under_the_stack():
+    from storix.cli.state import apply_layers, base_backend
 
-    plain = Storix(MemoryBackend())
-    assert prompt_label(plain) == 'MemoryBackend'  # no layers -> just the backend
+    base = Storix(MemoryBackend())
+    base.mkdir('/jail')
+    fs = apply_layers(base, cache=True, cache_ttl=None, sandbox='/jail')
 
-    fs = apply_layers(
-        Storix(MemoryBackend()), cache=True, cache_ttl=None, sandbox='/jail'
-    )
-    # the real provider is surfaced, annotated with the stack (not "CacheLayer")
+    # the real provider, not the outermost layer the shell would otherwise name
     assert type(base_backend(fs)).__name__ == 'MemoryBackend'
-    assert prompt_label(fs) == 'MemoryBackend(cache, sandbox)'
 
 
 def test_url_expire_flag_is_accepted():
@@ -218,15 +215,39 @@ def test_config_layers_unknown_name_dies_with_the_known_set(prefs_from):
     assert 'cache' in str(exc_info.value)  # the error names the known layers
 
 
-def test_connection_config_in_the_cli_table_is_rejected_not_ignored(prefs_from):
+def test_credentials_in_the_cli_table_are_rejected_not_ignored(prefs_from):
     from storix.cli.config import load_prefs
 
-    prefs_from("[cli]\nprovider = 'azure'\n")  # belongs in env, not here
+    prefs_from("[cli]\naccount_name = 'acme'\n")  # shared config, belongs in env
 
     with pytest.raises(SystemExit) as exc_info:
         load_prefs()
 
-    assert 'STORIX_PROVIDER' in str(exc_info.value)  # names where it belongs
+    assert 'STORIX_AZURE' in str(exc_info.value)  # names where it belongs
+
+
+def test_configured_provider_opens_that_backend(prefs_from):
+    from storix.cli.state import base_backend, build_base
+
+    prefs_from("[cli]\nprovider = 'memory'\n")
+
+    assert type(base_backend(build_base())).__name__ == 'MemoryBackend'
+    # an explicit -p still wins over the configured default
+    assert type(base_backend(build_base('local'))).__name__ == 'LocalBackend'
+
+
+def test_sandbox_root_that_is_not_there_fails_fast(prefs_from):
+    from storix.cli.state import apply_layers
+
+    prefs_from('[cli]\n')
+    fs = Storix(MemoryBackend())
+
+    with pytest.raises(SystemExit) as exc_info:
+        apply_layers(fs, cache=False, cache_ttl=None, sandbox='/videos')
+
+    # names the real root, not the '/' the jail would rescope it to
+    assert '/videos' in str(exc_info.value)
+    assert 'does not exist' in str(exc_info.value)
 
 
 def test_unknown_preference_is_rejected_with_the_known_set(prefs_from):

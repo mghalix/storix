@@ -29,14 +29,32 @@ the first file found anchors the project and stops the walk);
 (`~/.config/storix/config.toml`); defaults. Standalone files use a
 `[cli]` table (a `storix.toml` maps to `[tool.storix]`).
 
-**Preferences** are a flat pydantic model (`CliPrefs`): today `icons`
-(bool, with the `--icons/--no-icons` flag pair on top). The model forbids
-extras, so a typo or a wrong-place key exits naming the known set instead
-of silently doing nothing. Connection settings reached for here
-(`provider`, `base`, ...) get a targeted error naming their real home
-(`STORIX_PROVIDER`), because ADR 0015's scoping rule only helps if a
-misplaced key is *told* it is misplaced - silently ignoring `provider =
-"azure"` in `[tool.storix.cli]` looks exactly like it worked.
+**Preferences** are a flat pydantic model (`CliPrefs`): `icons`, `provider`,
+`dir_contents`, `layers`. The model forbids extras, so a typo or a
+wrong-place key exits naming the known set instead of silently doing
+nothing. Credentials and anchors reached for here (`account_name`, `base`,
+...) get a targeted error naming their real home, because ADR 0015's
+scoping rule only helps if a misplaced key is *told* it is misplaced -
+silently ignoring a key looks exactly like it worked.
+
+**`provider` is CLI-scoped, amending ADR 0015.** That ADR filed "which
+backend" under connection config, shared at `STORIX_*`. Practice showed
+the split is finer than "connection vs UX": *how* to connect (credentials,
+account names, base directories) is genuinely shared, but *which provider
+I explore by default* is a habit of the operator, not of the code. Forcing
+it through the shared `STORIX_PROVIDER` drags a service's library sessions
+onto whatever the human likes to browse - the exact coupling ADR 0015
+wanted to avoid, pointed the other way. So `provider` lives in
+`[tool.storix.cli]`, overriding `STORIX_PROVIDER` for the CLI only, with
+`-p/--provider` still winning. Credentials stay shared: the rule becomes
+"how to connect is shared, which one sx opens is the CLI's".
+
+**`dir_contents`** exists because a flat listing cannot know whether a
+directory is empty, and an icon that implies either way is a lie. Looking
+costs one listing per subdirectory (a round trip each on object stores;
+measured at 21 listings for a 20-directory `ls`, versus 1). Default on -
+accuracy is the point of the icons, and a cache layer absorbs repeats -
+with the knob for anyone who would rather have the single request.
 
 **The `[[cli.layers]]` stack** is an ordered array of
 `{name = ..., **options}` entries, innermost first (the last entry is

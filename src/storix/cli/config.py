@@ -24,21 +24,36 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 _MISPLACED: Final[dict[str, str]] = {
-    'provider': 'STORIX_PROVIDER (env or .env)',
     'home': 'STORIX_LOCAL_BASE / the provider settings (env or .env)',
     'base': 'STORIX_LOCAL_BASE (env or .env)',
+    'account_name': 'STORIX_AZURE_* (env or .env)',
+    'connection_string': 'STORIX_AZURE_* (env or .env)',
 }
-"""Connection settings users reach for here; ADR 0015 keeps them shared
-with the library, so name their real home instead of ignoring them."""
+"""Credentials and anchors users reach for here. How to *connect* is
+shared with the library (ADR 0015), so name their real home instead of
+ignoring them. ``provider`` is the deliberate exception: see CliPrefs."""
 
 
 class CliPrefs(BaseModel):
-    """User preferences for sx (display and UX, not connection config)."""
+    """User preferences for sx (display and UX, not credentials)."""
 
     model_config = ConfigDict(extra='forbid')
 
     icons: bool = True
     """Decorate listings with Nerd Font icons (needs a patched font)."""
+
+    dir_contents: bool = True
+    """Show whether a directory is empty in flat listings, which a plain
+    listing cannot know: it costs one extra listing per subdirectory (a
+    round trip each on object stores, free under a cache layer). Set false
+    to trade the distinction for one request per ``ls``."""
+
+    provider: str | None = None
+    """Which backend sx opens by default, overriding ``STORIX_PROVIDER``
+    for this CLI only (``-p/--provider`` still wins). ADR 0022 admits this
+    one connection key: "which provider do I explore by default" is a CLI
+    habit, and forcing it through the shared env would drag a service's
+    library sessions onto the same provider. Credentials stay shared."""
 
     layers: list[dict[str, Any]] = Field(default_factory=list)
     """Declarative layer stack (ADR 0015's ``[[layers]]`` DSL): ordered
@@ -105,11 +120,14 @@ def _user_prefs() -> dict[str, Any]:
 
 
 def _env_prefs() -> dict[str, Any]:
-    """``STORIX_CLI_*`` environment overrides (e.g. STORIX_CLI_ICONS=false)."""
+    """``STORIX_CLI_*`` overrides (e.g. ``STORIX_CLI_ICONS=false``)."""
     prefs: dict[str, Any] = {}
-    icons = os.environ.get('STORIX_CLI_ICONS')
-    if icons is not None:
-        prefs['icons'] = icons
+    for field in CliPrefs.model_fields:
+        if field == 'layers':  # a stack is not expressible as one env value
+            continue
+        value = os.environ.get(f'STORIX_CLI_{field.upper()}')
+        if value is not None:
+            prefs[field] = value
     return prefs
 
 

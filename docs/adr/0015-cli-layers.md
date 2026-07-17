@@ -1,6 +1,7 @@
 # 15. Layers in the CLI (and where their config lives)
 
-Status: accepted (declarative config file landed in 0.4.3, see ADR 0022)
+Status: accepted; declarative config file landed in 0.4.3 and the
+provider-scoping rule below is amended there (ADR 0022)
 
 ## Context
 `sx -p azure` builds a bare backend; a CLI user never feels the layers

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Final
 
 from storix import CacheLayer, SandboxLayer, cache as cache_op, get_storage, pathops
 from storix.enums import PathKind
+from storix.errors import StorageError
 from storix.models import Entry
 
 
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
 
     from storix import Storix
     from storix.backends import StorageBackend
+    from storix.types import StrPathLike
 
 
 _CLI_READ_CAP: Final[int] = 8 * 1024 * 1024
@@ -39,9 +41,38 @@ class _Session:
 _session = _Session()
 
 
+def build_base(provider: str | None = None) -> Storix:
+    """Open a bare session on ``provider``, else the configured default.
+
+    Precedence: an explicit ``-p/--provider``, then the config file's
+    ``provider``, then ``STORIX_PROVIDER`` / the factory default. No
+    layers - see ``build_session`` for the configured stack.
+
+    Args:
+        provider: The provider named on the command line, if any.
+
+    Raises:
+        SystemExit: If the provider is unknown, naming the available ones.
+    """
+    from .config import load_prefs
+
+    name = provider or load_prefs().provider
+    try:
+        return get_storage(name) if name is not None else get_storage()
+    except (StorageError, ValueError, KeyError) as exc:
+        # the factory's own error already names the available providers
+        message = f'sx: cannot open provider {name!r}: {exc}'
+        raise SystemExit(message) from exc
+
+
+def build_session(provider: str | None = None) -> Storix:
+    """A session on the resolved provider, wrapped in the configured stack."""
+    return stack_from_prefs(build_base(provider))
+
+
 def _fs() -> Storix:
     if _session.fs is None:
-        _session.fs = stack_from_prefs(get_storage())
+        _session.fs = build_session()
     return _session.fs
 
 
@@ -74,7 +105,7 @@ def apply_layers(
 ) -> Storix:
     """Wrap the session in the requested layers - sandbox innermost."""
     if sandbox is not None:
-        fs = fs.with_layer(SandboxLayer, root=sandbox)
+        fs = _sandboxed(fs, root=sandbox)
     if cache:
         fs = _cached(fs, ttl=cache_ttl)
     return fs
@@ -94,7 +125,33 @@ def _cached(
 
 
 def _sandboxed(fs: Storix, *, root: str) -> Storix:
-    return fs.with_layer(SandboxLayer, root=root)
+    """Jail the session under ``root``, refusing a root that is not there.
+
+    ``SandboxLayer`` is deliberately pure (its async twin cannot do I/O in
+    a constructor), so a missing root only surfaces later, rescoped, as
+    ``PathNotFoundError: path '/' does not exist`` - true inside the jail
+    and unreadable outside it. sx owns the jail, so it checks the real
+    root once, up front, where it can still name it.
+
+    Raises:
+        SystemExit: If ``root`` does not exist or is not a directory.
+    """
+    resolved = fs.resolve(root)
+    try:
+        if fs.isdir(resolved):
+            return fs.with_layer(SandboxLayer, root=resolved)
+        problem = (
+            'is a file, not a directory' if fs.exists(resolved) else 'does not exist'
+        )
+    except StorageError as exc:  # an unreachable backend, not a missing root
+        message = f'sx: cannot verify sandbox root {resolved}: {exc}'
+        raise SystemExit(message) from exc
+    provider = type(base_backend(fs)).__name__
+    message = (
+        f'sx: sandbox root {resolved} {problem} on {provider} '
+        f'(create it first, or point --sandbox / the config layer elsewhere)'
+    )
+    raise SystemExit(message)
 
 
 _LAYER_BUILDERS: Final[dict[str, Callable[..., Storix]]] = {
@@ -150,20 +207,6 @@ def base_backend(fs: Storix) -> StorageBackend:
     return node
 
 
-def prompt_label(fs: Storix) -> str:
-    """Provider name annotated with active layers, e.g. ``AzureBackend(cache)``."""
-    tags: list[str] = []
-    node: StorageBackend | None = fs.backend
-    while node is not None:
-        if isinstance(node, CacheLayer):
-            tags.append('cache')
-        elif isinstance(node, SandboxLayer):
-            tags.append('sandbox')
-        node = getattr(node, '_inner', None)
-    base = type(base_backend(fs)).__name__
-    return f'{base}({", ".join(tags)})' if tags else base
-
-
 # op name -> the CLI verbs it accelerates, for the layer summary
 _CACHE_VERBS = {'metadata': 'ls/stat', 'du': 'du', 'read': 'cat', 'url': 'url'}
 
@@ -181,6 +224,20 @@ def layer_summary(fs: Storix) -> str | None:
             parts.append(f'sandbox {node.to_real("/")}')  # public audit handle
         node = getattr(node, '_inner', None)
     return ' · '.join(parts) if parts else None
+
+
+def has_children(fs: Storix, path: StrPathLike) -> bool | None:
+    """Whether a directory holds anything, or None when unknown.
+
+    Costs one listing (stopped at the first entry), so callers should ask
+    only when the answer changes what the user sees. None means the
+    question could not be answered - a vanished or unreadable directory -
+    so a caller renders the neutral form rather than claiming either way.
+    """
+    try:
+        return next(iter(fs.backend.list_dir(fs.resolve(path))), None) is not None
+    except StorageError:
+        return None
 
 
 def list_entries(

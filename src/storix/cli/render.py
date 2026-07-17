@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
     from storix.models import Entry
 
-    type DirState = Literal['closed', 'open', 'empty']
+    type DirState = Literal['closed', 'full', 'empty']
 
 
 console = Console()
@@ -44,10 +44,11 @@ def entry_decor(entry: Entry, *, dir_state: DirState = 'closed') -> tuple[str, s
     """The (icon, rich style) pair for a directory-listing entry.
 
     Files match by exact name first (``Makefile``), then extension, then
-    the generic file decor. ``dir_state`` picks the folder glyph:
-    'closed' for flat listings (contents unknown), 'open'/'empty' for
-    tree views that know. The icon is '' when icons are disabled or
-    output is not a terminal.
+    the generic file decor. ``dir_state`` picks the folder glyph, and only
+    a caller that *knows* should pass a knowing one: 'full' or 'empty'
+    when the contents were looked at, 'closed' when they were not, so the
+    glyph never claims what nobody checked. The icon is '' when icons are
+    disabled or output is not a terminal.
     """
     table = _icon_table()
     if entry.is_dir:
@@ -72,6 +73,13 @@ def entry_label(
     icon, style = entry_decor(entry, dir_state=dir_state)
     name = f'{entry.name}/' if slash and entry.is_dir else entry.name
     return Text(f'{icon} {name}' if icon else name, style=style)
+
+
+def dir_state_of(*, populated: bool | None) -> DirState:
+    """Map a known-contents answer onto a folder glyph state."""
+    if populated is None:
+        return 'closed'
+    return 'full' if populated else 'empty'
 
 
 _KIB: Final[int] = 1024
