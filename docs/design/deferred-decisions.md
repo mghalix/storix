@@ -290,3 +290,60 @@ than riding in on 0.4.3.
 **Trigger:** a concrete ask for non-bar progress handling, or the first other
 CLI hook point - whichever comes first is the moment to design the import-from-
 config posture once, for both.
+
+## Concurrency in the sync flavor (and therefore the CLI)
+
+The async core fans out multi-target work concurrently: `cat`, `touch`, `mv`,
+`cp`, `rm`, multi-path `stat`, and `du`'s subtree walk all go through the
+`gather` shim, which in `_async/_compat.py` is `asyncio.gather` with a bounded
+semaphore. Real I/O concurrency - N Azure requests in flight at once.
+
+The sync flavor does none of it. `unasync.py` strips `await`, so a call
+expression like `backend.read(t)` executes immediately during `*` unpacking;
+by the time the sync `gather` (`_sync/_compat.py`) runs, every result is
+already computed, sequentially. The shim's own docstring says so. The CLI runs
+on the sync core, so `sx ls` with `dir_contents` does its per-subdirectory
+`is_empty` checks one after another, and `tree` walks sequentially - on cloud,
+fifty round trips where the async core would do them at once.
+
+**What this is and is not.** It is *not* the adapters being unoptimized: the
+sync backends are hand-written twins over real blocking libraries (`os`/`open`,
+the non-aio Azure SDK, `opendal.Operator`), so a *single* operation is as fast
+as the library allows, and those blocking calls release the GIL during I/O. It
+*is* the orchestration layer: concurrency across operations is the core's job
+(the `gather` sites), and sync Python has no built-in I/O concurrency. The
+bottleneck is exactly the `Storix`/`generic` fan-out, not the adapters - which
+matches the intuition that "the libraries are already optimized, the Storix
+class is the ceiling."
+
+**Codegen stays.** This does not argue for dropping unasync. The problem is
+one idiom: `gather(*(backend.op(x) for x in items))` pre-evaluates in sync
+because the arguments are computed before `gather` sees them.
+
+**Recommended fix (its own ADR + branch).** Replace the eager idiom with a
+deferred one: a `concurrent_map(fn, items, *, limit)` helper that takes the
+callable *un-invoked*.
+
+- `_async/_compat.py`: `asyncio.gather(*(fn(x) for x in items))`, bounded.
+- `_sync/_compat.py`: a bounded `ThreadPoolExecutor` mapping `fn` over `items`.
+  Because the sync backends do GIL-releasing blocking I/O, threads give genuine
+  I/O concurrency.
+
+Passing `fn` un-invoked is what lets sync defer to threads; codegen is
+untouched (only the two hand-written `_compat` twins differ, as they already
+do). Refactor the ~10 fan-out sites in `_async/core.py` and `generic.du` to the
+new helper, and move the batch-emptiness (`sx ls`) and tree traversal *into the
+core* so they use it too (today they are sequential CLI loops - the same
+"logic in the driving adapter that belongs in the core" the scandir work
+addressed for listing).
+
+**Caveats to settle in the ADR:** thread-safety of a shared backend client
+across threads (the sync Azure/opendal clients are built for concurrent calls;
+`MemoryBackend` is GIL-protected dict access - confirm each in the conformance
+suite under a thread pool); the pool bound (reuse `DEFAULT_CONCURRENCY`); and
+that error semantics stay unwrapped (first exception propagates, matching the
+async shim, so the storix taxonomy survives).
+
+**Trigger:** worth doing before the CLI is promoted for cloud-heavy use, or as
+soon as a user reports `sx ls`/`tree`/`du` being slow on a wide cloud tree.
+Independent of scandir, though scandir's `is_empty` is a prime beneficiary.

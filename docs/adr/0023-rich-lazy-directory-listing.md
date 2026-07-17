@@ -98,6 +98,13 @@ Also rejected: handing the port's `Entry` to users - it is a port DTO, and
 user-facing types map from port types (the `RawStat` -> `FileProperties`
 precedent).
 
+Rejected (not deferred): a lazy `DirEntry.stat()` in the shape of
+`os.DirEntry.stat()`. It provides no real value - `fs.stat(entry.path)` already
+returns the full `FileProperties`, so `.stat()` would only save typing - while
+costing a back-reference from the DTO to the session, turning a plain data
+holder into a session-bound object. Not recommended, no foreseeable payoff;
+closed, not parked.
+
 ## Consequences
 
 The kind/size an adapter already produced reach a consumer without a stat storm
