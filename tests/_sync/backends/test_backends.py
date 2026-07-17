@@ -48,6 +48,7 @@ from storix.types import EchoMode
         'observability',
         'opendal-memory',
         pytest.param('azure', marks=pytest.mark.integration),
+        pytest.param('azblob', marks=pytest.mark.integration),
         pytest.param('s3', marks=pytest.mark.integration),
         pytest.param('gcs', marks=pytest.mark.integration),
     ]
@@ -90,6 +91,24 @@ def backend(  # noqa: PLR0911, PLR0912, PLR0915 - one branch per backend param
         from storix._sync.backends.opendal import OpendalBackend
 
         yield OpendalBackend('memory')
+        return
+    if request.param == 'azblob':
+        container = os.environ.get('STORIX_TEST_AZBLOB_CONTAINER')
+        if not container:
+            pytest.skip('azblob integration credentials not configured')
+        from storix._sync.backends.azblob import AzureBlobBackend
+
+        azblob = AzureBlobBackend(
+            container,
+            account_name=os.environ['STORIX_TEST_AZBLOB_ACCOUNT_NAME'],
+            credential=os.environ.get('STORIX_TEST_AZBLOB_CREDENTIAL'),
+            endpoint=os.environ.get('STORIX_TEST_AZBLOB_ENDPOINT'),
+            root=f'/storix-conformance-{uuid.uuid4().hex[:12]}',
+        )
+        try:
+            yield azblob
+        finally:
+            azblob._op.remove_all('/')
         return
     if request.param == 's3':
         bucket = os.environ.get('STORIX_TEST_S3_BUCKET')

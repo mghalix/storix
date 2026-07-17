@@ -6,7 +6,7 @@ overridden per-call through ``get_storage(**overrides)``. Values are
 read from the environment and a local ``.env`` file.
 """
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -90,20 +90,38 @@ class GcsConfig(BaseSettings):
 
 
 class AzureConfig(BaseSettings):
-    """``STORIX_AZURE_*`` settings for the ADLS Gen2 backend."""
+    """``STORIX_AZURE_*`` settings for both Azure backends.
+
+    One schema serves both account kinds: container, account name, and
+    credential are all it takes. The default ``kind='auto'`` detects
+    whether the account has hierarchical namespaces (one
+    account-properties request at build time) and picks the surface:
+    the native Data Lake Gen2 backend (atomic renames, true appends)
+    for HNS accounts, the blob-endpoint backend for flat ones.
+    """
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix='STORIX_AZURE_', env_file='.env', extra='ignore'
     )
 
+    kind: Literal['auto', 'adls', 'blob'] = 'auto'
+    """Which Azure surface to speak: detected from the account by
+    default. Set ``'adls'`` or ``'blob'`` explicitly to skip the
+    detection request - required when the credential cannot read
+    account properties (container-scoped SAS, anonymous access)."""
+
     container: str | None = None
     """Container (filesystem) name; required."""
 
     account_name: str | None = None
-    """Storage account name; required. Must have HNS enabled."""
+    """Storage account name; required. The adls kind needs HNS enabled."""
 
     credential: str | None = None
-    """SAS token or account key; required."""
+    """SAS token or account key; required for adls, optional for blob
+    (``None`` means anonymous access to a public container)."""
+
+    endpoint: str | None = None
+    """Custom blob endpoint URL (emulators, sovereign clouds); blob kind only."""
 
     read_chunk_size: int = Field(default=DEFAULT_AZURE_READ_CHUNK_SIZE, gt=0)
     """Default consumer and SDK range chunk size in bytes."""

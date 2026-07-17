@@ -53,13 +53,17 @@ def test_memory_provider_rejects_configuration_overrides():
 
 
 def test_azure_from_kwargs_builds_without_network():
-    fs = get_storage('azure', container='raw', account_name='acct', credential='token')
+    # explicit kind skips auto-detection, keeping construction network-free
+    fs = get_storage(
+        'azure', kind='adls', container='raw', account_name='acct', credential='token'
+    )
     assert fs.backend.container == 'raw'
 
 
 def test_azure_transfer_overrides_reach_backend_and_sdk():
     fs = get_storage(
         'azure',
+        kind='adls',
         container='raw',
         account_name='acct',
         credential='token',
@@ -79,6 +83,7 @@ def test_azure_transfer_overrides_reach_backend_and_sdk():
 )
 def test_azure_transfer_overrides_must_be_positive(field: str):
     kwargs = {
+        'kind': 'adls',
         'container': 'raw',
         'account_name': 'acct',
         'credential': 'token',
@@ -103,6 +108,76 @@ def test_azure_missing_config_raises_helpfully(
     message = str(excinfo.value)
     assert 'container' in message
     assert 'STORIX_AZURE_' in message
+
+
+def test_azure_blob_kind_builds_the_blob_backend():
+    fs = get_storage('azure', kind='blob', container='raw', account_name='acct')
+    backend = fs.backend
+    assert type(backend).__name__ == 'AzureBlobBackend'
+    expected = 'wasbs://raw@acct.blob.core.windows.net/x.txt'
+    assert backend.locate(PurePosixPath('/x.txt')) == expected
+
+
+def test_azure_auto_kind_dispatches_on_detection(monkeypatch: pytest.MonkeyPatch):
+    # the default kind probes the account and picks the surface; the
+    # probe itself is one SDK call, faked here to keep the test offline
+    from storix._sync import factory
+
+    monkeypatch.setattr(factory, '_detect_azure_kind', lambda cfg: 'blob')
+    fs = get_storage(
+        'azure', container='raw', account_name='acct', credential='aGVsbG8='
+    )
+    assert type(fs.backend).__name__ == 'AzureBlobBackend'
+
+
+def test_azure_auto_kind_detection_is_cached(monkeypatch: pytest.MonkeyPatch):
+    # a cached detection must be reused without any probe: this fake
+    # account would otherwise fail the account-properties request
+    from storix._sync import factory
+
+    monkeypatch.setitem(factory._AZURE_KIND_CACHE, ('acct', None), 'blob')
+    fs = get_storage(
+        'azure', container='raw', account_name='acct', credential='aGVsbG8='
+    )
+    assert type(fs.backend).__name__ == 'AzureBlobBackend'
+
+
+def test_azure_kind_from_env(monkeypatch: pytest.MonkeyPatch):
+    # one STORIX_AZURE_* schema serves both kinds; only the kind flips
+    monkeypatch.setenv('STORIX_AZURE_KIND', 'blob')
+    fs = get_storage('azure', container='raw', account_name='acct')
+    assert type(fs.backend).__name__ == 'AzureBlobBackend'
+
+
+def test_azure_blob_credential_kind_is_sniffed():
+    from storix._sync.backends.azblob import AzureBlobBackend
+
+    sas = AzureBlobBackend('raw', account_name='acct', credential='sv=2024&sig=abc')
+    key = AzureBlobBackend('raw', account_name='acct', credential='aGVsbG8=')
+    # a SAS token can presign (append itself); a bare account key cannot
+    assert sas.capabilities.presigned_urls
+    assert not key.capabilities.presigned_urls
+
+
+def test_azure_blob_kind_does_not_require_a_credential(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)  # hermetic: a developer .env must not leak in
+    monkeypatch.delenv('STORIX_AZURE_CREDENTIAL', raising=False)
+    fs = get_storage('azure', kind='blob', container='public', account_name='acct')
+    assert type(fs.backend).__name__ == 'AzureBlobBackend'
+
+
+def test_azure_adls_kind_rejects_the_endpoint_override():
+    with pytest.raises(ConfigurationError, match='blob kind only'):
+        get_storage(
+            'azure',
+            kind='adls',
+            container='raw',
+            account_name='acct',
+            credential='token',
+            endpoint='http://localhost:10000/acct',
+        )
 
 
 def test_s3_from_kwargs_builds_without_network():

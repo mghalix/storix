@@ -7,8 +7,8 @@ hand; the conformance suite (integration-marked) is the drift guard.
 
 Requires a storage account with **hierarchical namespaces enabled** -
 the dfs endpoint this backend speaks only exists on HNS accounts. Flat
-(portal-default) blob accounts are not supported; enable HNS on the
-account or wait for the flat-namespace adapter.
+(portal-default) blob accounts are not supported here; use
+``AzureBlobBackend`` for those.
 """
 
 from __future__ import annotations

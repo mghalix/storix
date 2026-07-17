@@ -1526,6 +1526,9 @@ all = [
     { name = "rich" },
     { name = "typer" },
 ]
+azblob = [
+    { name = "opendal" },
+]
 azure = [
     { name = "aiohttp" },
     { name = "azure-storage-file-datalake" },
@@ -1575,6 +1578,7 @@ requires-dist = [
     { name = "azure-storage-file-datalake", marker = "extra == 'azure'", specifier = ">=12.14.0" },
     { name = "click", marker = "extra == 'cli'", specifier = ">=8.1.7" },
     { name = "loguru", marker = "extra == 'core'", specifier = ">=0.7.2" },
+    { name = "opendal", marker = "extra == 'azblob'", specifier = ">=0.47.0" },
     { name = "opendal", marker = "extra == 'gcs'", specifier = ">=0.47.0" },
     { name = "opendal", marker = "extra == 's3'", specifier = ">=0.47.0" },
     { name = "pydantic", marker = "extra == 'core'", specifier = ">=2.0.0" },
@@ -1582,12 +1586,12 @@ requires-dist = [
     { name = "python-magic", marker = "extra == 'core'", specifier = ">=0.4.27" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13.0.0" },
     { name = "storix", extras = ["core", "local"] },
-    { name = "storix", extras = ["local", "azure", "s3", "gcs", "cli"], marker = "extra == 'all'" },
+    { name = "storix", extras = ["local", "azure", "azblob", "s3", "gcs", "cli"], marker = "extra == 'all'" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.13.0" },
     { name = "wrapt", marker = "extra == 'core'", specifier = ">=2.0.1" },
     { name = "zensical", specifier = "==0.0.50" },
 ]
-provides-extras = ["core", "local", "azure", "s3", "gcs", "cli", "all"]
+provides-extras = ["core", "local", "azure", "azblob", "s3", "gcs", "cli", "all"]
 
 [package.metadata.requires-dev]
 dev = [
