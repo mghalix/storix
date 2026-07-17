@@ -21,6 +21,16 @@ uv add rich
 Attach the layer outermost (the last `with_layer`) so it counts the full
 logical transfer, whatever other layers sit below it.
 
+!!! warning "The demo materializes its payload"
+
+    The sample builds its whole 64 MiB payload as one `bytes` object up
+    front, purely to keep the example short and the total known. Multiply
+    the size by 50 for a slow-motion bar, but expect roughly 3 GiB of RAM
+    for that payload object alone. The cost is the demo's source
+    construction, not storix: `echo` and `stream` move data chunk by chunk
+    either way, and a real application would stream from a file or socket
+    without ever holding the total in memory.
+
 ## No total? Count bytes
 
 A truly unbounded source (a generator, a pipe) has no end to know. Render a
