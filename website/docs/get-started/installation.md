@@ -8,8 +8,8 @@ Storix requires Python 3.12 or newer.
 
     ```bash
     uv add storix             # local filesystem + in-memory
-    uv add "storix[azure]"    # + Azure Data Lake Gen2 (HNS accounts)
-    uv add "storix[azblob]"   # + Azure Blob Storage (any account kind)
+    uv add "storix[azure]"    # + all of Azure Storage (ADLS Gen2 + Blob)
+    uv add "storix[azblob]"   # + Azure Blob only (lean install)
     uv add "storix[s3]"       # + Amazon S3 (and MinIO, R2, ...)
     uv add "storix[gcs]"      # + Google Cloud Storage
     uv add "storix[cli]"      # + the sx command-line interface
@@ -35,8 +35,8 @@ optional extras so you only pull in a provider SDK when you need it.
 | Extra | Adds |
 | --- | --- |
 | (none) | `LocalBackend`, `MemoryBackend` |
-| `azure` | `AzureBackend` (Azure Data Lake Gen2, hierarchical namespace accounts) |
-| `azblob` | `AzureBlobBackend` (Azure Blob Storage, any account kind, flat included) |
+| `azure` | `AzureBackend` + `AzureBlobBackend`: all of Azure Storage, any account kind, with auto-detection |
+| `azblob` | `AzureBlobBackend` only: lean blob-only install (pass `kind="blob"` explicitly) |
 | `s3` | `S3Backend` (Amazon S3, plus S3-compatible stores like MinIO and R2) |
 | `gcs` | `GcsBackend` (Google Cloud Storage) |
 | `cli` | the `sx` command-line interface and interactive shell |

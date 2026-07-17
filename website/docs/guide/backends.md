@@ -8,7 +8,7 @@ the same session code runs over any of them.
 | `LocalBackend` | `storix.backends.LocalBackend` | real files on disk, anchored at a base directory |
 | `MemoryBackend` | `storix.backends.MemoryBackend` | tests and scratch work; nothing touches disk |
 | `AzureBackend` | `storix.backends.AzureBackend` | Azure Data Lake Gen2 (hierarchical namespace accounts) |
-| `AzureBlobBackend` | `storix.backends.AzureBlobBackend` | Azure Blob Storage, any account kind, flat included (`azblob` extra) |
+| `AzureBlobBackend` | `storix.backends.AzureBlobBackend` | Azure Blob Storage, any account kind, flat included (`azure` extra, or lean `azblob`) |
 | `S3Backend` | `storix.backends.S3Backend` | Amazon S3, and S3-compatible stores (MinIO, R2) via `endpoint` (`s3` extra) |
 | `GcsBackend` | `storix.backends.GcsBackend` | Google Cloud Storage (`gcs` extra) |
 

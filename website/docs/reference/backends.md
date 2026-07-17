@@ -9,7 +9,7 @@ concepts.
 ```python
 from storix.backends import LocalBackend, MemoryBackend
 from storix.backends import AzureBackend       # requires the 'azure' extra
-from storix.backends import AzureBlobBackend   # requires the 'azblob' extra
+from storix.backends import AzureBlobBackend   # 'azure' extra (or lean 'azblob')
 from storix.backends import S3Backend          # requires the 's3' extra
 from storix.backends import GcsBackend         # requires the 'gcs' extra
 ```
