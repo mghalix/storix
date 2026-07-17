@@ -44,10 +44,14 @@ from storix.types import EchoMode
         'dataurl',
         'cache',
         'observability',
+        'opendal-memory',
         pytest.param('azure', marks=pytest.mark.integration),
+        pytest.param('azblob', marks=pytest.mark.integration),
+        pytest.param('s3', marks=pytest.mark.integration),
+        pytest.param('gcs', marks=pytest.mark.integration),
     ]
 )
-async def backend(  # noqa: PLR0911 - one early return per backend param
+async def backend(  # noqa: PLR0911, PLR0912, PLR0915 - one branch per backend param
     request: pytest.FixtureRequest, tmp_path: Path
 ) -> AsyncIterator[StorageBackend]:
     if request.param == 'memory':
@@ -78,6 +82,68 @@ async def backend(  # noqa: PLR0911 - one early return per backend param
     if request.param == 'observability':
         # no sink set: the layer must be a pure passthrough
         yield ObservabilityLayer(MemoryBackend())
+        return
+    if request.param == 'opendal-memory':
+        # the internal engine over its credential-free memory service:
+        # keeps every engine code path in the default (non-integration) run
+        from storix._async.backends.opendal import OpendalBackend
+
+        yield OpendalBackend('memory')
+        return
+    if request.param == 'azblob':
+        container = os.environ.get('STORIX_TEST_AZBLOB_CONTAINER')
+        if not container:
+            pytest.skip('azblob integration credentials not configured')
+        from storix._async.backends.azblob import AzureBlobBackend
+
+        azblob = AzureBlobBackend(
+            container,
+            account_name=os.environ['STORIX_TEST_AZBLOB_ACCOUNT_NAME'],
+            credential=os.environ.get('STORIX_TEST_AZBLOB_CREDENTIAL'),
+            endpoint=os.environ.get('STORIX_TEST_AZBLOB_ENDPOINT'),
+            root=f'/storix-conformance-{uuid.uuid4().hex[:12]}',
+        )
+        try:
+            yield azblob
+        finally:
+            await azblob._op.remove_all('/')
+        return
+    if request.param == 's3':
+        bucket = os.environ.get('STORIX_TEST_S3_BUCKET')
+        if not bucket:
+            pytest.skip('s3 integration credentials not configured')
+        from storix._async.backends.s3 import S3Backend
+
+        s3 = S3Backend(
+            bucket,
+            region=os.environ.get('STORIX_TEST_S3_REGION', 'us-east-1'),
+            access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
+            secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
+            endpoint=os.environ.get('STORIX_TEST_S3_ENDPOINT'),
+            # a per-run root keeps concurrent runs isolated and cleanup exact
+            root=f'/storix-conformance-{uuid.uuid4().hex[:12]}',
+        )
+        try:
+            yield s3
+        finally:
+            await s3._op.remove_all('/')
+        return
+    if request.param == 'gcs':
+        bucket = os.environ.get('STORIX_TEST_GCS_BUCKET')
+        if not bucket:
+            pytest.skip('gcs integration credentials not configured')
+        from storix._async.backends.gcs import GcsBackend
+
+        gcs = GcsBackend(
+            bucket,
+            credential_path=os.environ.get('STORIX_TEST_GCS_CREDENTIAL_PATH'),
+            endpoint=os.environ.get('STORIX_TEST_GCS_ENDPOINT'),
+            root=f'/storix-conformance-{uuid.uuid4().hex[:12]}',
+        )
+        try:
+            yield gcs
+        finally:
+            await gcs._op.remove_all('/')
         return
 
     account = os.environ.get('ADLSG2_ACCOUNT_NAME')
