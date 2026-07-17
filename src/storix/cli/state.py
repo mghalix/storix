@@ -28,7 +28,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from storix import Storix
-    from storix.backends import StorageBackend
     from storix.types import StrPathLike
 
 
@@ -154,7 +153,7 @@ def _sandboxed(fs: Storix, *, root: str) -> Storix:
     except StorageError as exc:  # an unreachable backend, not a missing root
         message = f'sx: cannot verify sandbox root {resolved}: {exc}'
         raise SystemExit(message) from exc
-    provider = type(base_backend(fs)).__name__
+    provider = type(fs.base_backend).__name__
     message = (
         f'sx: sandbox root {resolved} {problem} on {provider} '
         f'(create it first, or point --sandbox / the config layer elsewhere)'
@@ -219,11 +218,6 @@ def stack_from_prefs(fs: Storix) -> Storix:
 def cache_layer(fs: Storix) -> CacheLayer | None:
     """The active ``CacheLayer`` in the session's stack, if any."""
     return next((la for la in fs.layers if isinstance(la, CacheLayer)), None)
-
-
-def base_backend(fs: Storix) -> StorageBackend:
-    """The real backend under any layers (the actual provider)."""
-    return fs.base_backend
 
 
 # op name -> the CLI verbs it accelerates, for the layer summary

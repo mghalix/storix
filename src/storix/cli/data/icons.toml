@@ -5,13 +5,14 @@
 # Lookup order: exact [name] match, then [ext], then the [file] default.
 
 [dir]
-# empty and full are the same folder, hollow vs filled, so the two read
-# as one pair at a glance: hollow says "nothing here, rmdir if you like",
-# filled says "there is something to ls or cd into".
-icon = "\uf07b"  # nf-fa-folder: contents not looked at
-full = "\uf07b"  # nf-fa-folder: known to hold something (filled)
-empty = "\uf114"  # nf-fa-folder_o: known empty (hollow outline)
+# the open/closed box metaphor: an OPEN folder when empty (you can see in,
+# nothing there, rmdir if you like) and a CLOSED colored folder when it
+# holds something worth a cd. Contents-unknown falls back to closed.
+icon = "\uf07b"  # nf-fa-folder: closed, contents not looked at
+full = "\uf07b"  # nf-fa-folder: closed, known to hold something
+empty = "\uf07c"  # nf-fa-folder_open: open, known empty
 style = "bold blue"
+empty_style = "dim"  # empty recedes; only a full folder gets the color
 
 [file]
 icon = "\uf016"  # nf-fa-file_o: no more specific match

@@ -159,14 +159,14 @@ def test_apply_layers_none_is_passthrough():
 
 
 def test_base_backend_surfaces_the_provider_under_the_stack():
-    from storix.cli.state import apply_layers, base_backend
+    from storix.cli.state import apply_layers
 
     base = Storix(MemoryBackend())
     base.mkdir('/jail')
     fs = apply_layers(base, cache=True, cache_ttl=None, sandbox='/jail')
 
     # the real provider, not the outermost layer the shell would otherwise name
-    assert type(base_backend(fs)).__name__ == 'MemoryBackend'
+    assert type(fs.base_backend).__name__ == 'MemoryBackend'
 
 
 def test_url_expire_flag_is_accepted():
@@ -227,13 +227,13 @@ def test_credentials_in_the_cli_table_are_rejected_not_ignored(prefs_from):
 
 
 def test_configured_provider_opens_that_backend(prefs_from):
-    from storix.cli.state import base_backend, build_base
+    from storix.cli.state import build_base
 
     prefs_from("[cli]\nprovider = 'memory'\n")
 
-    assert type(base_backend(build_base())).__name__ == 'MemoryBackend'
+    assert type(build_base().base_backend).__name__ == 'MemoryBackend'
     # an explicit -p still wins over the configured default
-    assert type(base_backend(build_base('local'))).__name__ == 'LocalBackend'
+    assert type(build_base('local').base_backend).__name__ == 'LocalBackend'
 
 
 def test_sandbox_root_that_is_not_there_fails_fast(prefs_from):

@@ -41,7 +41,6 @@ from .state import (
     _fs,
     _session,
     apply_layers,
-    base_backend,
     build_base,
     build_session,
     current_fs,
@@ -490,7 +489,7 @@ def upload(
 def provider() -> None:
     """Show the active backend and where it is anchored."""
     fs = _fs()
-    console.print(f'[green]backend:[/green] {type(base_backend(fs)).__name__}')
+    console.print(f'[green]backend:[/green] {type(fs.base_backend).__name__}')
     console.print(f'[green]cwd:[/green]     {fs.pwd()}')
     console.print(f'[green]home:[/green]    {fs.home}')
     console.print(f'[green]root uri:[/green] {fs.locate("/")}')

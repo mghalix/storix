@@ -1,12 +1,19 @@
-# S3, GCS, and Azure Blob
+# S3, GCS, and Azure
 
-`S3Backend`, `GcsBackend`, and `AzureBlobBackend` run the whole storix surface
-(sessions, layers, capabilities, the conformance-tested port semantics) over
-the big object stores. Explicit, typed constructors; no provider SDK
+`S3Backend`, `GcsBackend`, and the two Azure backends run the whole storix
+surface (sessions, layers, capabilities, the conformance-tested port semantics)
+over the big object stores. Explicit, typed constructors; no provider SDK
 vocabulary to learn.
 
+Azure has two backends because the account kind matters: `AzureBackend` speaks
+the Data Lake Gen2 endpoint (hierarchical-namespace accounts, with atomic
+renames and true appends), `AzureBlobBackend` speaks the plain blob endpoint
+(any account, flat included). The `azure` provider detects which you have and
+builds the right one, so the recipe below is the same for both - see the
+[backends guide](../guide/backends.md) for the per-kind differences.
+
 ```bash
-uv add "storix[s3]"    # or "storix[gcs]", "storix[azblob]"
+uv add "storix[s3]"    # or "storix[gcs]", "storix[azure]"
 ```
 
 ## S3
@@ -65,12 +72,12 @@ fs = get_storage(
 Omitting the credential resolves through Google's application default
 credentials, so on GCE/GKE the bucket alone is usually enough.
 
-## Azure Blob (flat accounts)
+## Azure
 
 One `azure` provider covers both account kinds: it detects whether the
-account has hierarchical namespaces and builds `AzureBackend` (HNS) or
-`AzureBlobBackend` (flat) accordingly. You never have to know which one you
-have:
+account has hierarchical namespaces and builds `AzureBackend` (Data Lake Gen2)
+or `AzureBlobBackend` (flat blob) accordingly. You never have to know which one
+you have:
 
 ```python
 fs = get_storage(

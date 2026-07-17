@@ -22,7 +22,6 @@ from typer.main import get_command
 from .app import app
 from .render import console, entry_decor
 from .state import (
-    base_backend,
     cache_layer,
     current_fs,
     layer_summary,
@@ -166,7 +165,7 @@ def start_shell(fs: Storix | None = None) -> None:
     )
 
     console.print('[bold blue]storix shell[/bold blue]')
-    console.print(f'connected to [green]{type(base_backend(fs)).__name__}[/green]')
+    console.print(f'connected to [green]{type(fs.base_backend).__name__}[/green]')
     summary = layer_summary(fs)
     if summary:
         tip = ' · type [cyan]refresh[/cyan] to clear' if cache_layer(fs) else ''

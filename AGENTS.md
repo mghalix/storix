@@ -92,7 +92,27 @@ Hexagonal: one core engine over one small port.
 
 Design rationale is recorded as ADRs in `docs/adr/`; the roadmap is
 `docs/roadmap.md`. The public documentation site is a separate Zensical project
-under `website/` (not part of the shipped package).
+under `website/` (not part of the shipped package). The ports-and-adapters
+framing (what is the core, the driven port, an adapter, a driving adapter) is
+`docs/design/architecture.md`.
+
+### The core boundary: interfaces never grow logic the core should own
+
+`Storix` is the application core; `sx` (and any future front-end: a pathlike
+adapter, a flat facade, an MCP server) is a driving adapter over it. A driving
+adapter presents the core, it does not extend it. So when you are building an
+interface and reach for something that is missing - a listing that keeps the
+kind/size the port already produced, an "is this directory empty" check, a way
+to read the layer stack without touching a private `_inner` - that gap is in
+the core, not a thing to quietly reimplement in the interface.
+
+Do not silently add it to the interface. Stop, and take it to the maintainer
+with a proposed core change; a new ADR may be warranted (it usually is, since
+it is a core-interface change). Proceed only once it is agreed. A capability
+re-implemented in `sx` is a capability the next front-end re-implements again,
+and core semantics that live in two places drift. The one exception is a
+genuine "the core cannot express this" - state why in a comment, as
+`_sandboxed` does for constructor-time I/O in a pure layer.
 
 ## Testing
 

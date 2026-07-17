@@ -207,14 +207,29 @@ shared with the library. Set it via STORIX_AZURE_* (env or .env).
 | `dir_contents` | `true` | Show whether a directory is empty in flat listings |
 | `layers` | `[]` | The always-on layer stack, innermost first |
 
-!!! note "What `dir_contents` costs"
+#### `dir_contents`: the empty-folder icon, and what it costs
 
-    A plain listing says which entries are directories, never whether they
-    hold anything, so `ls` looks: one extra listing per subdirectory, which
-    on an object store is a round trip each. That buys a real distinction -
-    the same folder glyph hollow when it is empty (nothing to see, `rmdir`
-    if you like) and filled when it holds something (worth a `cd`). A cache
-    layer absorbs the repeats; set `dir_contents = false` to trade the
-    distinction for a single request per `ls`, which falls back to the
-    filled folder for every directory. `tree` is unaffected - it already
-    reads every directory it draws.
+A directory listing tells you an entry *is* a directory. It does not tell you
+whether that directory is empty - that answer is a second lookup, listing the
+directory itself and seeing if anything comes back. `dir_contents` controls
+whether `ls` takes that lookup so it can show an **open** folder for an empty
+directory (nothing there, `rmdir` if you like) and a **closed** colored folder
+for one that holds something (worth a `cd`).
+
+This is not an Azure quirk. Every backend needs the extra lookup - a local
+`ls -l` in your shell does exactly the same readdir. The difference is price.
+On local disk the lookup is a cheap syscall, which is why tools like `eza`
+just always do it. On an object store each lookup is a network round trip, so
+on a directory of fifty subdirectories `ls` goes from one request to
+fifty-one. `dir_contents` exists because storix reaches cloud storage where
+`eza` does not, so the cost is worth a choice:
+
+- Leave it `true` (the default) for the accurate empty/full distinction. A
+  `cache` layer absorbs the repeat lookups, so an interactive session pays
+  the cost once.
+- Set it `false` to make `ls` a single request again - every directory then
+  shows the closed folder, empty or not. Also the right setting if you do not
+  use icons at all and just want `ls` fast.
+
+`tree` ignores this preference: it descends into every directory anyway, so it
+already knows which are empty at no extra cost.

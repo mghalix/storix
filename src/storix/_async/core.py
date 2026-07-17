@@ -95,13 +95,15 @@ class Storix:
         return self._backend
 
     @property
-    def layers(self) -> list[StorageBackend]:
+    def layers(self) -> tuple[StorageBackend, ...]:
         """The active layers, outermost first (empty when there are none).
 
         Reading the stack is a legitimate need - a UI naming what wraps a
         session, an audit trail recording it - and the alternative is
         duck-typing on a layer's private ``_inner``, which is nobody
-        else's business. Composition stays the core's::
+        else's business. A tuple, because this is a snapshot to read, not
+        the stack to edit: composition stays with ``with_layer`` /
+        ``without_layer``::
 
             any(isinstance(layer, CacheLayer) for layer in fs.layers)
 
@@ -114,7 +116,7 @@ class Storix:
         while (inner := getattr(node, '_inner', None)) is not None:
             stack.append(node)
             node = inner
-        return stack
+        return tuple(stack)
 
     @property
     def base_backend(self) -> StorageBackend:

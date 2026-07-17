@@ -673,7 +673,7 @@ def test_layers_is_empty_without_any():
     inner = MemoryBackend()
     fs = Storix(inner)
 
-    assert fs.layers == []
+    assert fs.layers == ()
     assert fs.base_backend is inner is fs.backend
 
 
