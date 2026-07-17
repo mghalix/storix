@@ -218,20 +218,12 @@ def stack_from_prefs(fs: Storix) -> Storix:
 
 def cache_layer(fs: Storix) -> CacheLayer | None:
     """The active ``CacheLayer`` in the session's stack, if any."""
-    node: StorageBackend | None = fs.backend
-    while node is not None:
-        if isinstance(node, CacheLayer):
-            return node
-        node = getattr(node, '_inner', None)
-    return None
+    return next((la for la in fs.layers if isinstance(la, CacheLayer)), None)
 
 
 def base_backend(fs: Storix) -> StorageBackend:
-    """The innermost real backend under any layers (the actual provider)."""
-    node: StorageBackend = fs.backend
-    while (inner := getattr(node, '_inner', None)) is not None:
-        node = inner
-    return node
+    """The real backend under any layers (the actual provider)."""
+    return fs.base_backend
 
 
 # op name -> the CLI verbs it accelerates, for the layer summary
@@ -241,19 +233,18 @@ _CACHE_VERBS = {'metadata': 'ls/stat', 'du': 'du', 'read': 'cat', 'url': 'url'}
 def layer_summary(fs: Storix) -> str | None:
     """A one-line description of the active layer stack (outermost first)."""
     parts: list[str] = []
-    node: StorageBackend | None = fs.backend
-    while node is not None:
-        if isinstance(node, CacheLayer):
-            verbs = '/'.join(_CACHE_VERBS[o] for o in node.enabled if o in _CACHE_VERBS)
-            via = '+'.join(node.store_names())
+    for layer in fs.layers:
+        if isinstance(layer, CacheLayer):
+            ops = (o for o in layer.enabled if o in _CACHE_VERBS)
+            verbs = '/'.join(_CACHE_VERBS[o] for o in ops)
+            via = '+'.join(layer.store_names())
             parts.append(f'cache {verbs} via {via}')
-        elif isinstance(node, SandboxLayer):
-            parts.append(f'sandbox {node.to_real("/")}')  # public audit handle
-        elif isinstance(node, DataUrlLayer):
+        elif isinstance(layer, SandboxLayer):
+            parts.append(f'sandbox {layer.to_real("/")}')  # public audit handle
+        elif isinstance(layer, DataUrlLayer):
             parts.append('url via data: URLs')
-        elif isinstance(node, MetadataLayer):
+        elif isinstance(layer, MetadataLayer):
             parts.append('metadata via sidecars')
-        node = getattr(node, '_inner', None)
     return ' · '.join(parts) if parts else None
 
 

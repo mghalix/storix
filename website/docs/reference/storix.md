@@ -58,10 +58,28 @@ sandbox. Use it for audit and cross-system references.
 ### Properties
 
 ```python
-backend -> StorageBackend   # the raw port, for backend-specific calls
-root    -> StorixPath       # always '/'
-home    -> StorixPath       # the '~' anchor
+backend      -> StorageBackend         # the raw port, for backend-specific calls
+base_backend -> StorageBackend         # the real provider, under any layers
+layers       -> list[StorageBackend]   # the active layers, outermost first
+root         -> StorixPath             # always '/'
+home         -> StorixPath             # the '~' anchor
 ```
+
+`backend` hands back the outermost object, which is whatever layer wraps the
+session; `base_backend` walks past the layers to the thing that really talks
+to storage, and `layers` reports what sits in between:
+
+```python
+from storix import CacheLayer
+
+fs = get_storage("azure").with_layer(CacheLayer, du=True)
+type(fs.base_backend).__name__                            # 'AzureBackend'
+[type(layer).__name__ for layer in fs.layers]             # ['CacheLayer']
+any(isinstance(layer, CacheLayer) for layer in fs.layers) # True
+```
+
+Layers are identified structurally, so your own show up beside the built-ins.
+The list is empty on an unwrapped session.
 
 ## Reading
 

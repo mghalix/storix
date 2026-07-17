@@ -217,3 +217,40 @@ natural and the REPL becomes one pane. The TUI is the honest end state if
 context, or when a TUI mode is on the table for other reasons. Whatever
 lands must keep the plain prompt as the default; the shell earning its keep
 by looking like a shell is the constraint, not a nice-to-have.
+
+## `scandir`: listing entries without throwing away what the port said
+
+`Storix.ls()` returns `list[StorixPath]` - names only. The port's `list_dir`
+already yields `Entry(name, is_dir, size)`, and backends fill `size` in for
+free where their listing carries it (LocalBackend's `scandir`, opendal's
+`list`). The core discards both facts on the way out.
+
+So any consumer that needs kind or size per entry has two bad options: stat
+every entry (N extra round trips on an object store), or drop to
+`fs.backend.list_dir()` and re-implement what `ls` does around it - resolve
+the target, handle "listing a file returns the file", filter hidden names via
+`pathops.is_hidden`, sort. The `sx` CLI does the second (`cli/state.py:
+list_entries`), which means core listing semantics now live in two places and
+can drift.
+
+**Shape:** a `scandir(path, *, all=False) -> list[Entry]` on the session -
+unix-flavored name, matching `os.scandir`, additive, and it keeps `ls` as the
+simple thing it should stay. `ls` becomes a thin projection of it. Then
+`list_entries` in the CLI deletes, and a future `pathlike` / flat facade / MCP
+front-end gets the same data without rediscovering the trick.
+
+**Open questions:** whether `Entry` (a port DTO) is the right thing to hand a
+user, or whether it should shape into a user-facing model the way `stat` maps
+`RawStat` -> `FileProperties`; and how `abs=` interacts (`Entry.name` is a
+basename, so the caller joins).
+
+**Related:** an `isempty(path)` / `has_children` primitive - "does this
+directory hold anything" answered with one listing stopped at the first entry.
+The CLI has it (`cli/state.py: has_children`) to drive its empty-vs-full
+folder icons, and it is generally useful (guarding an `rmdir`, deciding
+whether to recurse). Same question of where it belongs.
+
+**Trigger:** the second consumer. `sx` alone justified neither, but a
+`pathlike` adapter or the flat facade (both on the 0.4.0 adoption list) would
+need exactly this, and that is the moment to design it properly rather than
+copy `list_entries` a third time.

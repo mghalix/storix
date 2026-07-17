@@ -648,6 +648,35 @@ def test_observability_layer_awaits_an_async_sink():
     assert [e.transferred for e in events] == [3]
 
 
+# --- stack introspection ---
+
+
+def test_layers_reports_the_stack_outermost_first():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer, SandboxLayer
+
+    inner = MemoryBackend()
+    inner.make_dir(P('/jail'), parents=False)
+    fs = Storix(CacheLayer(SandboxLayer(inner, root='/jail')))
+
+    # reading the stack needs no duck-typing on a layer's private _inner
+    assert [type(layer).__name__ for layer in fs.layers] == [
+        'CacheLayer',
+        'SandboxLayer',
+    ]
+    assert fs.base_backend is inner  # past the layers, the real provider
+
+
+def test_layers_is_empty_without_any():
+    from storix._sync import Storix
+
+    inner = MemoryBackend()
+    fs = Storix(inner)
+
+    assert fs.layers == []
+    assert fs.base_backend is inner is fs.backend
+
+
 # --- without_layer / uncached ---
 
 

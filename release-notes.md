@@ -8,6 +8,13 @@ CLI. See ADR 0022.
 
 ### Added
 
+- `Storix.layers` reports the active layers, outermost first, and
+  `Storix.base_backend` walks past them to the real provider. Reading the
+  stack is a legitimate need - naming what wraps a session, recording it in an
+  audit trail - and the alternative was duck-typing on a layer's private
+  `_inner`, which is what the CLI had been doing. Composition stays with
+  `with_layer` / `without_layer`; layers are identified structurally, so
+  custom ones appear beside the built-ins.
 - The interactive shell runs on `prompt_toolkit`: Tab completes command names
   (with their descriptions) and remote paths, directories complete with a
   trailing slash, and arrow-key history works. Completion sources a live

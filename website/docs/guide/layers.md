@@ -127,5 +127,18 @@ fs.without_layer(CacheLayer).du("/big")
 A `SandboxLayer` is deliberately non-removable. You can always ask for less
 caching; you can never ask your way out of a security boundary.
 
+## Reading the stack
+
+`fs.layers` reports what is wrapping a session, outermost first, and
+`fs.base_backend` walks past all of it to the real provider:
+
+```python
+[type(layer).__name__ for layer in fs.layers]   # ['CacheLayer', 'SandboxLayer']
+type(fs.base_backend).__name__                  # 'AzureBackend'
+```
+
+Use it to show a user what is active, or to record it in an audit trail. It
+is read-only: composition stays with `with_layer` / `without_layer`.
+
 To build middleware of your own, see the runnable
 [custom layer recipe](../recipes/custom-layer.md).

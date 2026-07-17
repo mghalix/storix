@@ -97,6 +97,41 @@ class Storix:
         return self._backend
 
     @property
+    def layers(self) -> list[StorageBackend]:
+        """The active layers, outermost first (empty when there are none).
+
+        Reading the stack is a legitimate need - a UI naming what wraps a
+        session, an audit trail recording it - and the alternative is
+        duck-typing on a layer's private ``_inner``, which is nobody
+        else's business. Composition stays the core's::
+
+            any(isinstance(layer, CacheLayer) for layer in fs.layers)
+
+        The base backend is *not* included; it is ``base_backend``. Layers
+        are identified structurally (anything wrapping an inner backend),
+        so custom layers appear alongside the built-ins.
+        """
+        stack: list[StorageBackend] = []
+        node = self._backend
+        while (inner := getattr(node, '_inner', None)) is not None:
+            stack.append(node)
+            node = inner
+        return stack
+
+    @property
+    def base_backend(self) -> StorageBackend:
+        """The real backend under any layers - the actual provider.
+
+        ``backend`` hands back the outermost object, which is whatever
+        layer happens to wrap the session; this walks past them to the
+        thing that really talks to storage.
+        """
+        node = self._backend
+        while (inner := getattr(node, '_inner', None)) is not None:
+            node = inner
+        return node
+
+    @property
     def root(self) -> StorixPath:
         """The filesystem root (always ``/``)."""
         return _ROOT
