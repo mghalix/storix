@@ -83,4 +83,7 @@ sx -p azure ls /   # point it at a configured provider
 If you run the launcher without the extra, it exits with the install command
 instead of an optional-dependency traceback.
 
+Tab completion, icons, transfer progress bars, and the persistent config file
+are covered in [The sx CLI](../guide/cli.md).
+
 Next: the [Quickstart](quickstart.md).

@@ -1,5 +1,89 @@
 # Release Notes
 
+## [0.4.3] - 2026-07-17
+
+The `sx` revamp: completion, progress, icons, unix-consistent output, and a
+persistent config file. Library code is untouched; every change lives in the
+CLI. See ADR 0022.
+
+### Added
+
+- The interactive shell runs on `prompt_toolkit`: Tab completes command names
+  (with their descriptions) and remote paths, directories complete with a
+  trailing slash, and arrow-key history works. Completion sources a live
+  listing, so an active cache layer makes repeats instant.
+- `upload` and `download` render a live progress bar driven by the
+  `ObservabilityLayer`. `sx` owns the total (the local file's size for an
+  upload, `stat` for a download) and the layer supplies transferred bytes, per
+  ADR 0019.
+- Listings decorate entries with Nerd Font icons, the glyph set eza and
+  nvim-web-devicons draw from, with per-category colors. The table ships as
+  package data (`storix/cli/data/icons.toml`), so retheming is a data edit.
+  Icons disable automatically when output is not a terminal.
+- A persistent config file for CLI preferences and an always-on layer stack
+  (ADR 0022). Precedence, strongest first: flags, the nearest project config
+  (`storix.toml` > `.storix.toml` > `pyproject.toml [tool.storix.cli]`, found
+  by walking upward), `STORIX_CLI_*` environment variables,
+  `~/.config/storix/config.toml`, defaults. The ordered `[[cli.layers]]` array
+  resolves the curated CLI layer set (`cache`, `sandbox`) by name, completing
+  the DSL ADR 0015 deferred. Unknown keys, and connection settings put in the
+  CLI table by mistake, exit with the correct home named rather than being
+  silently ignored.
+- `ls -t` (sort by modification time) and `-r` (reverse); `tree -a`; `du -h`;
+  `--icons/--no-icons`.
+
+### Changed
+
+- `du -h` and `ls -l` humanize sizes in binary units with coreutils'
+  single-letter suffixes (`165M`), matching `du -h` / `numfmt --to=iec
+  --round=up` exactly, including the boundary where rounding promotes the unit.
+- `tree` closes with unix tree's `N directories, M files` summary, counts the
+  root directory as tree does, and reads entry kinds from the listing instead
+  of a stat per child (one request per level).
+- `upload` detects a content type (extension first, else sniffing the head)
+  and sets it on backends advertising the `content_type` capability. Uploads
+  previously left Azure to default every blob to `application/octet-stream`.
+- `upload` and `download` stream instead of materializing the whole file, so a
+  transfer larger than memory succeeds.
+- `du` echoes the path as given rather than the resolved one, like unix `du`.
+- The CLI package is split by concern: `app` (commands), `state` (session and
+  layer-stack access), `render` (consoles, icons, sizes), `config`
+  (preferences), `shell` (REPL), `data/` (assets).
+- The `cli` extra gained `prompt-toolkit`; the launcher's missing-extra guard
+  covers it.
+
+### Fixed
+
+- Directory icons no longer imply contents they have not checked: flat
+  listings use a closed folder, while `tree`, which enumerates children
+  anyway, shows an open folder for populated directories and an outline for
+  empty ones.
+- Well-known filenames (`Makefile`, `Dockerfile`, `pyproject.toml`,
+  `.gitignore`, ...) get their own icon instead of the generic file glyph.
+
+## [0.4.2] - 2026-07-16
+
+Object stores: S3, GCS, and Azure Blob through the first external backend
+adapter. See ADR 0020.
+
+### Added
+
+- `S3Backend` and `GcsBackend` over an internal opendal engine, reaching
+  Amazon S3, S3-compatible stores (MinIO, R2), and Google Cloud Storage, with
+  the `s3` and `gcs` extras.
+- `AzureBlobBackend` and a self-detecting `azure` provider that builds either
+  Azure backend from one schema, so a flat (non-HNS) account works without
+  code changes.
+- Lean install profiles: `azadls` (ADLS Gen2 only) and `azblob` (blob only);
+  `azure` composes the two.
+- Documentation for the object-store backends: guide, reference, install
+  profiles, a recipe, and an S3 sample against a throwaway local MinIO.
+
+### Fixed
+
+- `storix[azure]` bundles the blob engine, and optional-dependency errors name
+  the exact extra to install.
+
 ## [0.4.1] - 2026-07-16
 
 Transfer progress as composable observability events, with documentation,

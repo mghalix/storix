@@ -159,3 +159,35 @@ painful.
 **Trigger:** deferred behind backend breadth (adoption comes first). Revisit
 only after closing the taxonomy; that migration is the gating work, not the
 Gate itself.
+
+## CLI packaging: workspace member / separate distribution
+
+The sx CLI lives at `src/storix/cli/` inside the one distribution, gated by
+the `cli` extra plus a launcher guard (missing deps exit with the install
+command). During the 0.4.3 revamp it was modularized into separate-concern
+modules (`app` commands, `state` session, `render` presentation, `config`
+prefs, `shell` REPL, `data/` assets), which raised the question: should it
+become its own package - a uv workspace member under `src/` (tau-style
+multi-package layout), or a separate repo like FastAPI's `fastapi-cli`?
+
+**Why deferred, not done:** the wanted decoupling already mostly exists.
+Install-time separation comes from the extra (without it the subpackage is
+inert); test separation is a directory split, not a packaging problem; and
+`from storix.cli import ...` being useless to library users is true but
+harmless. A second distribution costs a second PyPI project, a second
+version released in lockstep, and an extra that depends on a package that
+depends back on storix (workable - airflow providers, `fastapi[standard]`
+-> fastapi-cli - but real release ops) while buying a single-maintainer 0.x
+project nothing today. The modern pattern for "CLI over a library" IS the
+fastapi-cli / uv-workspace-member shape, so the destination is agreed; only
+the timing is deferred.
+
+**Prep already done:** the module boundaries mean the future split is a
+directory move plus a pyproject, not a redesign.
+
+**Trigger:** revisit when any of these arrives - sx grows its own release
+cadence (shipping CLI fixes without library releases), a heavy CLI-only
+dependency (a TUI), or a second front-end that should share the CLI's
+packaging (the MCP server from the 0.5.0 agent story). First step then:
+uv workspace member `storix-cli` under this repo; a separate repo only if
+its issue tracker and release notes stop overlapping storix's.

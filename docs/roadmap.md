@@ -51,18 +51,21 @@ Ship bundled as 0.4.1 or as successive patches:
   and library consumers with zero core churn. The consumer owns the total
   (a percentage needs one; storix only knows bytes-so-far). First slice of
   the audit story (op-level events later), not a throwaway (ADR 0019)
-- 0.4.2 `OpendalBackend`: first external adapter, async-native + presign,
+- [x] 0.4.2 `OpendalBackend`: first external adapter, async-native + presign,
   spike-gated (ADR 0020)
-- 0.4.3 `sx` UX: prompt_toolkit autocomplete + upload/download progress
-  bars over the ObservabilityLayer
+- [x] 0.4.3 `sx` UX: prompt_toolkit autocomplete + upload/download progress
+  bars over the ObservabilityLayer; grew into the full CLI revamp - Nerd
+  Font icons (data-driven), unix/coreutils-consistent output, persistent
+  prefs + declarative `[[cli.layers]]` config (ADR 0022), modular package
 
 ## 0.2.x - polish
 
 - `MountLayer`: unix-style multi-container compositor (designed, see
   deferred-decisions.md)
-- CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
+- [x] CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
   (ruff-style precedence) with an ordered `[[layers]]` DSL; backend
-  config stays shared, layer stack is CLI-scoped (ADR 0015)
+  config stays shared, layer stack is CLI-scoped (ADR 0015; landed
+  in 0.4.3, ADR 0022)
 - CLI cache store selection: swap the in-memory default for a persistent
   store via the `[[layers]]` `store=` (a cashews URL, or a new built-in
   disk-backed `CacheStore`). Lets one-shot `sx --cache` benefit across

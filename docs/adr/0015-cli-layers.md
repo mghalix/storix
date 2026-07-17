@@ -1,6 +1,6 @@
 # 15. Layers in the CLI (and where their config lives)
 
-Status: accepted (declarative config file deferred)
+Status: accepted (declarative config file landed in 0.4.3, see ADR 0022)
 
 ## Context
 `sx -p azure` builds a bare backend; a CLI user never feels the layers
