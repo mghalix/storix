@@ -1,0 +1,139 @@
+"""Persistent sx preferences: the prefs slice of ADR 0015's config file.
+
+Connection config ("which backend, how to connect") stays shared at
+``STORIX_*`` env / ``[tool.storix]`` and is read by ``get_storage``; this
+module reads only CLI presentation preferences. The declarative
+``[[layers]]`` stack DSL stays deferred per ADR 0015 - no layer config
+lives here.
+
+Precedence, strongest first: command-line flags (applied by the caller),
+the nearest project config, ``STORIX_CLI_*`` env, the XDG user file,
+defaults.
+"""
+
+from __future__ import annotations
+
+import os
+import tomllib
+
+from functools import cache
+from pathlib import Path
+from typing import Any, Final
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+
+_MISPLACED: Final[dict[str, str]] = {
+    'provider': 'STORIX_PROVIDER (env or .env)',
+    'home': 'STORIX_LOCAL_BASE / the provider settings (env or .env)',
+    'base': 'STORIX_LOCAL_BASE (env or .env)',
+}
+"""Connection settings users reach for here; ADR 0015 keeps them shared
+with the library, so name their real home instead of ignoring them."""
+
+
+class CliPrefs(BaseModel):
+    """User preferences for sx (display and UX, not connection config)."""
+
+    model_config = ConfigDict(extra='forbid')
+
+    icons: bool = True
+    """Decorate listings with Nerd Font icons (needs a patched font)."""
+
+    layers: list[dict[str, Any]] = Field(default_factory=list)
+    """Declarative layer stack (ADR 0015's ``[[layers]]`` DSL): ordered
+    ``{name = ..., **kwargs}`` entries, innermost first. Applied to every
+    session unless a layer flag (``--cache``/``--sandbox``) replaces the
+    whole stack for that invocation. Names resolve in
+    ``state.stack_from_prefs``."""
+
+
+def _section(document: Any, *keys: str) -> dict[str, Any] | None:
+    """Descend ``keys`` into a parsed TOML document; None when absent."""
+    node = document
+    for key in keys:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node if isinstance(node, dict) else None
+
+
+def _read(file: Path) -> dict[str, Any]:
+    """Parse a TOML file, dying with a readable message on bad syntax.
+
+    Raises:
+        SystemExit: If the file exists but is not valid TOML.
+    """
+    try:
+        return tomllib.loads(file.read_text('utf-8'))
+    except tomllib.TOMLDecodeError as exc:
+        message = f'sx: invalid config {file}: {exc}'
+        raise SystemExit(message) from exc
+    except OSError:
+        return {}
+
+
+def _project_prefs() -> dict[str, Any]:
+    """The nearest project config, ruff-style: walk upward from cwd.
+
+    Per directory, ``storix.toml`` wins over ``.storix.toml`` (their
+    ``[cli]`` table), else a ``pyproject.toml`` carrying
+    ``[tool.storix.cli]``. The first file found anchors the project and
+    stops the walk, even when it holds no CLI preferences.
+    """
+    cwd = Path.cwd()
+    for directory in (cwd, *cwd.parents):
+        for name in ('storix.toml', '.storix.toml'):
+            file = directory / name
+            if file.is_file():
+                return _section(_read(file), 'cli') or {}
+        pyproject = directory / 'pyproject.toml'
+        if pyproject.is_file():
+            found = _section(_read(pyproject), 'tool', 'storix', 'cli')
+            if found is not None:
+                return found
+    return {}
+
+
+def _user_prefs() -> dict[str, Any]:
+    """The personal defaults: ``~/.config/storix/config.toml`` (XDG)."""
+    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
+    file = base / 'storix' / 'config.toml'
+    if not file.is_file():
+        return {}
+    return _section(_read(file), 'cli') or {}
+
+
+def _env_prefs() -> dict[str, Any]:
+    """``STORIX_CLI_*`` environment overrides (e.g. STORIX_CLI_ICONS=false)."""
+    prefs: dict[str, Any] = {}
+    icons = os.environ.get('STORIX_CLI_ICONS')
+    if icons is not None:
+        prefs['icons'] = icons
+    return prefs
+
+
+@cache
+def load_prefs() -> CliPrefs:
+    """Load and merge the persistent preferences (cached per process).
+
+    Raises:
+        SystemExit: If a config file is malformed, holds an unknown key,
+            or a value has the wrong type. Connection settings that do not
+            belong here are rejected naming where they do belong, so a
+            misplaced key never silently does nothing.
+    """
+    merged: dict[str, Any] = {**_user_prefs(), **_env_prefs(), **_project_prefs()}
+    for key, home in _MISPLACED.items():
+        if key in merged:
+            message = (
+                f'sx: {key!r} is not a CLI preference - it is connection config, '
+                f'shared with the library. Set it via {home}.'
+            )
+            raise SystemExit(message)
+    try:
+        return CliPrefs(**merged)
+    except ValidationError as exc:
+        known = ', '.join(CliPrefs.model_fields)
+        message = f'sx: invalid CLI config ({exc}). Known preferences: {known}.'
+        raise SystemExit(message) from exc

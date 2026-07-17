@@ -2,7 +2,9 @@ from importlib import import_module
 from typing import Final
 
 
-_CLI_PACKAGES: Final[frozenset[str]] = frozenset({'click', 'rich', 'typer'})
+_CLI_PACKAGES: Final[frozenset[str]] = frozenset(
+    {'click', 'prompt_toolkit', 'rich', 'typer'}
+)
 """Top-level packages provided by the optional CLI extra."""
 
 _CLI_EXTRA_ERROR: Final[str] = (

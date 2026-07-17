@@ -13,9 +13,22 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def fresh_session() -> None:
-    """Each test gets a clean in-memory session (no disk, no env)."""
+def fresh_session(tmp_path, monkeypatch) -> None:
+    """Each test gets a clean in-memory session and no ambient config.
+
+    The prefs loader searches upward from the cwd, so a test run from a
+    checkout would otherwise inherit the repo's own ``[tool.storix.cli]``.
+    Anchor it at an empty directory instead.
+    """
+    from storix.cli.config import load_prefs
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+    monkeypatch.delenv('STORIX_CLI_ICONS', raising=False)
+    load_prefs.cache_clear()
     cli.use_fs(Storix(MemoryBackend()))
+    yield
+    load_prefs.cache_clear()
 
 
 def run(*args: str):
@@ -120,9 +133,9 @@ def test_data_url_works_but_presigned_needs_capability():
 
 def test_apply_layers_composition_and_lookup():
     from storix import CacheLayer, SandboxLayer
-    from storix.cli.app import _apply_layers, cache_layer, layer_summary
+    from storix.cli.state import apply_layers, cache_layer, layer_summary
 
-    fs = _apply_layers(
+    fs = apply_layers(
         Storix(MemoryBackend()), cache=True, cache_ttl=None, sandbox='/jail'
     )
     # sandbox innermost, cache outermost
@@ -136,22 +149,22 @@ def test_apply_layers_composition_and_lookup():
 
 
 def test_apply_layers_none_is_passthrough():
-    from storix.cli.app import _apply_layers, cache_layer, layer_summary
+    from storix.cli.state import apply_layers, cache_layer, layer_summary
 
     base = Storix(MemoryBackend())
-    fs = _apply_layers(base, cache=False, cache_ttl=None, sandbox=None)
+    fs = apply_layers(base, cache=False, cache_ttl=None, sandbox=None)
     assert fs is base
     assert cache_layer(fs) is None
     assert layer_summary(fs) is None
 
 
 def test_prompt_label_shows_base_backend_not_the_layer():
-    from storix.cli.app import _apply_layers, base_backend, prompt_label
+    from storix.cli.state import apply_layers, base_backend, prompt_label
 
     plain = Storix(MemoryBackend())
     assert prompt_label(plain) == 'MemoryBackend'  # no layers -> just the backend
 
-    fs = _apply_layers(
+    fs = apply_layers(
         Storix(MemoryBackend()), cache=True, cache_ttl=None, sandbox='/jail'
     )
     # the real provider is surfaced, annotated with the stack (not "CacheLayer")
@@ -167,3 +180,61 @@ def test_url_expire_flag_is_accepted():
     out = run('url', '/a.txt', '--expire', '60')
     assert out.exit_code == 0
     assert out.stdout.strip().startswith('data:')  # data URLs ignore expiry
+
+
+@pytest.fixture
+def prefs_from(tmp_path, monkeypatch):
+    """Point prefs loading at a fresh project dir holding one storix.toml."""
+    from storix.cli.config import load_prefs
+
+    def write(body: str):
+        (tmp_path / 'storix.toml').write_text(body)
+        monkeypatch.chdir(tmp_path)
+        load_prefs.cache_clear()
+
+    yield write
+    load_prefs.cache_clear()
+
+
+def test_config_layers_build_the_stack(prefs_from):
+    from storix.cli.state import cache_layer, stack_from_prefs
+
+    prefs_from('[cli]\n[[cli.layers]]\nname = "cache"\nttl = 5\n')
+
+    fs = stack_from_prefs(Storix(MemoryBackend()))
+
+    assert cache_layer(fs) is not None  # configured cache is live
+
+
+def test_config_layers_unknown_name_dies_with_the_known_set(prefs_from):
+    from storix.cli.state import stack_from_prefs
+
+    prefs_from('[cli]\n[[cli.layers]]\nname = "warp"\n')
+
+    with pytest.raises(SystemExit) as exc_info:
+        stack_from_prefs(Storix(MemoryBackend()))
+
+    assert 'warp' in str(exc_info.value)
+    assert 'cache' in str(exc_info.value)  # the error names the known layers
+
+
+def test_connection_config_in_the_cli_table_is_rejected_not_ignored(prefs_from):
+    from storix.cli.config import load_prefs
+
+    prefs_from("[cli]\nprovider = 'azure'\n")  # belongs in env, not here
+
+    with pytest.raises(SystemExit) as exc_info:
+        load_prefs()
+
+    assert 'STORIX_PROVIDER' in str(exc_info.value)  # names where it belongs
+
+
+def test_unknown_preference_is_rejected_with_the_known_set(prefs_from):
+    from storix.cli.config import load_prefs
+
+    prefs_from('[cli]\nicnos = true\n')  # typo
+
+    with pytest.raises(SystemExit) as exc_info:
+        load_prefs()
+
+    assert 'icons' in str(exc_info.value)

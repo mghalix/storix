@@ -13,25 +13,117 @@ from typing import TYPE_CHECKING
 
 import click
 
-from rich.console import Console
+from prompt_toolkit import PromptSession
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.styles import Style
 from typer.main import get_command
 
-from . import app as cli
+from .app import app
+from .render import console, entry_decor
+from .state import (
+    cache_layer,
+    current_fs,
+    layer_summary,
+    list_entries,
+    prompt_label,
+    use_fs,
+)
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
+
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.document import Document
+
     from storix import Storix
 
 
-console = Console()
 _MAX_CWD = 30
 
+_BUILTINS: dict[str, str] = {
+    'clear': 'clear the screen',
+    'exit': 'leave the shell',
+    'help': 'show commands',
+    'quit': 'leave the shell',
+    'refresh': 'clear the cache layer',
+}
+"""Shell built-ins and the descriptions their completions display."""
 
-def _prompt(fs: Storix) -> str:
+_MENU_STYLE = Style.from_dict(
+    {
+        'completion-menu': 'bg:ansibrightblack ansiwhite',
+        'completion-menu.completion.current': 'bg:ansiblue ansiwhite bold',
+        'completion-menu.meta.completion': 'bg:ansibrightblack ansibrightblue',
+        'completion-menu.meta.completion.current': 'bg:ansiblue ansiwhite',
+    }
+)
+"""Completion menu colors (ansi names so they follow the terminal theme)."""
+
+
+class _ShellCompleter(Completer):
+    """Tab candidates: command names first, remote paths everywhere else.
+
+    Commands complete with their one-line description; paths come from a
+    single ``list_dir`` on the directory part of the word being completed
+    (the session's cwd when there is none), so entries keep their kind and
+    directories complete with a trailing slash, an icon, and color. An
+    active cache layer makes repeat listings cheap. Hidden entries appear
+    only when the typed fragment starts with a dot, like unix completion.
+    """
+
+    def __init__(self, commands: Mapping[str, str]) -> None:
+        self._commands = dict(sorted(commands.items()))
+
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterator[Completion]:
+        """Yield completions for the word before the cursor."""
+        text = document.text_before_cursor
+        word = document.get_word_before_cursor(WORD=True)
+        if not text[: len(text) - len(word)].strip():  # first word: a command
+            yield from (
+                Completion(name, start_position=-len(word), display_meta=meta)
+                for name, meta in self._commands.items()
+                if name.startswith(word)
+            )
+            return
+        fragment = word.rpartition('/')[2]
+        parent = word[: len(word) - len(fragment)]  # '' or ends with '/'
+        try:
+            entries = list_entries(
+                current_fs(), parent or None, all=fragment.startswith('.')
+            )
+        except Exception:  # noqa: BLE001 - completion must never break the prompt
+            return
+        for entry in entries:
+            if not entry.name.startswith(fragment):
+                continue
+            icon = entry_decor(entry)[0]
+            slash = '/' if entry.is_dir else ''
+            label = f'{icon} {entry.name}{slash}' if icon else f'{entry.name}{slash}'
+            yield Completion(
+                f'{parent}{entry.name}{slash}',
+                start_position=-len(word),
+                display=label,
+                style='fg:ansibrightblue bold' if entry.is_dir else '',
+            )
+
+
+def _prompt(fs: Storix) -> FormattedText:
     cwd = str(fs.pwd())
     if len(cwd) > _MAX_CWD:
         cwd = '...' + cwd[-(_MAX_CWD - 3) :]
-    return f'{cli.prompt_label(fs)} {cwd} $ '
+    return FormattedText(
+        [
+            ('ansibrightgreen bold', prompt_label(fs)),
+            ('', ' '),
+            ('ansibrightblue bold', cwd),
+            # the starship-style prompt glyph, deliberately not an ascii '>'
+            ('ansimagenta bold', ' ❯ '),  # noqa: RUF001
+        ]
+    )
 
 
 def _help() -> None:
@@ -52,22 +144,33 @@ def _help() -> None:
 def start_shell(fs: Storix | None = None) -> None:
     """Run the interactive shell over ``fs`` (or the default session)."""
     if fs is not None:
-        cli.use_fs(fs)
-    fs = cli.current_fs()
+        use_fs(fs)
+    fs = current_fs()
 
-    command = get_command(cli.app)
+    command = get_command(app)
+    commands = (
+        {name: sub.get_short_help_str(60) for name, sub in command.commands.items()}
+        if isinstance(command, click.Group)
+        else {}
+    )
+    session: PromptSession[str] = PromptSession(
+        completer=_ShellCompleter({**commands, **_BUILTINS}),
+        complete_while_typing=False,
+        complete_in_thread=True,
+        style=_MENU_STYLE,
+    )
 
     console.print('[bold blue]storix shell[/bold blue]')
-    console.print(f'connected to [green]{cli.prompt_label(fs)}[/green]')
-    summary = cli.layer_summary(fs)
+    console.print(f'connected to [green]{prompt_label(fs)}[/green]')
+    summary = layer_summary(fs)
     if summary:
-        tip = ' · type [cyan]refresh[/cyan] to clear' if cli.cache_layer(fs) else ''
+        tip = ' · type [cyan]refresh[/cyan] to clear' if cache_layer(fs) else ''
         console.print(f'[green]{summary}[/green]{tip}')
-    console.print("type 'help' for commands, 'exit' to quit\n")
+    console.print("type 'help' for commands, 'exit' to quit, tab to complete\n")
 
     while True:
         try:
-            line = console.input(_prompt(cli.current_fs())).strip()
+            line = session.prompt(_prompt(current_fs())).strip()
         except (EOFError, KeyboardInterrupt):
             console.print('\n[yellow]bye[/yellow]')
             return
@@ -91,7 +194,7 @@ def start_shell(fs: Storix | None = None) -> None:
             console.clear()
             continue
         if name == 'refresh':
-            layer = cli.cache_layer(cli.current_fs())
+            layer = cache_layer(current_fs())
             if layer is None:
                 console.print('[yellow]no cache layer active[/yellow]')
             else:

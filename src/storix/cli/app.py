@@ -1,96 +1,57 @@
-"""Storix CLI: unix-like commands over any storix backend."""
+"""Storix CLI: unix-like commands over any storix backend.
+
+The typer command surface only. Session state and stack access live in
+``state``, presentation in ``render``, persistent preferences in
+``config``, the REPL in ``shell``.
+"""
 
 from __future__ import annotations
 
 import sys
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
 
-from rich.console import Console
+from rich.columns import Columns
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    TaskProgressColumn,
+    TextColumn,
+    TransferSpeedColumn,
+)
 from rich.table import Table
+from rich.text import Text
 
-from storix import CacheLayer, SandboxLayer, cache as cache_op, get_storage
+from storix import ObservabilityLayer, get_storage
 from storix.errors import StorageError
+
+from .render import console, entry_label, err, human_size
+from .state import (
+    _fs,
+    _session,
+    apply_layers,
+    base_backend,
+    current_fs,
+    layer_summary,
+    list_entries,
+    set_icons,
+    stack_from_prefs,
+    use_fs,
+)
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from storix import Storix
-    from storix.backends import StorageBackend
+    from storix.models import Entry
 
 
-# cap cached file content at 8 MiB in the CLI, so `cat`ing a huge file
-# never balloons the session's memory
-_CLI_READ_CAP = 8 * 1024 * 1024
-
-
-def _apply_layers(
-    fs: Storix, *, cache: bool, cache_ttl: float | None, sandbox: str | None
-) -> Storix:
-    """Wrap the session in the requested layers - sandbox innermost."""
-    if sandbox is not None:
-        fs = fs.with_layer(SandboxLayer, root=sandbox)
-    if cache:
-        fs = fs.with_layer(
-            CacheLayer,
-            metadata=True,
-            du=True,
-            read=cache_op(max_bytes=_CLI_READ_CAP),
-            ttl=cache_ttl,
-        )
-    return fs
-
-
-def cache_layer(fs: Storix) -> CacheLayer | None:
-    """The active ``CacheLayer`` in the session's stack, if any."""
-    node: StorageBackend | None = fs.backend
-    while node is not None:
-        if isinstance(node, CacheLayer):
-            return node
-        node = getattr(node, '_inner', None)
-    return None
-
-
-def base_backend(fs: Storix) -> StorageBackend:
-    """The innermost real backend under any layers (the actual provider)."""
-    node: StorageBackend = fs.backend
-    while (inner := getattr(node, '_inner', None)) is not None:
-        node = inner
-    return node
-
-
-def prompt_label(fs: Storix) -> str:
-    """Provider name annotated with active layers, e.g. ``AzureBackend(cache)``."""
-    tags: list[str] = []
-    node: StorageBackend | None = fs.backend
-    while node is not None:
-        if isinstance(node, CacheLayer):
-            tags.append('cache')
-        elif isinstance(node, SandboxLayer):
-            tags.append('sandbox')
-        node = getattr(node, '_inner', None)
-    base = type(base_backend(fs)).__name__
-    return f'{base}({", ".join(tags)})' if tags else base
-
-
-# op name -> the CLI verbs it accelerates, for the layer summary
-_CACHE_VERBS = {'metadata': 'ls/stat', 'du': 'du', 'read': 'cat', 'url': 'url'}
-
-
-def layer_summary(fs: Storix) -> str | None:
-    """A one-line description of the active layer stack (outermost first)."""
-    parts: list[str] = []
-    node: StorageBackend | None = fs.backend
-    while node is not None:
-        if isinstance(node, CacheLayer):
-            verbs = '/'.join(_CACHE_VERBS[o] for o in node.enabled if o in _CACHE_VERBS)
-            via = '+'.join(node.store_names())
-            parts.append(f'cache {verbs} via {via}')
-        elif isinstance(node, SandboxLayer):
-            parts.append(f'sandbox {node.to_real("/")}')  # public audit handle
-        node = getattr(node, '_inner', None)
-    return ' · '.join(parts) if parts else None
+__all__ = ['app', 'current_fs', 'main', 'use_fs']
 
 
 app = typer.Typer(
@@ -99,33 +60,6 @@ app = typer.Typer(
     no_args_is_help=False,
     add_completion=False,
 )
-console = Console()
-err = Console(stderr=True)
-
-
-class _Session:
-    """Holds the one live filesystem so state (cwd) persists across commands."""
-
-    fs: Storix | None = None
-
-
-_session = _Session()
-
-
-def _fs() -> Storix:
-    if _session.fs is None:
-        _session.fs = get_storage()
-    return _session.fs
-
-
-def current_fs() -> Storix:
-    """The active session filesystem (public entry point for the shell)."""
-    return _fs()
-
-
-def use_fs(fs: Storix) -> None:
-    """Point the session at ``fs`` (public entry point for the shell)."""
-    _session.fs = fs
 
 
 def _die(cmd: str, exc: Exception) -> NoReturn:
@@ -142,24 +76,45 @@ def ls(
     *,
     long: Annotated[bool, typer.Option('-l', '--long')] = False,
     all_: Annotated[bool, typer.Option('-a', '--all')] = False,
+    time_sort: Annotated[
+        bool,
+        typer.Option('-t', '--time', help='sort by modification time, newest first'),
+    ] = False,
+    reverse: Annotated[bool, typer.Option('-r', '--reverse')] = False,
 ) -> None:
     """List directory contents (hidden entries need -a)."""
     fs = _fs()
+    base = fs.resolve(path)
     try:
-        entries = fs.ls(path, all=all_, abs=True)
+        entries = list_entries(fs, path, all=all_)
+        if time_sort and len(entries) > 1:
+            # listings carry no mtime, so -t costs one stat per entry
+            mtimes = {e.name: fs.backend.stat(base / e.name).modified for e in entries}
+            entries.sort(key=lambda e: mtimes[e.name], reverse=True)
     except StorageError as exc:
         _die('ls', exc)
+    if reverse:
+        entries.reverse()
 
     if not long:
-        console.print(*(p.name for p in entries)) if entries else None
+        cells = [entry_label(entry) for entry in entries]
+        console.print(Columns(cells, padding=(0, 2))) if cells else None
         return
 
     table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column()  # kind
+    table.add_column(justify='right')  # size
+    table.add_column()  # icon + name
     for entry in entries:
-        props = fs.stat(entry)
-        is_dir = props.kind == 'directory'
-        name = f'[bold blue]{entry.name}/[/bold blue]' if is_dir else entry.name
-        table.add_row('d' if is_dir else '-', str(props.size), name)
+        if entry.is_dir:
+            size_text = Text('-', style='dim')
+        else:
+            size = entry.size
+            if size is None:
+                size = fs.stat(base / entry.name).size
+            size_text = Text(human_size(size), style='green')
+        kind = Text('d' if entry.is_dir else '-', style='dim')
+        table.add_row(kind, size_text, entry_label(entry))
     console.print(table)
 
 
@@ -179,27 +134,45 @@ def cd(path: Annotated[str | None, typer.Argument()] = None) -> None:
 
 
 @app.command()
-def tree(path: Annotated[str | None, typer.Argument()] = None) -> None:
-    """Print a directory tree."""
+def tree(
+    path: Annotated[str | None, typer.Argument()] = None,
+    *,
+    all_: Annotated[bool, typer.Option('-a', '--all')] = False,
+) -> None:
+    """Print a directory tree (unix tree style, with the closing count)."""
     fs = _fs()
+    dirs, files = 1, 0  # unix tree counts the root directory
 
-    def walk(target: str, prefix: str = '') -> None:
+    def children_of(target: str) -> list[Entry]:
         try:
-            children = fs.ls(target, abs=True)
+            return list_entries(fs, target, all=all_)
         except StorageError as exc:
             _die('tree', exc)
-        for i, child in enumerate(sorted(children, key=lambda p: p.name)):
+
+    def walk(children: list[Entry], target: str, prefix: str = '') -> None:
+        nonlocal dirs, files
+        for i, child in enumerate(children):
             last = i == len(children) - 1
             branch = '└── ' if last else '├── '
-            is_dir = fs.isdir(child)
-            label = f'[bold blue]{child.name}[/bold blue]' if is_dir else child.name
-            console.print(f'{prefix}{branch}{label}')
-            if is_dir:
-                walk(str(child), prefix + ('    ' if last else '│   '))
+            if child.is_dir:
+                dirs += 1
+                inner = f'{target}/{child.name}'
+                sub = children_of(inner)
+                label = entry_label(
+                    child, slash=False, dir_state='open' if sub else 'empty'
+                )
+                console.print(Text(f'{prefix}{branch}') + label)
+                walk(sub, inner, prefix + ('    ' if last else '│   '))
+            else:
+                files += 1
+                console.print(Text(f'{prefix}{branch}') + entry_label(child))
 
     root = str(fs.resolve(path))
     console.print(f'[bold blue]{root}[/bold blue]')
-    walk(root)
+    walk(children_of(root), root)
+    d = 'directory' if dirs == 1 else 'directories'
+    f = 'file' if files == 1 else 'files'
+    console.print(f'\n{dirs} {d}, {files} {f}')
 
 
 # --- creating / writing ---
@@ -286,13 +259,21 @@ def stat(path: Annotated[str, typer.Argument()]) -> None:
 
 
 @app.command()
-def du(path: Annotated[str | None, typer.Argument()] = None) -> None:
+def du(
+    path: Annotated[str | None, typer.Argument()] = None,
+    *,
+    human: Annotated[
+        bool, typer.Option('-h', '--human', help='human-readable size (e.g. 165M)')
+    ] = False,
+) -> None:
     """Total size in bytes of a tree (apparent content bytes)."""
     fs = _fs()
     try:
-        console.print(f'{fs.du(path)}\t{fs.resolve(path)}')
+        total = fs.du(path)
     except StorageError as exc:
         _die('du', exc)
+    shown = path if path is not None else str(fs.resolve(path))
+    console.print(f'{human_size(total) if human else total}\t{shown}')
 
 
 @app.command()
@@ -382,6 +363,39 @@ def exists(paths: Annotated[list[str], typer.Argument()]) -> None:
 # --- local <-> remote transfer ---
 
 
+@contextmanager
+def _transfer_progress(fs: Storix, label: str, total: int) -> Iterator[Storix]:
+    """Session emitting into a live bar; sx owns ``total`` (ADR 0019).
+
+    Wraps ``fs`` in an outermost ``ObservabilityLayer`` whose sink moves a
+    rich progress bar; the percentage is ``transferred`` over the total the
+    caller already owns. The wrapped session starts at home, so callers
+    must pass absolute paths.
+
+    Args:
+        fs: The session to wrap.
+        label: Bar description, typically the file's basename.
+        total: The transfer's total size in bytes.
+
+    Yields:
+        The wrapped session; use it for the one transfer.
+    """
+    with Progress(
+        TextColumn('[progress.description]{task.description}'),
+        BarColumn(),
+        TaskProgressColumn(),
+        DownloadColumn(binary_units=True),
+        TransferSpeedColumn(),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task(label, total=total)
+        yield fs.with_layer(
+            ObservabilityLayer,
+            sink=lambda event: progress.update(task, completed=event.transferred),
+        )
+
+
 @app.command()
 def download(
     remote: Annotated[str, typer.Argument()],
@@ -391,13 +405,22 @@ def download(
     from pathlib import Path
 
     fs = _fs()
+    src = fs.resolve(remote)
     try:
-        data = fs.cat(remote)
+        total = fs.stat(src).size
     except StorageError as exc:
         _die('download', exc)
-    dst = Path(local) if local else Path(fs.resolve(remote).name)
+    dst = Path(local) if local else Path(src.name)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_bytes(data)
+    try:
+        with (
+            _transfer_progress(fs, src.name, total) as obs,
+            dst.open('wb') as out,
+        ):
+            for chunk in obs.stream(src):
+                out.write(chunk)
+    except StorageError as exc:
+        _die('download', exc)
     console.print(f'{remote} -> {dst}')
 
 
@@ -413,9 +436,20 @@ def upload(
     if not src.is_file():
         _die('upload', FileNotFoundError(local))
     fs = _fs()
-    dst = remote or str(fs.pwd() / src.name)
+    dst = fs.resolve(remote) if remote else fs.pwd() / src.name
     try:
-        fs.echo(src.read_bytes(), dst)
+        with (
+            _transfer_progress(fs, src.name, src.stat().st_size) as obs,
+            src.open('rb') as data,
+        ):
+            content_type = None
+            if fs.backend.capabilities.content_type:
+                from storix.utils import detect_mimetype
+
+                # extension first, libmagic sniff of the head as fallback
+                content_type = detect_mimetype(buf=data.read(4096), path=src.name)
+                data.seek(0)
+            obs.echo(data, dst, content_type=content_type)
     except StorageError as exc:
         _die('upload', exc)
     console.print(f'{local} -> {dst}')
@@ -463,16 +497,29 @@ def _main(
     sandbox: Annotated[
         str | None, typer.Option('--sandbox', help='jail the session under this path')
     ] = None,
+    icons: Annotated[
+        bool | None,
+        typer.Option(
+            '--icons/--no-icons',
+            help='Nerd Font icons in listings (default: persistent prefs)',
+        ),
+    ] = None,
     interactive: Annotated[bool, typer.Option('-i', '--interactive')] = False,
 ) -> None:
     """Set up the session; launch the shell when no command is given."""
+    if icons is not None:
+        set_icons(icons)
     # rebuild on an explicit --provider or any layer flag, else keep the
-    # persistent session (so cwd survives across shell commands)
+    # persistent session (so cwd survives across shell commands); layer
+    # flags replace the configured [[cli.layers]] stack for the invocation
     if provider_ is not None or cache or sandbox is not None:
         base = get_storage(provider_) if provider_ is not None else get_storage()
-        _session.fs = _apply_layers(
-            base, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
-        )
+        if cache or sandbox is not None:
+            _session.fs = apply_layers(
+                base, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
+            )
+        else:
+            _session.fs = stack_from_prefs(base)
 
     if ctx.invoked_subcommand is None or interactive:
         from .shell import start_shell
