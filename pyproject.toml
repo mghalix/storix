@@ -36,16 +36,19 @@ core = [
 local = [
     "aiofiles>=24.1.0",
 ]
-azure = [
-    # the self-detecting azure provider can build either Azure backend,
-    # so the full extra carries both the SDK and the blob engine
+azadls = [
+    # lean ADLS Gen2-only install (HNS accounts; kind='adls')
     "azure-storage-file-datalake>=12.14.0",
     "aiohttp>=3.9.0",
-    "opendal>=0.47.0",
 ]
 azblob = [
-    # lean blob-only install (pass kind='blob'; auto-detection needs [azure])
+    # lean blob-only install (kind='blob'; auto-detection needs the SDK)
     "opendal>=0.47.0",
+]
+azure = [
+    # the self-detecting azure provider can build either Azure backend,
+    # so the full extra is the two leans composed
+    "storix[azadls, azblob]",
 ]
 s3 = [
     "opendal>=0.47.0",
@@ -59,7 +62,7 @@ cli = [
     "typer>=0.13.0",
 ]
 all = [
-    "storix[local, azure, azblob, s3, gcs, cli]",
+    "storix[local, azure, s3, gcs, cli]",
 ]
 
 [dependency-groups]
