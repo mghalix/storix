@@ -1,6 +1,6 @@
 [project]
 name = "storix"
-version = "0.4.1"
+version = "0.4.2"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -36,9 +36,25 @@ core = [
 local = [
     "aiofiles>=24.1.0",
 ]
-azure = [
+azadls = [
+    # lean ADLS Gen2-only install (HNS accounts; kind='adls')
     "azure-storage-file-datalake>=12.14.0",
     "aiohttp>=3.9.0",
+]
+azblob = [
+    # lean blob-only install (kind='blob'; auto-detection needs the SDK)
+    "opendal>=0.47.0",
+]
+azure = [
+    # the self-detecting azure provider can build either Azure backend,
+    # so the full extra is the two leans composed
+    "storix[azadls, azblob]",
+]
+s3 = [
+    "opendal>=0.47.0",
+]
+gcs = [
+    "opendal>=0.47.0",
 ]
 cli = [
     "click>=8.1.7",
@@ -46,7 +62,7 @@ cli = [
     "typer>=0.13.0",
 ]
 all = [
-    "storix[local, azure, cli]",
+    "storix[local, azure, s3, gcs, cli]",
 ]
 
 [dependency-groups]
@@ -86,6 +102,8 @@ sx = "storix.cli:main"
 #<--- tools --->#
 [tool.pyright]
 include = ["src"]
+# opendal ships compiled modules with stubs only; source resolution is noise
+reportMissingModuleSource = false
 exclude = [
   "**/__pycache__",
   "**/dist",
