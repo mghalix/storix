@@ -1532,6 +1532,7 @@ azblob = [
 azure = [
     { name = "aiohttp" },
     { name = "azure-storage-file-datalake" },
+    { name = "opendal" },
 ]
 cli = [
     { name = "click" },
@@ -1579,6 +1580,7 @@ requires-dist = [
     { name = "click", marker = "extra == 'cli'", specifier = ">=8.1.7" },
     { name = "loguru", marker = "extra == 'core'", specifier = ">=0.7.2" },
     { name = "opendal", marker = "extra == 'azblob'", specifier = ">=0.47.0" },
+    { name = "opendal", marker = "extra == 'azure'", specifier = ">=0.47.0" },
     { name = "opendal", marker = "extra == 'gcs'", specifier = ">=0.47.0" },
     { name = "opendal", marker = "extra == 's3'", specifier = ">=0.47.0" },
     { name = "pydantic", marker = "extra == 'core'", specifier = ">=2.0.0" },

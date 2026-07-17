@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .opendal import OpendalBackend
+
+try:
+    from .opendal import OpendalBackend
+except ImportError:  # pragma: no cover
+    _msg = "s3 extra not installed. Install it by running `uv add 'storix[s3]'`."
+    raise ImportError(_msg) from None
 
 
 if TYPE_CHECKING:

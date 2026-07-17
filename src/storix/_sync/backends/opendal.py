@@ -49,8 +49,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover
     if (exc.name or '').partition('.')[0] != 'opendal':
         raise
     _msg = (
-        'this backend needs an optional dependency. Install it by running '
-        "`uv add 'storix[s3]'` (S3) or `uv add 'storix[gcs]'` (GCS)."
+        'the storage engine for this backend is not installed. Install the '
+        "matching extra: `uv add 'storix[azure]'`, 'storix[azblob]', "
+        "'storix[s3]', or 'storix[gcs]'."
     )
     raise ImportError(_msg) from None
 
