@@ -210,26 +210,47 @@ shared with the library. Set it via STORIX_AZURE_* (env or .env).
 #### `dir_contents`: the empty-folder icon, and what it costs
 
 A directory listing tells you an entry *is* a directory. It does not tell you
-whether that directory is empty - that answer is a second lookup, listing the
-directory itself and seeing if anything comes back. `dir_contents` controls
-whether `ls` takes that lookup so it can show an **open** folder for an empty
-directory (nothing there, `rmdir` if you like) and a **closed** colored folder
-for one that holds something (worth a `cd`).
+whether that directory is empty - that answer is a second look, listing the
+directory itself to see if anything comes back. Ordinary `ls` never takes that
+look, which is why it does not distinguish empty from non-empty at all.
+`dir_contents` controls whether `sx ls` does, so it can show an **open** folder
+for an empty directory (nothing there, `rmdir` if you like) and a **closed**
+folder for one that holds something (worth a `cd`).
 
-This is not an Azure quirk. Every backend needs the extra lookup - a local
-`ls -l` in your shell does exactly the same readdir. The difference is price.
-On local disk the lookup is a cheap syscall, which is why tools like `eza`
-just always do it. On an object store each lookup is a network round trip, so
-on a directory of fifty subdirectories `ls` goes from one request to
-fifty-one. `dir_contents` exists because storix reaches cloud storage where
-`eza` does not, so the cost is worth a choice:
+The look is one extra listing per subdirectory, and the price depends on the
+backend. On local disk it is a cheap directory read. On an object store it is
+a network round trip, so listing a directory of fifty subdirectories with
+`dir_contents` on is fifty-one requests instead of one. That is why it is a
+setting rather than always-on: storix reaches cloud storage, where the cost is
+real.
 
-- Leave it `true` (the default) for the accurate empty/full distinction. A
-  `cache` layer absorbs the repeat lookups, so an interactive session pays
-  the cost once.
+- Leave it `true` (the default) for the accurate empty/full distinction. With
+  a `cache` layer active - which is worth having in the shell anyway (see
+  below) - the repeat lookups are served from cache, so an interactive session
+  pays the cost once.
 - Set it `false` to make `ls` a single request again - every directory then
   shows the closed folder, empty or not. Also the right setting if you do not
-  use icons at all and just want `ls` fast.
+  use icons and just want `ls` fast.
 
 `tree` ignores this preference: it descends into every directory anyway, so it
 already knows which are empty at no extra cost.
+
+!!! tip "Turn on the cache for interactive sessions"
+
+    In the shell you navigate the same tree repeatedly, so a read-through
+    cache pays off immediately: `du`, `ls`, `stat`, and the `dir_contents`
+    emptiness lookups are all served from memory on repeat, and you stop
+    thinking about per-listing cost. Add it once, for the session or in your
+    config:
+
+    ```bash
+    sx --cache            # this session
+    ```
+
+    ```toml
+    [tool.storix.cli]
+    layers = [{ name = "cache", ttl = 300 }]   # every session
+    ```
+
+    Your own writes self-evict, so the cache never shows you stale results for
+    changes you made; only other writers' changes wait for the TTL.

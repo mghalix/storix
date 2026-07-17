@@ -6,19 +6,29 @@ things.
 
 ## The pieces
 
-```
-   driving adapters            application core            driven adapters
-  (present the core)              (the hexagon)          (reach real storage)
-
-      sx  (CLI)  ─┐                                      ┌─ LocalBackend
-   library code  ─┼──►  ┌───────────────────┐           ├─ MemoryBackend
-   (future) MCP  ─┘     │      Storix        │  ──────►  ├─ AzureBackend
-                        │  cwd, ~, path       │  Storage  ├─ AzureBlobBackend
-                        │  resolution, unix   │  Backend  ├─ S3Backend
-                        │  operations         │  (port)   └─ GcsBackend
-                        └───────────────────┘
-                          driving port = the
-                          Storix public API
+```mermaid
+flowchart LR
+    subgraph driving["driving adapters — present the core"]
+        cli["sx (CLI)"]
+        lib["library code"]
+        future["future: pathlike / flat / MCP"]
+    end
+    core["<b>Storix</b><br/>application core<br/>cwd · ~ · path resolution · unix ops"]
+    port{{"<b>StorageBackend</b><br/>driven port (the contract)"}}
+    subgraph driven["driven adapters — reach real storage"]
+        local["LocalBackend"]
+        mem["MemoryBackend"]
+        azure["AzureBackend · AzureBlobBackend"]
+        obj["S3Backend · GcsBackend"]
+    end
+    cli --> core
+    lib --> core
+    future --> core
+    core -->|"driving port =<br/>the Storix API"| port
+    port --> local
+    port --> mem
+    port --> azure
+    port --> obj
 ```
 
 - **Application core** - `Storix` (`_async/core.py`). The hexagon's inside. It
@@ -28,8 +38,8 @@ things.
 
 - **Driven port (secondary port)** - `StorageBackend` (`backends/_proto.py`),
   the ~14-method interface. This is the *contract*, the boundary the core
-  depends on. It is not an implementation. In `AGENTS.md` this is what "the
-  port" means.
+  depends on. It is not an implementation; "the port", unqualified, always
+  means this.
 
 - **Driven adapters (secondary adapters)** - `LocalBackend`, `MemoryBackend`,
   `AzureBackend`, `AzureBlobBackend`, `S3Backend`, `GcsBackend`. Each is a
@@ -68,11 +78,12 @@ driving adapter above it - is unchanged, because both satisfy `StorageBackend`.
 The same lever runs the other way: a new driving adapter (pathlike, flat, MCP)
 reuses the whole core and every backend for free.
 
-This is also the boundary rule for contributors (see `AGENTS.md`, "The core
-boundary"): a driving adapter must not grow logic the core should own. If `sx`
-needs the kind/size a listing already computed, the fix is a core method that
-returns it, not a re-implementation in the CLI - otherwise the next driving
-adapter re-implements it too, and core semantics drift across copies.
+The direct consequence for the driving side: a driving adapter *presents* the
+core, it does not extend it. If `sx` needs the kind or size a listing already
+computed, the fix is a core method that returns it, not a re-implementation in
+the CLI - otherwise the next driving adapter re-implements it too, and core
+semantics drift across copies. (The contributor workflow for spotting and
+raising such a gap is a separate, process concern.)
 
 ## Where each piece lives
 

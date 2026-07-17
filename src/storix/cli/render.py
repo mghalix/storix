@@ -54,8 +54,7 @@ def entry_decor(entry: Entry, *, dir_state: DirState = 'closed') -> tuple[str, s
     if entry.is_dir:
         node = table['dir']
         icon = node['icon'] if dir_state == 'closed' else node[dir_state]
-        # an empty folder recedes (its own style); full/unknown keep the color
-        style = node['empty_style'] if dir_state == 'empty' else node['style']
+        style = node['style']  # same color for every state; only the glyph varies
     else:
         node = (
             table['name'].get(entry.name)

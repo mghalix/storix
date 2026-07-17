@@ -254,3 +254,39 @@ whether to recurse). Same question of where it belongs.
 `pathlike` adapter or the flat facade (both on the 0.4.0 adoption list) would
 need exactly this, and that is the moment to design it properly rather than
 copy `list_entries` a third time.
+
+## CLI observability sink from config (custom progress handling)
+
+`sx` attaches an `ObservabilityLayer` around `upload`/`download` with a
+built-in rich progress bar. A user might want to override that sink - push
+transfer events to a log, a status server, their own TUI. The sink is just
+`Callable[[TransferEvent], Any]`, so the config could name a dotted path:
+
+```toml
+[tool.storix.cli]
+progress_sink = "myproject.cli:make_progress_sink"   # -> a callable, or a factory
+```
+
+**Why deferred, not built:** this is config that imports and runs code, the
+exact posture ADR 0022 avoided for the `[[cli.layers]]` builders (curated
+names, never import paths, because a config file that imports anything is an
+execution vector). For a sink it is more defensible - explicitly the user's own
+script, opt-in - but it reopens that decision and deserves its own pass rather
+than riding in on 0.4.3.
+
+**Proposed shape when designed:**
+
+- A `ProgressSink` `Protocol` (`__call__(event: TransferEvent) -> Any`),
+  exported so users type their function against it.
+- Resolve `module:attr` to a callable; if it is a zero-arg factory, call it
+  once per transfer to get a fresh sink (lets a sink hold per-transfer state).
+- A hard failure to import or call exits naming the offending path (same
+  posture as an unknown layer), never a silent fallback that hides a typo.
+- Consider generalizing to a small `[tool.storix.cli.hooks]` table if a second
+  hook point appears (e.g. a post-write audit sink), rather than one bespoke
+  key. Decide that only when the second one exists.
+- Keep the built-in bar as the default; the config only overrides it.
+
+**Trigger:** a concrete ask for non-bar progress handling, or the first other
+CLI hook point - whichever comes first is the moment to design the import-from-
+config posture once, for both.

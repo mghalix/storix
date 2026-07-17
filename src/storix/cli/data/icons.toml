@@ -6,13 +6,13 @@
 
 [dir]
 # the open/closed box metaphor: an OPEN folder when empty (you can see in,
-# nothing there, rmdir if you like) and a CLOSED colored folder when it
-# holds something worth a cd. Contents-unknown falls back to closed.
+# nothing there, rmdir if you like) and a CLOSED folder when it holds
+# something worth a cd. Same color for both - the open glyph alone carries
+# "empty". Contents-unknown falls back to closed.
 icon = "\uf07b"  # nf-fa-folder: closed, contents not looked at
 full = "\uf07b"  # nf-fa-folder: closed, known to hold something
 empty = "\uf07c"  # nf-fa-folder_open: open, known empty
 style = "bold blue"
-empty_style = "dim"  # empty recedes; only a full folder gets the color
 
 [file]
 icon = "\uf016"  # nf-fa-file_o: no more specific match

@@ -126,6 +126,24 @@ genuine "the core cannot express this" - state why in a comment, as
   New backends and layers should slot into it rather than getting a bespoke
   harness.
 
+## Naming the public surface
+
+Two rules, both already visible in the existing API - follow them so new
+additions stay consistent.
+
+- **Borrow the established unix name.** A user-facing operation takes the name
+  of the unix command or well-known program that already means it: `ls`, `cat`,
+  `du`, `mv`, `cp`, `echo`, `touch`, `stat`, `tree`. When you add one, reach for
+  that vocabulary before inventing: an "absolute path" resolver is `realpath`,
+  not `get_absolute`; a lazy rich listing is `scandir` (after `os.scandir`), a
+  lazy name listing is `iterdir` (after `pathlib`). The names are the docs; a
+  unix user already knows them.
+- **Prefer an extensible `kind` over a boolean.** A classification that could
+  grow a case tomorrow is an enum, not a bool. `PathKind` (`file`/`directory`,
+  and a future `symlink`) is why user-facing entries carry `kind`, not
+  `is_dir` - a boolean cannot represent the third case without a breaking
+  change. Booleans are for genuinely two-valued facts.
+
 ## Writing style
 
 ASCII only. No Unicode punctuation, em-dashes, or decorative characters. Use
