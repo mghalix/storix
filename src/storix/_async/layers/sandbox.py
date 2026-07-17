@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from storix import pathops
 from storix._async._stream import validate_chunk_size
-from storix.errors import PathError, PermissionDeniedError
+from storix.errors import PathError, PathNotFoundError, PermissionDeniedError
 from storix.types import StorixPath
 
 
@@ -70,8 +70,18 @@ class SandboxLayer:
         return p
 
     def _rescope(self, exc: PathError) -> PathError:
-        """Rebuild an inner error in the caller's virtual namespace."""
-        return type(exc)(self.to_virtual(exc.path))
+        """Rebuild an inner error in the caller's virtual namespace.
+
+        When the inner path that failed *is* the root, plain rescoping
+        would report ``'/'`` - true inside the jail, and unreadable
+        outside it, since no filesystem is missing its own root. Say what
+        is actually wrong instead, without naming the real root the jail
+        exists to hide.
+        """
+        virtual = self.to_virtual(exc.path)
+        if virtual == _ROOT and isinstance(exc, PathNotFoundError):
+            return PathNotFoundError(virtual, 'sandbox root does not exist')
+        return type(exc)(virtual)
 
     # --- the port, delegated under translation ---
 

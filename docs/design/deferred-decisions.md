@@ -191,3 +191,29 @@ dependency (a TUI), or a second front-end that should share the CLI's
 packaging (the MCP server from the 0.5.0 agent story). First step then:
 uv workspace member `storix-cli` under this repo; a separate repo only if
 its issue tracker and release notes stop overlapping storix's.
+
+## Standing session context in the shell (beyond the start banner)
+
+The `sx` prompt is deliberately minimal: the working directory and a glyph.
+Provider and layer stack are stable facts, so they print once in the start
+banner and on demand via `provider`. That leaves a real gap: fifty commands
+later the banner has scrolled away, and "what am I connected to, what is
+wrapping it, am I jailed" is exactly what you want to re-check before an
+`rm -r`.
+
+A prompt_toolkit `bottom_toolbar` was built and reverted in 0.4.3: it pins a
+status line under the prompt for free, but it repaints on every keystroke,
+occupies a row permanently, and reads as clutter for a shell whose whole
+appeal is that it looks like a shell. Not obviously better than nothing.
+
+**Options when this is revisited:** a toggleable toolbar (off by default, a
+`ctx` built-in or a key binding); a right-hand prompt (`rprompt`) carrying
+only the provider, which disappears as the line grows; a `Ctrl-G`-style
+one-shot context popover; or a genuine TUI mode (Textual) where a header is
+natural and the REPL becomes one pane. The TUI is the honest end state if
+`sx` grows past a REPL, and it subsumes the question.
+
+**Trigger:** revisit when a second person reports losing track of the session
+context, or when a TUI mode is on the table for other reasons. Whatever
+lands must keep the plain prompt as the default; the shell earning its keep
+by looking like a shell is the constraint, not a nice-to-have.

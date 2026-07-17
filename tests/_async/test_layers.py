@@ -73,6 +73,18 @@ async def test_errors_are_rescoped_to_virtual_paths(
     assert 'jail' not in str(excinfo.value)
 
 
+async def test_a_missing_root_says_so_instead_of_denying_the_root_exists():
+    # a jail over a root that is not there: rescoping alone would report
+    # "path '/' does not exist", true inside the jail and nonsense outside
+    layer = SandboxLayer(MemoryBackend(), root='/absent')
+
+    with pytest.raises(PathNotFoundError) as excinfo:
+        await layer.stat(P('/'))
+
+    assert 'sandbox root does not exist' in str(excinfo.value)
+    assert 'absent' not in str(excinfo.value)  # the real root still never leaks
+
+
 async def test_rescopes_parent_paths_from_inner_errors(
     jailed: tuple[MemoryBackend, SandboxLayer],
 ):

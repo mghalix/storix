@@ -36,6 +36,11 @@ CLI. See ADR 0022.
   `dir_contents` (whether flat listings check emptiness).
 - `r2` and `minio` install extras, aliases for `s3`, whose API both stores
   speak. Installing for the store you use no longer requires knowing that.
+- The configured `[[cli.layers]]` stack covers every built-in layer a config
+  file can express: `cache`, `sandbox`, `url`, and `metadata`. The two
+  capability-backfilling layers go through `with_layer_missing`, so one config
+  yields a native SAS URL where the backend has one and a `data:` URL where it
+  does not.
 
 ### Changed
 
@@ -71,8 +76,13 @@ CLI. See ADR 0022.
 - Well-known filenames (`Makefile`, `Dockerfile`, `pyproject.toml`,
   `.gitignore`, ...) get their own icon instead of the generic file glyph.
 - The shell prompt is just the working directory again. The backend name and
-  layer stack, which grow with every layer, moved to a bottom toolbar where
-  they stay visible without prefixing every command.
+  layer stack, which grow with every layer, print once in the start banner
+  and on demand via `provider` instead of prefixing every command.
+- `SandboxLayer` no longer reports `path '/' does not exist` when its root is
+  missing: true inside the jail, where the absent root *is* `/`, and nonsense
+  to anyone reading it. It now says `sandbox root does not exist`, still
+  without naming the real root it exists to hide. Library users get this too,
+  not just `sx`.
 
 ## [0.4.2] - 2026-07-16
 

@@ -10,7 +10,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from storix import CacheLayer, SandboxLayer, cache as cache_op, get_storage, pathops
+from storix import (
+    CacheLayer,
+    DataUrlLayer,
+    MetadataLayer,
+    SandboxLayer,
+    cache as cache_op,
+    get_storage,
+    pathops,
+)
 from storix.enums import PathKind
 from storix.errors import StorageError
 from storix.models import Entry
@@ -154,11 +162,30 @@ def _sandboxed(fs: Storix, *, root: str) -> Storix:
     raise SystemExit(message)
 
 
+def _url(fs: Storix) -> Storix:
+    """Backfill ``url`` with a data: URL, preferring a native presign."""
+    return fs.with_layer_missing(DataUrlLayer)
+
+
+def _metadata(fs: Storix) -> Storix:
+    """Backfill custom metadata (JSON sidecars), preferring native."""
+    return fs.with_layer_missing(MetadataLayer)
+
+
 _LAYER_BUILDERS: Final[dict[str, Callable[..., Storix]]] = {
     'cache': _cached,
     'sandbox': _sandboxed,
+    'url': _url,
+    'metadata': _metadata,
 }
-"""Config-file layer names -> builders (the curated CLI set, ADR 0015)."""
+"""Config-file layer names -> builders, one per built-in layer a config
+file can express. ``url`` and ``metadata`` backfill a capability, so they
+go through ``with_layer_missing``: a backend that already has it natively
+(an Azure SAS URL) keeps it, and the layer is skipped rather than
+shadowing the real thing. ``ObservabilityLayer`` is deliberately absent:
+its only argument is a sink callable, which TOML cannot express, and
+without one it is a passthrough - sx attaches it itself around transfers
+(ADR 0019)."""
 
 
 def stack_from_prefs(fs: Storix) -> Storix:
@@ -222,6 +249,10 @@ def layer_summary(fs: Storix) -> str | None:
             parts.append(f'cache {verbs} via {via}')
         elif isinstance(node, SandboxLayer):
             parts.append(f'sandbox {node.to_real("/")}')  # public audit handle
+        elif isinstance(node, DataUrlLayer):
+            parts.append('url via data: URLs')
+        elif isinstance(node, MetadataLayer):
+            parts.append('metadata via sidecars')
         node = getattr(node, '_inner', None)
     return ' · '.join(parts) if parts else None
 

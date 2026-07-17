@@ -153,11 +153,25 @@ not retype flags. Sources, strongest first:
     ```
 
 Layers apply in listed order, each wrapping the previous, so the last entry
-is outermost. The available names mirror the flags: `cache` (options: `ttl`,
-`max_bytes`) and `sandbox` (`root`). Passing a layer flag replaces the
-configured stack for that invocation rather than merging with it, so the
-effective stack is always readable from one source. `sx provider` prints the
-active stack:
+is outermost. Every built-in layer a config file can express has a name:
+
+| Name | Layer | Options |
+| --- | --- | --- |
+| `cache` | `CacheLayer` (read-through: `du`/`ls`/`stat`/`cat`) | `ttl`, `max_bytes` |
+| `sandbox` | `SandboxLayer` (escape-proof chroot) | `root` |
+| `url` | `DataUrlLayer` (`url` on any backend) | none |
+| `metadata` | `MetadataLayer` (custom metadata on any backend) | none |
+
+`url` and `metadata` backfill a capability, so they are skipped when the
+backend already has it natively: configure `url` and you get Azure's real SAS
+link where one is available and a `data:` URL where it is not, from the same
+config. `ObservabilityLayer` has no name here on purpose - its only argument
+is a sink callable, which TOML cannot express, and `sx` attaches it itself
+around `upload`/`download` to draw the progress bar.
+
+Passing a layer flag replaces the configured stack for that invocation rather
+than merging with it, so the effective stack is always readable from one
+source. `sx provider` prints the active stack:
 
 ```
 $ sx provider
@@ -197,8 +211,10 @@ shared with the library. Set it via STORIX_AZURE_* (env or .env).
 
     A plain listing says which entries are directories, never whether they
     hold anything, so `ls` looks: one extra listing per subdirectory, which
-    on an object store is a round trip each. That is what lets an empty
-    folder read as empty rather than every folder looking alike. A cache
+    on an object store is a round trip each. That buys a real distinction -
+    the same folder glyph hollow when it is empty (nothing to see, `rmdir`
+    if you like) and filled when it holds something (worth a `cd`). A cache
     layer absorbs the repeats; set `dir_contents = false` to trade the
-    distinction for a single request per `ls`. `tree` is unaffected - it
-    already reads every directory it draws.
+    distinction for a single request per `ls`, which falls back to the
+    filled folder for every directory. `tree` is unaffected - it already
+    reads every directory it draws.

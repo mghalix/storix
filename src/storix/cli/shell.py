@@ -115,8 +115,9 @@ def _prompt(fs: Storix) -> FormattedText:
     """The prompt: just where you are, starship-style.
 
     Who you are connected to and what wraps the session are stable facts,
-    not per-line ones, so they live in the start banner and the bottom
-    toolbar instead of re-stating themselves above every command.
+    not per-line ones: the start banner states them once and ``provider``
+    reprints them on demand, rather than prefixing every command with a
+    label that grows with each layer.
     """
     cwd = str(fs.pwd())
     if len(cwd) > _MAX_CWD:
@@ -128,20 +129,6 @@ def _prompt(fs: Storix) -> FormattedText:
             ('ansimagenta bold', ' ❯ '),  # noqa: RUF001
         ]
     )
-
-
-def _toolbar(fs: Storix) -> FormattedText:
-    """The session's standing context, pinned to the last line.
-
-    The backend name plus what wraps it - the layer summary already spells
-    the stack out, so the name stays bare rather than repeating the tags.
-    """
-    provider = type(base_backend(fs)).__name__
-    parts: list[tuple[str, str]] = [('ansibrightgreen bold', f' {provider}')]
-    summary = layer_summary(fs)
-    if summary:
-        parts.append(('ansibrightblack', f'  {summary}'))
-    return FormattedText(parts)
 
 
 def _help() -> None:
@@ -176,7 +163,6 @@ def start_shell(fs: Storix | None = None) -> None:
         complete_while_typing=False,
         complete_in_thread=True,
         style=_MENU_STYLE,
-        bottom_toolbar=lambda: _toolbar(current_fs()),
     )
 
     console.print('[bold blue]storix shell[/bold blue]')
