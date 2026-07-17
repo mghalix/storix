@@ -29,6 +29,26 @@ def craft_adlsg2_url_sas(
     return f'{base_url}/{path}?{sas_token.lstrip("?")}'
 
 
+def craft_blob_url_sas(
+    *, endpoint: str, container: str, blob_name: str, sas_token: str
+) -> str:
+    """Structure an Azure Blob URL with a SAS token embedded.
+
+    Args:
+        endpoint: Configured blob endpoint, honoring Azurite and
+            sovereign clouds (e.g. ``https://acct.blob.core.windows.net``).
+        container: Container anchoring the blob.
+        blob_name: Container-relative blob name, ``root`` prefix included.
+        sas_token: The signed query string (a leading ``?`` is optional).
+
+    Returns:
+        The full ``{endpoint}/{container}/{blob_name}?{sas}`` URL.
+    """
+    base_url = endpoint.rstrip('/')
+    path = posixpath.join(*(p.strip('/') for p in (container, blob_name)))
+    return f'{base_url}/{path}?{sas_token.lstrip("?")}'
+
+
 def get_mimetype(*, buf: bytes) -> str:
     """Detect mimetype from a buffer using globally exposed 'magic'."""
     return magic.from_buffer(buf, mime=True)  # type: ignore[attr-defined]
