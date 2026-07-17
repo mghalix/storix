@@ -12,9 +12,11 @@ CHUNK_SIZE: Final[int] = 64 * 1024
 
 
 def main() -> None:
-    payload = b'\0' * (
-        64 * 1024 * 1024 * 50
-    )  # you produced the source: the total is yours
+    # 64 MiB: 1024 chunk events per bar, gentle on RAM. Multiply by 50
+    # for a slow-motion bar - but note the demo materializes its whole
+    # source in memory first (~3 GiB then), purely to keep the example
+    # short; storix itself streams chunk by chunk either way.
+    payload = b'\0' * (64 * 1024 * 1024)
     chunks = (payload[i : i + CHUNK_SIZE] for i in range(0, len(payload), CHUNK_SIZE))
 
     with Progress() as progress:
