@@ -1,5 +1,11 @@
 # Release Notes
 
+## [0.4.5] - 2026-07-18
+
+### What's Changed
+#### Features
+* feat(core): add recursive search and richer CLI listings by @mghalix in https://github.com/mghalix/storix/pull/13
+
 ## [0.4.4] - 2026-07-18
 
 Rich recursive-listing groundwork, Azure Blob URL parity, and real concurrency
