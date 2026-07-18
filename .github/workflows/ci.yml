@@ -2,39 +2,314 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches:
+      - main
   pull_request:
 
+permissions: {}
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  core:
+    name: Core / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.12', '3.13']
+        python-version:
+          - "3.12"
+          - "3.13"
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
           python-version: ${{ matrix.python-version }}
           enable-cache: true
 
-      - run: uv sync --all-extras --dev
+      - name: Install default runtime only
+        run: uv sync --locked --no-dev
 
-      - name: Lint
-        run: uv run ruff check .
+      - name: Exercise default runtime
+        run: uv run --no-sync python -I tests/smoke/core.py
 
-      - name: Format check
-        run: uv run ruff format --check .
+  unit:
+    name: Unit / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.12"
+          - "3.13"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-      - name: Codegen drift (sync tree matches async source)
-        run: uv run python scripts/unasync.py --check
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
 
-      - name: Tests
-        run: uv run pytest -q
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Run unit and conformance tests with branch coverage
+        run: uv run --no-sync just test-unit -q
+
+  integration:
+    name: Optional integrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install every optional integration
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Collect and run credentialed integration cases
+        run: uv run --no-sync just test-integration -q
+
+  lower-bounds:
+    name: Runtime lower bounds
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: "3.12"
+          enable-cache: false
+
+      - name: Install the locked test environment
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Select declared runtime lower bounds
+        run: >-
+          uv pip install --python .venv/bin/python
+          --resolution lowest-direct --reinstall --refresh
+          ".[all]"
+
+      - name: Show selected runtime versions
+        run: uv pip tree --python .venv/bin/python --package storix --depth 1
+
+      - name: Test runtime lower bounds
+        run: uv run --no-sync pytest -q --ignore=tests/automation
+
+  typing:
+    name: Typing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Check public and implementation types
+        run: uv run --no-sync just typing
+
+  automation:
+    name: Repository automation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout full pull request history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Check formatting, lint, and generated files
+        run: |
+          uv run --no-sync ruff check .
+          uv run --no-sync ruff format --check .
+          uv run --no-sync python scripts/unasync.py --check
+
+      - name: Validate pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: uv run --no-sync cz check --message "${PR_TITLE}"
+
+      - name: Validate every introduced commit
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" =~ ^0+$ ]]; then
+            BASE_SHA="$(git rev-list --max-parents=0 "${HEAD_SHA}")"
+          fi
+          uv run --no-sync cz check --rev-range "${BASE_SHA}..${HEAD_SHA}"
+
+      - name: Test release and workflow automation
+        run: uv run --no-sync pytest -q tests/automation
+
+      - name: Scan for dead code
+        run: uv run --no-sync vulture src release scripts/unasync.py --min-confidence 100
+
+      - name: Audit Actions offline
+        run: uv run --no-sync zizmor --offline --persona=pedantic --min-severity=low .github/workflows
+
+  docs:
+    name: Documentation and examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Run offline examples
+        run: uv run --no-sync just examples
+
+      - name: Build strict documentation
+        run: uv run --no-sync just docs-build
+
+  artifacts:
+    name: Wheel and sdist
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Build publishable artifacts
+        run: uv build --no-sources
+
+      - name: Check distribution metadata
+        run: uv run --no-sync twine check dist/*
+
+      - name: Smoke-test exact wheel and sdist
+        run: uv run --no-sync python tests/smoke/distributions.py dist
+
+  required:
+    name: Required
+    if: always()
+    needs:
+      - core
+      - unit
+      - integration
+      - lower-bounds
+      - typing
+      - automation
+      - docs
+      - artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every CI layer
+        env:
+          ARTIFACTS_RESULT: ${{ needs.artifacts.result }}
+          AUTOMATION_RESULT: ${{ needs.automation.result }}
+          CORE_RESULT: ${{ needs.core.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+          LOWER_BOUNDS_RESULT: ${{ needs.lower-bounds.result }}
+          TYPING_RESULT: ${{ needs.typing.result }}
+          UNIT_RESULT: ${{ needs.unit.result }}
+        run: |
+          set -euo pipefail
+
+          for result in \
+            "${CORE_RESULT}" \
+            "${UNIT_RESULT}" \
+            "${INTEGRATION_RESULT}" \
+            "${LOWER_BOUNDS_RESULT}" \
+            "${TYPING_RESULT}" \
+            "${AUTOMATION_RESULT}" \
+            "${DOCS_RESULT}" \
+            "${ARTIFACTS_RESULT}"
+          do
+            test "${result}" = "success"
+          done
