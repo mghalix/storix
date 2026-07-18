@@ -106,4 +106,4 @@ CLI loops - they benefit only once the recursive walk moves into the core
 (the `find`/`walk` work), which will express its per-level fan-out through this
 same `concurrent` helper.
 
-0.4.x (backward-compatible; internal-only, no public API change; ADR 0021).
+0.4.4 (backward-compatible; internal-only, no public API change; ADR 0021).

@@ -1,5 +1,41 @@
 # Release Notes
 
+## [0.4.4] - 2026-07-18
+
+Rich recursive-listing groundwork, Azure Blob URL parity, and real concurrency
+in the sync flavor. Three backward-compatible features. See ADRs 0023-0025.
+
+### Added
+
+- `Storix.scandir` yields a directory's entries lazily as rich `DirEntry`
+  objects (name, absolute path, `kind`, and any size the listing carried for
+  free), after `os.scandir`; `iterdir` is its lazy-names sibling (after
+  `pathlib`); `is_empty` answers whether a directory holds anything in one
+  round trip (hidden entries counted, so a dotfile-only directory is not
+  empty). `ls` is reimplemented over `scandir` with unchanged behavior, so the
+  kind/size the port already produces reaches consumers without a stat per
+  entry. `DirEntry` is exported from `storix` and `storix.aio`. ADR 0023.
+- `AzureBlobBackend.url()` mints a read SAS from an account key locally
+  (`generate_blob_sas`, pure HMAC, no request), 1:1 with `AzureBackend` (ADLS):
+  the same code and credential now produce a URL on any Azure account kind.
+  `presigned_urls` is advertised when the credential can sign, and
+  `azure-storage-blob` joins the lean `azblob` extra so it works there too.
+  ADR 0024.
+
+### Changed
+
+- The sync flavor's multi-target operations (`cat`, `touch`, `mkdir`, `rm`,
+  `mv`, `cp`, and `du`'s subtree walk) now run concurrently. A thunk-based
+  `concurrent` helper dispatches the fan-out to a bounded `ThreadPoolExecutor`
+  in sync and to `asyncio.gather` in async; because the backends do
+  GIL-releasing blocking I/O, the sync threads give genuine I/O concurrency. So
+  `sx du`/`cp`/`rm` on a wide cloud tree parallelize like the async API. The
+  async path is unchanged, error semantics stay unwrapped (the storix taxonomy
+  survives), and codegen is untouched. ADR 0025.
+- The `sx` CLI consumes the new core listing: its `list_entries` and
+  `has_children` re-implementations are gone in favor of `scandir` and
+  `is_empty`, so listing semantics live in one place.
+
 ## [0.4.3] - 2026-07-17
 
 The `sx` revamp: completion, progress, icons, unix-consistent output, and a

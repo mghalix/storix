@@ -74,5 +74,5 @@ install-accurate rather than always-false on blob. Cost: `azblob` carries
 each mirrors its SDK. A unit test signs with a throwaway key offline (SAS
 generation is local), so coverage needs no live account.
 
-0.4.5 (backward-compatible feature -> patch; ADR 0021). Ships after 0.4.4
-(scandir); independent of it.
+0.4.4 (backward-compatible feature -> patch; ADR 0021). Bundled into the
+0.4.4 release with scandir and the sync-concurrency work; independent of both.
