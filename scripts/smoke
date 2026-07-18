@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Install one exact artifact in a fresh environment and execute one scenario
+# outside the repository. Usage:
+#   scripts/smoke ARTIFACT SCENARIO EXTRAS_OR_DASH [SUPPORT_REQUIREMENT ...]
+
+set -euo pipefail
+
+if [[ $# -lt 3 ]]; then
+    echo "usage: $0 ARTIFACT SCENARIO EXTRAS_OR_DASH [SUPPORT_REQUIREMENT ...]" >&2
+    exit 2
+fi
+
+artifact="$(realpath "$1")"
+scenario="$(realpath "$2")"
+extras="$3"
+shift 3
+
+if [[ ! -f "$artifact" ]]; then
+    echo "artifact does not exist: $artifact" >&2
+    exit 2
+fi
+
+if [[ ! -f "$scenario" ]]; then
+    echo "scenario does not exist: $scenario" >&2
+    exit 2
+fi
+
+temporary="$(mktemp -d)"
+trap 'rm -rf "$temporary"' EXIT
+
+venv="$temporary/.venv"
+python="$venv/bin/python"
+uv venv --quiet --python "3.13" "$venv"
+
+if [[ "$extras" == "-" ]]; then
+    requirement="$artifact"
+else
+    requirement="storix[$extras] @ file://$artifact"
+fi
+
+uv pip install \
+    --quiet \
+    --python "$python" \
+    --refresh \
+    --link-mode copy \
+    "$requirement" \
+    "$@"
+
+cd "$temporary"
+env -u PYTHONPATH -u UV_PROJECT_ENVIRONMENT -u VIRTUAL_ENV \
+    "$python" -I "$scenario"

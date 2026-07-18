@@ -1,0 +1,1 @@
+"""Artifact smoke consumers."""
