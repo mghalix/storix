@@ -2,10 +2,10 @@
 
 `sx ls` with the empty/full folder glyph needs every subdirectory's
 emptiness. This times the serial loop (one `is_empty`, so one LIST, per
-subdirectory - the pre-0.4.5 behavior) against the bulk path the CLI now
-uses (`state.empty_all` -> `Storix.empty_children`), which derives every
-child's emptiness from ONE recursive listing (ADR 0027 (b)). The win is
-N round trips collapsing to one.
+subdirectory - the pre-0.4.5 behavior) against the batch path the CLI now
+uses (`state.empty_all` -> `Storix.empty_children`). An advertising backend
+derives every child's emptiness from one recursive listing (ADR 0027 (b)); a
+backend without that cheap operation uses the portable concurrent fallback.
 
 Reproducible mode uses a `LatencyBackend` (a `MemoryBackend` with a sleep
 per listing call); set STORIX_BENCH_PROVIDER=azure (+ STORIX_* creds) for
@@ -58,7 +58,7 @@ def main() -> None:
     provider = os.environ.get('STORIX_BENCH_PROVIDER')
     if provider:
         fs = get_storage(provider)
-        names = [p.name for p in fs.ls('/', abs=True) if fs.isdir(p)]
+        names = [entry.name for entry in fs.scandir('/') if entry.is_dir]
         print(f'real backend {provider!r}: {len(names)} subdirs')
     else:
         fs = Storix(LatencyBackend())
@@ -72,9 +72,15 @@ def main() -> None:
     base = fs.resolve('/')
     dirs = [base / n for n in names]
     serial = _time('serial (loop is_empty)', lambda: [fs.is_empty(d) for d in dirs])
-    bulk = _time('bulk (empty_all, 1 list)', lambda: empty_all(fs, base, names))
-    if bulk:
-        print(f'  -> {serial / bulk:.1f}x faster: one request vs {len(names)}')
+    if fs.backend.capabilities.bulk_listing:
+        label = 'bulk (empty_all, 1 list)'
+        comparison = f'one request vs {len(names)}'
+    else:
+        label = 'concurrent fallback'
+        comparison = f'{len(names)} concurrent probes'
+    batch = _time(label, lambda: empty_all(fs, base, names))
+    if batch:
+        print(f'  -> {serial / batch:.1f}x faster: {comparison}')
 
 
 if __name__ == '__main__':

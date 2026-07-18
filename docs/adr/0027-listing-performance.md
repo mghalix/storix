@@ -1,6 +1,6 @@
 # 27. Listing performance: concurrent batch, bulk emptiness, cache cold path
 
-Status: accepted ((b) bulk emptiness: built; (c) concurrent walk: staged)
+Status: accepted ((b) bulk emptiness: built; (c) proposed in ADR 0028)
 
 ## Context
 
@@ -55,7 +55,13 @@ As built:
   `list_with_recursive`, so `s3`/`gcs`/`azblob`/`opendal-memory` advertise it
   and the `fs` service does not) and `MemoryBackend` (one keyspace scan).
   `LocalBackend` and `AzureBackend` do not advertise it and fall back to (a);
-  local disk latency is not the round-trip cost this targets.
+  local disk latency is not the round-trip cost this targets. ADLS does expose
+  a recursive `get_paths`, but capability means "cheap for this strategy", not
+  merely "the SDK has a recursive flag". On the measured HNS container, the
+  root exceeded the 10,000-key bound: bulk-then-fallback made `sx ls` take
+  12.78s instead of 7.30s. The first 100 recursively ordered results alone took
+  2.94s and all belonged to one top-level directory. `AzureBackend` therefore
+  deliberately keeps the concurrent shallow fallback.
 - Core: `Storix.empty_children(path, names=...)` groups the descendant keys by
   immediate child and returns each child directory's emptiness in one call.
   `is_empty` (single) stays for the point query. The CLI `state.empty_all`
@@ -75,7 +81,8 @@ listing (one cache entry). Independently, `walk` (and thus `sx tree` and the
 `sx du` breakdown) is a sequential lazy generator in both flavors; the
 whole-tree consumers want a level-buffered concurrent traversal (the deferred
 concurrent-walk), which also fixes the inconsistency that `generic.du` (the du
-total) is already concurrent while the breakdown is not.
+total) is already concurrent while the breakdown is not. ADR 0028 specifies
+that traversal and the removal of the CLI's private recursive storage loop.
 
 Rejected: defaulting `dir_contents` off on cloud - it disables the feature
 instead of making it fast, which is not what was asked. Rejected: making the
