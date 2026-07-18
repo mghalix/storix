@@ -41,8 +41,8 @@ from .render import (
     human_size,
 )
 from .state import (
-    _fs,
-    _session,
+    _fs,  # pyright: ignore[reportPrivateUsage]
+    _session,  # pyright: ignore[reportPrivateUsage]
     apply_layers,
     build_base,
     build_session,
@@ -57,7 +57,7 @@ from .state import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from storix import Storix
     from storix.models import DirEntry
@@ -78,6 +78,17 @@ app = typer.Typer(
 def _die(cmd: str, exc: Exception) -> NoReturn:
     err.print(f'[red]{cmd}: {exc}[/red]')
     raise typer.Exit(1) from exc
+
+
+def _count_label(count: int, singular: str, plural: str) -> str:
+    """Choose a count-sensitive label.
+
+    Args:
+        count: Quantity the label describes.
+        singular: Label used for exactly one item.
+        plural: Label used for every other count.
+    """
+    return singular if count == 1 else plural
 
 
 # --- listing / navigation ---
@@ -227,7 +238,8 @@ def tree(
     fs = _fs()
     if sort not in {'name', 'time', 'size'}:
         _die('tree', ValueError(f'sort must be name, time or size, got {sort!r}'))
-    dirs, files = 1, 0  # unix tree counts the root directory
+    dirs: int = 1  # unix tree counts the root directory
+    files: int = 0
 
     def children_of(target: str) -> list[DirEntry]:
         try:
@@ -264,7 +276,7 @@ def tree(
                 expand = level is None or depth < level
                 sub = children_of(inner) if expand else []
                 # only claim empty/full when we actually looked inside
-                state = 'closed' if not expand else ('full' if sub else 'empty')
+                state = 'closed' if not expand else dir_state_of(populated=bool(sub))
                 label = entry_label(child, slash=False, dir_state=state)
                 console.print(columns(child) + Text(f'{prefix}{branch}') + label)
                 if expand:
@@ -278,8 +290,8 @@ def tree(
     root = str(fs.resolve(path))
     console.print(f'[bold blue]{root}[/bold blue]')
     walk(children_of(root), root, '', 1)
-    d = 'directory' if dirs == 1 else 'directories'
-    f = 'file' if files == 1 else 'files'
+    d = _count_label(dirs, 'directory', 'directories')
+    f = _count_label(files, 'file', 'files')
     console.print(f'\n{dirs} {d}, {files} {f}')
 
 
@@ -542,7 +554,7 @@ def exists(paths: Annotated[list[str], typer.Argument()]) -> None:
 
 
 @contextmanager
-def _transfer_progress(fs: Storix, label: str, total: int) -> Iterator[Storix]:
+def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
     """Session emitting into a live bar; sx owns ``total`` (ADR 0019).
 
     Wraps ``fs`` in an outermost ``ObservabilityLayer`` whose sink moves a
@@ -658,7 +670,7 @@ def shell() -> None:
 
 
 @app.callback(invoke_without_command=True)
-def _main(
+def _main(  # pyright: ignore[reportUnusedFunction]
     ctx: typer.Context,
     *,
     provider_: Annotated[

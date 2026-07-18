@@ -17,7 +17,6 @@ of truth" guarantee and must be audited by hand against its twin.
 import asyncio
 
 from collections.abc import Awaitable, Callable, Iterable
-from typing import cast
 
 from storix.constants import DEFAULT_CONCURRENCY
 
@@ -44,8 +43,7 @@ async def gather[T](*aws: Awaitable[T], limit: int = DEFAULT_CONCURRENCY) -> lis
         async with semaphore:
             return await aw
 
-    results = await asyncio.gather(*(bounded(aw) for aw in aws))
-    return cast('list[T]', results)
+    return await asyncio.gather(*(bounded(aw) for aw in aws))
 
 
 async def concurrent[T](

@@ -18,7 +18,7 @@ import tomllib
 
 from functools import cache
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -65,12 +65,12 @@ class CliPrefs(BaseModel):
 
 def _section(document: Any, *keys: str) -> dict[str, Any] | None:
     """Descend ``keys`` into a parsed TOML document; None when absent."""
-    node = document
+    node: object = document
     for key in keys:
         if not isinstance(node, dict) or key not in node:
             return None
-        node = node[key]
-    return node if isinstance(node, dict) else None
+        node = cast('dict[str, Any]', node)[key]
+    return cast('dict[str, Any]', node) if isinstance(node, dict) else None
 
 
 def _read(file: Path) -> dict[str, Any]:

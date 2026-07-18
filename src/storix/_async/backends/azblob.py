@@ -13,7 +13,8 @@ plain blob endpoint and works on every storage account, flat
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from importlib.util import find_spec
+from typing import TYPE_CHECKING, Final
 
 from storix.enums import PathKind
 from storix.errors import IsADirectoryError
@@ -28,12 +29,17 @@ except ImportError:  # pragma: no cover
     )
     raise ImportError(_msg) from None
 
-try:
-    import azure.storage.blob  # noqa: F401
 
-    _HAS_BLOB_SDK = True
-except ImportError:  # pragma: no cover
-    _HAS_BLOB_SDK = False
+def _has_blob_sdk() -> bool:
+    """Return whether the optional Azure Blob SDK can be imported."""
+    try:
+        return find_spec('azure.storage.blob') is not None
+    except ModuleNotFoundError:  # pragma: no cover
+        return False
+
+
+_HAS_BLOB_SDK: Final[bool] = _has_blob_sdk()
+"""Whether local account-key SAS signing is available."""
 
 
 if TYPE_CHECKING:

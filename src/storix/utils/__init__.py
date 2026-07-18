@@ -7,12 +7,21 @@ from storix.types import StrPathLike
 
 # Expose 'magic' at module level for testability and patching.
 # Will be used by get_mimetype; tests may monkeypatch storix.utils.magic.
+def _fallback_from_buffer(_buf: object, *, mime: bool = True) -> str:
+    """Return a generic content type when libmagic is unavailable.
+
+    Args:
+        _buf: Content prefix that could not be inspected.
+        mime: Whether the caller requested a MIME type.
+    """
+    del mime
+    return 'application/octet-stream'
+
+
 try:
     import magic as magic
 except (ImportError, OSError):  # libmagic may be missing at either level
-    magic = SimpleNamespace(  # type: ignore[assignment]
-        from_buffer=lambda _buf, mime=True: 'application/octet-stream'
-    )
+    magic = SimpleNamespace(from_buffer=_fallback_from_buffer)  # type: ignore[assignment]
 
 
 def craft_adlsg2_url(*, account_name: str) -> str:
