@@ -1,5 +1,40 @@
 # Release Notes
 
+## [0.4.5] - 2026-07-18
+
+Recursive search is now a first-class core capability, with a faster and more
+capable Unix-style CLI built on the same primitives.
+
+### Added
+
+- `Storix.walk` lazily traverses directory trees in top-down or bottom-up
+  order, while `Storix.find` filters by glob and entry kind and `Storix.glob`
+  provides pathlib-style recursive matching.
+- `find(kind=...)` accepts the typed `PathKindStr` literals `file` and
+  `directory` as well as `PathKind` values.
+- `sx find` exposes recursive search from the command line.
+- `sx du` gains summary, per-file, and maximum-depth modes, and `sx tree` gains
+  depth limits, long output, and sorting by name, time, or size.
+- A listing-and-searching recipe and reproducible listing benchmarks document
+  the new APIs and their performance model.
+
+### Changed
+
+- `sx ls` and `sx tree` batch per-entry metadata lookups through Storix's
+  concurrency helper, avoiding one serial network round trip per entry on
+  remote backends.
+
+### Fixed
+
+- `find` and `glob` can include hidden entries when `all=True`.
+- `sx tree -l` no longer leaks dim styling from metadata columns into names.
+
+### Removed
+
+- The unreferenced and unexported legacy `src/storix/core` prototype is gone;
+  the supported `Storix` methods now own recursive traversal. This does not
+  remove a public API.
+
 ## [0.4.4] - 2026-07-18
 
 Rich recursive-listing groundwork, Azure Blob URL parity, and real concurrency
