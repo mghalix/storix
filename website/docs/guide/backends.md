@@ -31,7 +31,7 @@ Storix(MemoryBackend())          # in-process, disposable
 
 ## The port
 
-Every backend implements one small interface, the 17-method `StorageBackend`
+Every backend implements one small interface, the 18-method `StorageBackend`
 port (read, write, list, stat, and friends). The core `Storix` engine owns
 all the unix behavior (cwd, path resolution, `mv` as copy-plus-delete, and so on)
 and calls only that port. Backends do no path logic and raise only

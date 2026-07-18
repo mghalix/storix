@@ -288,6 +288,32 @@ async def test_empty_children_honors_explicit_names(fs: Storix):
     assert await fs.empty_children('/d', names=['full']) == {'full': False}
 
 
+async def test_empty_children_with_names_uses_one_bulk_listing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = MemoryBackend()
+    fs = Storix(backend)
+    await fs.mkdir('/d/empty', parents=True)
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    calls = 0
+    list_tree = backend.list_tree
+
+    async def counting_list_tree(path: P):
+        nonlocal calls
+        calls += 1
+        async for descendant in list_tree(path):
+            yield descendant
+
+    monkeypatch.setattr(backend, 'list_tree', counting_list_tree)
+
+    assert await fs.empty_children('/d', names=['empty', 'full']) == {
+        'empty': True,
+        'full': False,
+    }
+    assert calls == 1
+
+
 async def test_empty_children_ignores_file_children(fs: Storix):
     await fs.mkdir('/d')
     await fs.touch('/d/a.txt')
@@ -319,9 +345,7 @@ async def test_empty_children_falls_back_without_capability():
     import dataclasses
 
     backend = MemoryBackend()
-    backend.capabilities = dataclasses.replace(
-        backend.capabilities, bulk_listing=False
-    )
+    backend.capabilities = dataclasses.replace(backend.capabilities, bulk_listing=False)
     fs = Storix(backend)
     await fs.mkdir('/d')
     await fs.mkdir('/d/empty')

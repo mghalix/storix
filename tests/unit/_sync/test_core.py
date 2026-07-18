@@ -290,6 +290,31 @@ def test_empty_children_honors_explicit_names(fs: Storix):
     assert fs.empty_children('/d', names=['full']) == {'full': False}
 
 
+def test_empty_children_with_names_uses_one_bulk_listing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = MemoryBackend()
+    fs = Storix(backend)
+    fs.mkdir('/d/empty', parents=True)
+    fs.mkdir('/d/full')
+    fs.touch('/d/full/a.txt')
+    calls = 0
+    list_tree = backend.list_tree
+
+    def counting_list_tree(path: P):
+        nonlocal calls
+        calls += 1
+        yield from list_tree(path)
+
+    monkeypatch.setattr(backend, 'list_tree', counting_list_tree)
+
+    assert fs.empty_children('/d', names=['empty', 'full']) == {
+        'empty': True,
+        'full': False,
+    }
+    assert calls == 1
+
+
 def test_empty_children_ignores_file_children(fs: Storix):
     fs.mkdir('/d')
     fs.touch('/d/a.txt')

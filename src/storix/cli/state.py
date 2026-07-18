@@ -124,9 +124,7 @@ def stat_all(fs: Storix, paths: Sequence[StorixPath]) -> list[RawStat]:
     return concurrent(partial(fs.backend.stat, path) for path in paths)
 
 
-def empty_all(
-    fs: Storix, base: StorixPath, names: Sequence[str]
-) -> list[bool | None]:
+def empty_all(fs: Storix, base: StorixPath, names: Sequence[str]) -> list[bool | None]:
     """Emptiness of ``base``'s named child directories, in one core call.
 
     Delegates to ``fs.empty_children`` so the bulk (one recursive listing)
