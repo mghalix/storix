@@ -107,7 +107,7 @@ philosophy of 0013 is unchanged; only where the capability comes from
 changes).
 
 Breaking: `when_missing(Capability.X, Layer)` call sites must drop the
-capability. In-tree that is one test (`tests/_async/test_layers.py:118`,
+capability. In-tree that is one test (`tests/unit/_async/test_layers.py:118`,
 sync twin generated) plus the ADR references above. Downstream: a
 minor-version breaking note; trivial mechanical migration (delete the
 first argument).
@@ -127,7 +127,7 @@ Implementation (edit `_async` only, then `just gen`; full gate
 - [ ] Export `LayerFactory` from `_async/__init__.py`, `aio/__init__.py`,
       `storix/__init__.py`, and add it to each `__all__` (mirror how
       `BoundLayer` is exported).
-- [ ] `tests/_async/test_layers.py:118`: update to the inferred signature
+- [ ] `tests/unit/_async/test_layers.py:118`: update to the inferred signature
       (`when_missing(DataUrlLayer)`); add a case asserting `ValueError`
       when the layer has no `provides`.
 - [ ] Optional: reimplement `with_layer_missing` over `when_missing`.

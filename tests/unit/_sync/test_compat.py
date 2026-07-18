@@ -1,6 +1,6 @@
 """Tests for the sync concurrency twin (hand-written, not generated).
 
-Mirrors the ``concurrent`` cases in tests/_async/test_compat.py. The async
+Mirrors the ``concurrent`` cases in tests/unit/_async/test_compat.py. The async
 ``gather`` tests have no counterpart here: the sync ``gather`` was removed
 once every call site moved to thunks.
 """
