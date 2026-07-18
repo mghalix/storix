@@ -1,48 +1,152 @@
 name: Release
 
-# Fires when you push a version tag (e.g. `git tag v0.2.0 && git push --tags`).
-# Builds, publishes to PyPI via Trusted Publishing (no stored token), and
-# creates the GitHub release. One-time setup: on pypi.org add a Trusted
-# Publisher for this repo -> workflow `release.yml` (see docs/roadmap.md).
-
 on:
-  push:
-    tags: ['v*']
+  release:
+    types:
+      - published
 
-permissions:
-  contents: write   # create the GitHub release
-  id-token: write   # PyPI Trusted Publishing (OIDC)
+permissions: {}
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  verify:
+    name: Verify immutable release
     runs-on: ubuntu-latest
-    # Must match the "Environment name" on the PyPI trusted publisher.
-    # Add protection rules (required reviewer, etc.) under repo Settings
-    # -> Environments -> pypi to gate every release.
+    timeout-minutes: 10
+    permissions:
+      attestations: read # Verify build provenance for every distribution.
+      contents: read # Read the tag, release, and attached assets.
+
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_AUTHOR: ${{ github.event.release.author.login }}
+      RELEASE_BODY: ${{ github.event.release.body }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+    steps:
+      - name: Checkout immutable release tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          enable-cache: false
+
+      - name: Install Python
+        run: uv python install 3.13
+
+      - name: Verify prepared release
+        run: |
+          set -euo pipefail
+
+          if [[ "${RELEASE_AUTHOR}" != "github-actions[bot]" ]]; then
+            echo "Release was not created by the draft-release workflow"
+            exit 1
+          fi
+
+          uv run python release/prepare.py verify-tag "${RELEASE_TAG}"
+
+          tagged_commit="$(git rev-parse HEAD)"
+          expected_marker="<!-- release-target:${tagged_commit} -->"
+          if [[ "${RELEASE_BODY}" != *"${expected_marker}"* ]]; then
+            echo "Release notes do not identify the checked-out release target"
+            exit 1
+          fi
+
+          git fetch --no-tags \
+            origin \
+            "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+          if ! git merge-base \
+            --is-ancestor HEAD "origin/${DEFAULT_BRANCH}"; then
+            echo "Tag ${RELEASE_TAG} does not belong to ${DEFAULT_BRANCH} history"
+            exit 1
+          fi
+
+          gh release verify "${RELEASE_TAG}"
+
+      - name: Download immutable release assets
+        run: |
+          mkdir dist
+          gh release download "${RELEASE_TAG}" \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --dir dist
+
+      - name: Verify release assets and build provenance
+        run: |
+          set -euo pipefail
+
+          wheel_count="$(find dist -maxdepth 1 -name '*.whl' | wc -l)"
+          sdist_count="$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)"
+          if [[ "${wheel_count}" != "1" || "${sdist_count}" != "1" ]]; then
+            echo "Expected exactly one wheel and one source distribution"
+            exit 1
+          fi
+
+          tagged_commit="$(git rev-parse HEAD)"
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            gh release verify-asset "${RELEASE_TAG}" "${artifact}"
+            gh attestation verify "${artifact}" \
+              --repo "${GH_REPO}" \
+              --signer-workflow "${GH_REPO}/.github/workflows/create-draft-release.yml" \
+              --source-digest "${tagged_commit}"
+          done
+
+      - name: Check distribution metadata
+        run: uv run twine check dist/*
+
+  publish:
+    name: Publish immutable assets to PyPI
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     environment:
       name: pypi
       url: https://pypi.org/p/storix
+
+    permissions:
+      attestations: read # Verify the immutable release before publishing.
+      contents: read # Download the immutable GitHub Release assets.
+      id-token: write # Authenticate to PyPI through Trusted Publishing.
+
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Download immutable release assets
+        run: |
+          mkdir dist
+          gh release verify "${RELEASE_TAG}"
+          gh release download "${RELEASE_TAG}" \
+            --pattern '*.whl' \
+            --pattern '*.tar.gz' \
+            --dir dist
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            gh release verify-asset "${RELEASE_TAG}" "${artifact}"
+          done
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
-
-      - name: Verify the tag matches the package version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(uv version --short)"
-          test "$tag" = "$pkg" || {
-            echo "tag $tag != pyproject version $pkg"; exit 1;
-          }
-
-      - run: uv build
-
-      - name: Publish to PyPI (Trusted Publishing)
-        run: uv publish
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          generate_release_notes: true
-          files: dist/*
+          version: "0.11.18"
+          enable-cache: false
+
+      - name: Publish
+        run: >
+          uv publish --trusted-publishing always
+          --check-url https://pypi.org/simple/
+          dist/*.whl
+          dist/*.tar.gz

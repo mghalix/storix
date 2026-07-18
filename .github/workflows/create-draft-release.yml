@@ -1,0 +1,128 @@
+name: Create draft release
+
+on:
+  pull_request:
+    types:
+      - closed
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: create-draft-release
+  cancel-in-progress: false
+
+jobs:
+  create-draft:
+    name: Build assets and create draft
+    if: >-
+      (
+        github.event_name == 'workflow_dispatch' &&
+        github.ref_name == github.event.repository.default_branch
+      ) || (
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.base.ref == github.event.repository.default_branch &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        startsWith(github.event.pull_request.head.ref, 'release/')
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      attestations: write # Record build provenance before the release is public.
+      contents: write # Create the draft release and attach its assets.
+      id-token: write # Sign artifact provenance with GitHub OIDC.
+
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      RELEASE_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.pull_request.merge_commit_sha }}
+
+    steps:
+      - name: Checkout merged release commit
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.RELEASE_TARGET }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          enable-cache: false
+
+      - name: Install Python
+        run: uv python install 3.13
+
+      - name: Verify release metadata and target
+        id: release-details
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${RELEASE_TARGET}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Release target must be a full commit SHA"
+            exit 1
+          fi
+
+          if [[ "$(git rev-parse HEAD)" != "${RELEASE_TARGET}" ]]; then
+            echo "Checked-out commit does not match the release target"
+            exit 1
+          fi
+
+          tag="$(uv run python release/prepare.py release-tag)"
+          uv run python release/prepare.py verify-tag "${tag}"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+          git fetch --no-tags \
+            origin \
+            "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+
+          if ! git merge-base \
+            --is-ancestor "${RELEASE_TARGET}" "origin/${DEFAULT_BRANCH}"; then
+            echo "Release target does not belong to ${DEFAULT_BRANCH} history"
+            exit 1
+          fi
+
+          if git show-ref --verify --quiet "refs/tags/${tag}"; then
+            echo "Release tag ${tag} already exists"
+            exit 1
+          fi
+
+          {
+            echo "<!-- release-target:${RELEASE_TARGET} -->"
+            echo
+            uv run python release/prepare.py release-notes
+          } > draft-release-notes.md
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras --all-groups
+
+      - name: Build and verify release candidate
+        run: uv run --no-sync just release-check
+
+      - name: Attest distributions
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Create draft with verified assets
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release-details.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Release ${RELEASE_TAG} already exists"
+            exit 1
+          fi
+
+          gh release create "${RELEASE_TAG}" \
+            dist/*.whl \
+            dist/*.tar.gz \
+            --draft \
+            --target "${RELEASE_TARGET}" \
+            --title "${RELEASE_TAG}" \
+            --notes-file draft-release-notes.md

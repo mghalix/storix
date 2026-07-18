@@ -1,0 +1,172 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: SemVer bump to prepare
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      date:
+        description: Release date in YYYY-MM-DD format; defaults to current UTC date
+        required: false
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Open release pull request
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    environment:
+      name: release-automation
+
+    steps:
+      - name: Create short-lived release token
+        id: release-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout default branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ steps.release-token.outputs.token }}
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          enable-cache: false
+
+      - name: Install Python
+        run: uv python install 3.13
+
+      - name: Verify release lane is empty
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          open_release_pr="$(
+            gh pr list \
+              --state open \
+              --json headRefName \
+              --jq '[.[] | select(.headRefName | startswith("release/"))] | length'
+          )"
+          draft_release="$(
+            gh release list \
+              --limit 100 \
+              --json isDraft \
+              --jq '[.[] | select(.isDraft)] | length'
+          )"
+
+          if [[ "${open_release_pr}" != "0" ]]; then
+            echo "An open release pull request already exists"
+            exit 1
+          fi
+
+          if [[ "${draft_release}" != "0" ]]; then
+            echo "A draft release already awaits publication"
+            exit 1
+          fi
+
+      - name: Prepare release metadata
+        id: release-details
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          RELEASE_BUMP: ${{ inputs.bump }}
+          RELEASE_DATE: ${{ inputs.date }}
+          RELEASE_NOTES_FILE: ${{ runner.temp }}/generated-release-notes.md
+        run: |
+          set -euo pipefail
+
+          next_version="$(
+            uv run python release/prepare.py next-version "${RELEASE_BUMP}"
+          )"
+          current_tag="$(uv run python release/prepare.py release-tag)"
+          next_tag="v${next_version}"
+
+          generate_arguments=(
+            --method POST
+            "repos/${GH_REPO}/releases/generate-notes"
+            -f "tag_name=${next_tag}"
+            -f "target_commitish=${DEFAULT_BRANCH}"
+          )
+          if gh release view "${current_tag}" >/dev/null 2>&1; then
+            generate_arguments+=(-f "previous_tag_name=${current_tag}")
+          else
+            published_releases="$(
+              gh release list \
+                --limit 1 \
+                --exclude-drafts \
+                --json tagName \
+                --jq 'length'
+            )"
+            if [[ "${published_releases}" != "0" ]]; then
+              echo "Current version release ${current_tag} is missing"
+              exit 1
+            fi
+          fi
+
+          gh api "${generate_arguments[@]}" --jq '.body' > "${RELEASE_NOTES_FILE}"
+
+          arguments=(
+            prepare
+            "${RELEASE_BUMP}"
+            --notes-file "${RELEASE_NOTES_FILE}"
+          )
+          if [[ -n "${RELEASE_DATE}" ]]; then
+            arguments+=(--date "${RELEASE_DATE}")
+          fi
+
+          uv run python release/prepare.py "${arguments[@]}"
+          uv lock --check
+          tag="$(uv run python release/prepare.py release-tag)"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Open release pull request
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ steps.release-token.outputs.token }}
+          RELEASE_TAG: ${{ steps.release-details.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          branch="release/${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+          git diff --check
+          git switch -c "${branch}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- pyproject.toml uv.lock "website/docs/release-notes.md"
+          git diff --cached --check
+          git commit -m "chore(release): ${RELEASE_TAG}"
+
+          gh auth setup-git
+          git push --set-upstream origin "${branch}"
+          gh pr create \
+            --base "${DEFAULT_BRANCH}" \
+            --head "${branch}" \
+            --title "chore(release): ${RELEASE_TAG}" \
+            --body "Prepare ${RELEASE_TAG}. Curate the generated release notes, verify the version, and merge only after CI passes."
