@@ -46,7 +46,7 @@ class StorixPath(PurePosixPath):
         return guess_mimetype_from_path(self)
 
     @property
-    def kind(self) -> Literal['file', 'directory']:
+    def kind(self) -> PathKindStr:
         """Guessed kind of the object at this path (file or directory)."""
         return 'file' if self.maybe_file() else 'directory'
 
@@ -64,6 +64,12 @@ os.PathLike.register(StorixPath)
 type StrPathLike = os.PathLike[str] | str
 type StorageProvider = Literal['local', 'memory', 'azure', 's3', 'gcs']
 type EchoMode = Literal['w', 'a']
+
+type PathKindStr = Literal['file', 'directory']
+"""The string form of ``PathKind``, for ergonomic keyword args (``kind='file'``)
+that a type checker still guides. Kept in lockstep with the enum by
+``test_path_kind_str_matches_enum`` - add a ``PathKind`` case and the test
+fails until this Literal lists it too."""
 
 type DataBuffer[AnyStr: (str, bytes)] = (
     AnyStr | Buffer | Iterable[AnyStr | Buffer] | IO[AnyStr]

@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from storix._async.backends import StorageBackend
-    from storix.types import AsyncDataBuffer, EchoMode, StrPathLike
+    from storix.types import AsyncDataBuffer, EchoMode, PathKindStr, StrPathLike
 
 
 P = ParamSpec('P')
@@ -514,7 +514,7 @@ class Storix:
         path: StrPathLike | None = None,
         *,
         name: str | None = None,
-        kind: PathKind | str | None = None,
+        kind: PathKind | PathKindStr | None = None,
     ) -> AsyncIterator[DirEntry]:
         """Recursively find entries, a filtered ``walk`` (after unix ``find``).
 
