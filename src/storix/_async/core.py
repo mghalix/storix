@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import copy
 
+from functools import partial
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
 
 from storix import pathops
-from storix._async._compat import gather
+from storix._async._compat import concurrent
 from storix._async._stream import ensure_chunks, validate_chunk_size
 from storix._async.backends import generic
 from storix.enums import Capability, PathKind
@@ -434,7 +435,9 @@ class Storix:
     async def cat(self, path: StrPathLike, /, *paths: StrPathLike) -> bytes:
         """Read one or more files, concatenated in argument order."""
         targets = [self._resolve(p) for p in (path, *paths)]
-        parts = await gather(*(self._backend.read(target) for target in targets))
+        parts = await concurrent(
+            partial(self._backend.read, target) for target in targets
+        )
         return b''.join(parts)
 
     async def stream(
@@ -559,11 +562,9 @@ class Storix:
         targets = [self._resolve(p) for p in (path, *paths)]
         for target in targets:
             await self._ensure_parent(target)
-        await gather(
-            *(
-                self._backend.write(target, b'', mode='a', content_type=None)
-                for target in targets
-            )
+        await concurrent(
+            partial(self._backend.write, target, b'', mode='a', content_type=None)
+            for target in targets
         )
 
     async def echo(
@@ -628,8 +629,9 @@ class Storix:
         raises ``AlreadyExistsError`` on any existing target.
         """
         targets = [self._resolve(p) for p in (path, *paths)]
-        await gather(
-            *(self._backend.make_dir(target, parents=parents) for target in targets)
+        await concurrent(
+            partial(self._backend.make_dir, target, parents=parents)
+            for target in targets
         )
 
     # --- delete ---
@@ -642,17 +644,20 @@ class Storix:
         All targets are validated before anything is deleted.
         """
         targets = [self._resolve(p) for p in (path, *paths)]
-        stats = await gather(*(self._backend.stat(target) for target in targets))
+        stats = await concurrent(
+            partial(self._backend.stat, target) for target in targets
+        )
         for target, raw in zip(targets, stats, strict=True):
             if raw.kind is PathKind.DIRECTORY and not recursive:
                 raise IsADirectoryError(target)
-        await gather(
-            *(
-                self._backend.delete_tree(target)
+        await concurrent(
+            partial(
+                self._backend.delete_tree
                 if raw.kind is PathKind.DIRECTORY
-                else self._backend.delete(target)
-                for target, raw in zip(targets, stats, strict=True)
+                else self._backend.delete,
+                target,
             )
+            for target, raw in zip(targets, stats, strict=True)
         )
 
     async def rmdir(self, path: StrPathLike, /, *paths: StrPathLike) -> None:
@@ -663,11 +668,13 @@ class Storix:
         ``NotADirectoryError``.
         """
         targets = [self._resolve(p) for p in (path, *paths)]
-        stats = await gather(*(self._backend.stat(target) for target in targets))
+        stats = await concurrent(
+            partial(self._backend.stat, target) for target in targets
+        )
         for target, raw in zip(targets, stats, strict=True):
             if raw.kind is not PathKind.DIRECTORY:
                 raise NotADirectoryError(target)
-        await gather(*(self._backend.delete(target) for target in targets))
+        await concurrent(partial(self._backend.delete, target) for target in targets)
 
     # --- move / copy ---
 
@@ -680,11 +687,9 @@ class Storix:
         """
         sources, dst = self._split_destination('mv', source, paths)
         targets = await self._plan_destinations(sources, dst)
-        await gather(
-            *(
-                self._backend.move(src, target)
-                for src, target in zip(sources, targets, strict=True)
-            )
+        await concurrent(
+            partial(self._backend.move, src, target)
+            for src, target in zip(sources, targets, strict=True)
         )
 
     async def cp(
@@ -696,18 +701,18 @@ class Storix:
         overlays into existing destination directories like unix does.
         """
         sources, dst = self._split_destination('cp', source, paths)
-        src_stats = await gather(*(self._backend.stat(src) for src in sources))
+        src_stats = await concurrent(
+            partial(self._backend.stat, src) for src in sources
+        )
         for src, raw in zip(sources, src_stats, strict=True):
             if raw.kind is PathKind.DIRECTORY and not recursive:
                 raise IsADirectoryError(src)
         targets = await self._plan_destinations(sources, dst)
-        await gather(
-            *(
-                generic.copy_tree(self._backend, src, target)
-                if raw.kind is PathKind.DIRECTORY
-                else self._backend.copy(src, target)
-                for src, raw, target in zip(sources, src_stats, targets, strict=True)
-            )
+        await concurrent(
+            partial(generic.copy_tree, self._backend, src, target)
+            if raw.kind is PathKind.DIRECTORY
+            else partial(self._backend.copy, src, target)
+            for src, raw, target in zip(sources, src_stats, targets, strict=True)
         )
 
     def _split_destination(

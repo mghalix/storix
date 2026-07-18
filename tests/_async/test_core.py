@@ -279,6 +279,18 @@ async def test_cat_concatenates_in_order(fs: Storix):
     assert await fs.cat('/a.txt', '/b.txt') == b'onetwo'
 
 
+async def test_cat_fan_out_propagates_underlying_error_unwrapped(fs: Storix):
+    """One missing target in a fan-out raises the storix error unwrapped.
+
+    The sync flavor fans out over a thread pool; the error must arrive as
+    the raw ``PathNotFoundError``, not an ``ExceptionGroup``, so callers'
+    ``except PathNotFoundError`` keeps working.
+    """
+    await fs.echo(b'here', '/exists.txt')
+    with pytest.raises(PathNotFoundError):
+        await fs.cat('/exists.txt', '/missing.txt')
+
+
 async def test_stream_yields_content_in_chunks(fs: Storix):
     await fs.echo(b'streamed payload', '/a.bin')
     chunks = [chunk async for chunk in fs.stream('/a.bin')]

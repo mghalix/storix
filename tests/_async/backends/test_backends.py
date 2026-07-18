@@ -14,6 +14,7 @@ from pathlib import Path, PurePosixPath as P
 
 import pytest
 
+from storix._async import Storix
 from storix._async.backends import StorageBackend
 from storix._async.backends.local import LocalBackend
 from storix._async.backends.memory import MemoryBackend
@@ -537,3 +538,23 @@ async def test_delete_tree_removes_everything(backend: StorageBackend):
     for path in ('/d', '/d/sub', '/d/a.txt', '/d/sub/b.txt'):
         assert not await backend.exists(P(path))
     assert await backend.exists(P('/'))
+
+
+# --- concurrent fan-out (the sync twin runs these through the thread pool) ---
+
+
+async def test_fan_out_read_round_trips(backend: StorageBackend):
+    """A multi-target read fan-out returns every target's content, in order.
+
+    Runs on every backend in both flavors; the generated sync twin drives
+    the ``concurrent`` thread pool over distinct keys, which is the
+    thread-safety check the ADR calls for.
+    """
+    fs = Storix(backend)
+    names = [f'/f{i}.txt' for i in range(10)]
+    for i, name in enumerate(names):
+        await fs.echo(f'content-{i}'.encode(), name)
+
+    joined = await fs.cat(*names)
+
+    assert joined == b''.join(f'content-{i}'.encode() for i in range(10))
