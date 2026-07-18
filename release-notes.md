@@ -2,8 +2,9 @@
 
 ## [0.4.5] - 2026-07-18
 
-Recursive search on the core, and the `du`/`tree` that consume it. One
-backward-compatible feature. See ADR 0026.
+Recursive search on the core, the `du`/`tree` that consume it, and the
+concurrency floor under listing on cloud backends. Backward-compatible. See
+ADR 0026 and 0027.
 
 ### Added
 
@@ -14,9 +15,20 @@ backward-compatible feature. See ADR 0026.
   `os.walk`, unix `find`, and `pathlib.glob`. No new class; methods only.
 - `sx find [PATH] --name PATTERN --type f|d` - recursive search from the shell,
   the headline power-user and agent feature.
+- `find(kind=...)` takes a typed `PathKindStr` literal (`'file'`/`'directory'`)
+  as well as the `PathKind` enum, so a wrong string is a type error, not a
+  runtime one; a test keeps the literal in lockstep with the enum.
+- A "Listing and searching" recipe (which of `ls`/`iterdir`/`scandir`/`walk`/
+  `find`/`glob` to reach for) and a `benchmarks/` directory that times the
+  listing lookups serial vs concurrent against a fixed latency.
 
 ### Changed
 
+- `sx ls` and `sx tree` batch their per-entry backend lookups (directory
+  emptiness for the folder glyph, `-t` mtime, `-l`/`--sort` size) through the
+  core `concurrent` helper instead of a serial loop, so a listing of N entries
+  on a cloud backend costs one round trip's latency, not N. The deeper wins
+  (bulk emptiness, the concurrent walk) are designed in ADR 0027 and staged.
 - `sx du` is now 1:1 with unix `du`: it prints a cumulative size per directory,
   bottom-up, ending with the total (previously only the total, i.e. `du -s`),
   computed in one post-order walk. New flags `-s/--summary` (the old
@@ -24,6 +36,11 @@ backward-compatible feature. See ADR 0026.
   Verified line-for-line against `du -b`.
 - `sx tree` gains eza-style flavors: `-L/--level N` (depth cap), `-l/--long`
   (kind and size columns), `--sort name|time|size`. No-flag behavior unchanged.
+
+### Fixed
+
+- `sx tree -l` no longer dims the entry names (a rich base-style bleed in the
+  row assembly); only the kind/size columns are dim.
 
 ### Removed
 
