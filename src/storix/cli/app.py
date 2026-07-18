@@ -47,9 +47,11 @@ from .state import (
     build_base,
     build_session,
     current_fs,
+    empty_all,
     icons_enabled,
     layer_summary,
     set_icons,
+    stat_all,
     use_fs,
 )
 
@@ -60,8 +62,6 @@ if TYPE_CHECKING:
     from storix import Storix
     from storix.models import DirEntry
     from storix.types import StorixPath
-
-    from .render import DirState
 
 
 __all__ = ['app', 'current_fs', 'main', 'use_fs']
@@ -83,23 +83,6 @@ def _die(cmd: str, exc: Exception) -> NoReturn:
 # --- listing / navigation ---
 
 
-def _dir_state(fs: Storix, base: StorixPath, entry: DirEntry) -> DirState:
-    """The folder glyph state for a flat-listing entry.
-
-    A listing does not say whether a directory holds anything, so the
-    honest default is the neutral 'closed' folder. When ``dir_contents``
-    is on, look - one listing per subdirectory - so empty reads as empty.
-    A vanished or unreadable subdirectory falls back to the neutral glyph.
-    """
-    if not entry.is_dir or not (icons_enabled() and load_prefs().dir_contents):
-        return 'closed'
-    try:
-        populated = not fs.is_empty(base / entry.name)
-    except StorageError:
-        populated = None
-    return dir_state_of(populated=populated)
-
-
 @app.command()
 def ls(
     path: Annotated[str | None, typer.Argument()] = None,
@@ -112,28 +95,57 @@ def ls(
     ] = False,
     reverse: Annotated[bool, typer.Option('-r', '--reverse')] = False,
 ) -> None:
-    """List directory contents (hidden entries need -a)."""
+    """List directory contents (hidden entries need -a).
+
+    The per-entry backend lookups a listing does not carry for free -
+    directory emptiness (the folder glyph), mtime (``-t``), a missing file
+    size (``-l``) - are batched concurrently (``state.empty_all`` /
+    ``stat_all``), so a directory of N entries on a cloud backend costs one
+    round trip's worth of latency, not N.
+    """
     fs = _fs()
     base = fs.resolve(path)
     try:
         entries = sorted(fs.scandir(path, all=all_), key=lambda e: e.name)
-        if time_sort and len(entries) > 1:
-            # listings carry no mtime, so -t costs one stat per entry
-            mtimes = {e.name: fs.backend.stat(base / e.name).modified for e in entries}
-            entries.sort(key=lambda e: mtimes[e.name], reverse=True)
     except StorageError as exc:
         _die('ls', exc)
+
+    show_empty = icons_enabled() and load_prefs().dir_contents
+    empty: dict[str, bool | None] = {}
+    if show_empty:
+        dir_entries = [e for e in entries if e.is_dir]
+        empty = dict(
+            zip(
+                (e.name for e in dir_entries),
+                empty_all(fs, [base / e.name for e in dir_entries]),
+                strict=True,
+            )
+        )
+
+    if time_sort and len(entries) > 1:
+        stats = stat_all(fs, [base / e.name for e in entries])
+        mtimes = {e.name: s.modified for e, s in zip(entries, stats, strict=True)}
+        entries.sort(key=lambda e: mtimes[e.name], reverse=True)
     if reverse:
         entries.reverse()
 
-    def label(entry) -> Text:  # noqa: ANN001 - DirEntry, kept local to ls
-        return entry_label(entry, dir_state=_dir_state(fs, base, entry))
+    def label(entry: DirEntry) -> Text:
+        if entry.is_dir and show_empty:
+            is_empty = empty.get(entry.name)
+            populated = None if is_empty is None else not is_empty
+            state = dir_state_of(populated=populated)
+        else:
+            state = 'closed'
+        return entry_label(entry, dir_state=state)
 
     if not long:
         cells = [label(entry) for entry in entries]
         console.print(Columns(cells, padding=(0, 2))) if cells else None
         return
 
+    # -l: batch the file sizes the listing did not carry, concurrently too
+    missing = [base / e.name for e in entries if not e.is_dir and e.size is None]
+    sizes = dict(zip(missing, (s.size for s in stat_all(fs, missing)), strict=True))
     table = Table(show_header=False, box=None, pad_edge=False)
     table.add_column()  # kind
     table.add_column(justify='right')  # size
@@ -142,9 +154,7 @@ def ls(
         if entry.is_dir:
             size_text = Text('-', style='dim')
         else:
-            size = entry.size
-            if size is None:
-                size = fs.stat(base / entry.name).size
+            size = entry.size if entry.size is not None else sizes[base / entry.name]
             size_text = Text(human_size(size), style='green')
         kind = Text('d' if entry.is_dir else '-', style='dim')
         table.add_row(kind, size_text, label(entry))
@@ -169,19 +179,24 @@ def cd(path: Annotated[str | None, typer.Argument()] = None) -> None:
 def _sorted_entries(fs: Storix, entries: list[DirEntry], sort: str) -> list[DirEntry]:
     """Order a directory's entries for ``tree`` by the chosen key.
 
-    ``name`` sorts alphabetically; ``time`` newest first (one stat per
-    entry, since listings carry no mtime); ``size`` largest first, with
-    directories (no meaningful size) sinking to the bottom.
+    ``name`` sorts alphabetically; ``time`` newest first; ``size`` largest
+    first, with directories (no meaningful size) sinking to the bottom.
+    ``time`` and ``size`` need a stat per entry the listing did not carry,
+    so those are batched concurrently (``stat_all``), one round trip's
+    latency for the level rather than one per entry.
     """
     if sort == 'time':
-        mtime = {e.name: fs.backend.stat(e.path).modified for e in entries}
+        stats = stat_all(fs, [e.path for e in entries])
+        mtime = {e.name: s.modified for e, s in zip(entries, stats, strict=True)}
         return sorted(entries, key=lambda e: mtime[e.name], reverse=True)
     if sort == 'size':
+        missing = [e.path for e in entries if not e.is_dir and e.size is None]
+        extra = dict(zip(missing, (s.size for s in stat_all(fs, missing)), strict=True))
 
         def size_of(entry: DirEntry) -> int:
             if entry.is_dir:
                 return -1
-            return entry.size if entry.size is not None else fs.stat(entry.path).size
+            return entry.size if entry.size is not None else extra[entry.path]
 
         return sorted(entries, key=size_of, reverse=True)
     return sorted(entries, key=lambda e: e.name)

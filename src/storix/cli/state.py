@@ -8,6 +8,7 @@ presentation-related lives in ``render``; the typer surface in ``app``.
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, Final
 
 from storix import (
@@ -18,13 +19,16 @@ from storix import (
     cache as cache_op,
     get_storage,
 )
+from storix._sync._compat import concurrent
 from storix.errors import StorageError
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from storix import Storix
+    from storix.models import RawStat
+    from storix.types import StorixPath
 
 
 _CLI_READ_CAP: Final[int] = 8 * 1024 * 1024
@@ -101,6 +105,39 @@ def icons_enabled() -> bool:
 def set_icons(enabled: bool) -> None:  # noqa: FBT001 - a setter takes the value
     """Force icons on or off for this process (the flag override)."""
     _session.icons = enabled
+
+
+# --- concurrent per-entry lookups ---
+#
+# A listing needs per-entry facts the listing itself does not carry: a
+# directory's emptiness (the folder glyph), an entry's mtime (`ls -t`), a
+# file's size when the backend did not include it. Each is one backend call
+# per entry, and doing them in a Python loop is N serial round trips - the
+# thing that made `sx ls` on a cloud container take N x latency. Batch them
+# through the core `concurrent` helper instead, so N distinct-target calls
+# run at once (a thread pool over the sync backends' GIL-releasing I/O, ADR
+# 0025). The CLI only declares the batch; the concurrency lives in the core.
+
+
+def stat_all(fs: Storix, paths: Sequence[StorixPath]) -> list[RawStat]:
+    """Stat every path concurrently - one cloud round trip, not N serial."""
+    return concurrent(partial(fs.backend.stat, path) for path in paths)
+
+
+def empty_all(fs: Storix, paths: Sequence[StorixPath]) -> list[bool | None]:
+    """Test each directory for emptiness concurrently.
+
+    ``None`` for a directory whose check failed (vanished or unreadable),
+    so the caller can render the neutral glyph rather than guess.
+    """
+
+    def probe(path: StorixPath) -> bool | None:
+        try:
+            return fs.is_empty(path)
+        except StorageError:
+            return None
+
+    return concurrent(partial(probe, path) for path in paths)
 
 
 def apply_layers(
