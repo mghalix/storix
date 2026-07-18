@@ -267,6 +267,96 @@ def test_is_empty_missing_raises(fs: Storix):
         fs.is_empty('/nope')
 
 
+# --- walk / find / glob ---
+
+
+def _nested_tree(fs: Storix) -> None:
+    """A small nested tree shared by the recursive-listing tests.
+
+    /pkg, /pkg/sub, /pkg/mod.py, /pkg/sub/deep.py, /pkg/readme.txt.
+    """
+    fs.mkdir('/pkg/sub', parents=True)
+    fs.echo(b'a', '/pkg/mod.py')
+    fs.echo(b'bb', '/pkg/sub/deep.py')
+    fs.echo(b'ccc', '/pkg/readme.txt')
+
+
+def test_walk_recurses_into_every_descendant(fs: Storix):
+    _nested_tree(fs)
+
+    names = {e.name for e in fs.walk('/')}
+
+    assert names == {'pkg', 'sub', 'mod.py', 'deep.py', 'readme.txt'}
+
+
+def test_walk_returns_a_lazy_iterator(fs: Storix):
+    from collections.abc import Iterator
+
+    # a generator, not a materialized list: nothing is read until iterated
+    assert isinstance(fs.walk('/'), Iterator)
+
+
+def test_walk_top_down_yields_a_directory_before_its_children(fs: Storix):
+    _nested_tree(fs)
+
+    names = [e.name for e in fs.walk('/')]
+
+    assert names.index('pkg') < names.index('sub') < names.index('deep.py')
+
+
+def test_walk_post_order_yields_a_child_before_its_parent(fs: Storix):
+    _nested_tree(fs)
+
+    names = [e.name for e in fs.walk('/', top_down=False)]
+
+    assert names.index('deep.py') < names.index('sub')  # file before its dir
+    assert names.index('sub') < names.index('pkg')  # child dir before parent
+
+
+def test_walk_excludes_hidden_and_does_not_descend_them_unless_all(
+    fs: Storix,
+):
+    fs.mkdir('/pkg/.git', parents=True)
+    fs.touch('/pkg/.env', '/pkg/.git/config')
+
+    visible = {e.name for e in fs.walk('/pkg')}
+    every = {e.name for e in fs.walk('/pkg', all=True)}
+
+    assert '.env' not in visible and '.git' not in visible
+    assert 'config' not in visible  # a hidden directory is not descended
+    assert {'.env', '.git', 'config'} <= every
+
+
+def test_find_filters_by_name_glob(fs: Storix):
+    _nested_tree(fs)
+
+    py = {e.name for e in fs.find('/', name='*.py')}
+
+    assert py == {'mod.py', 'deep.py'}
+
+
+def test_find_filters_by_kind(fs: Storix):
+    _nested_tree(fs)
+
+    dirs = {e.name for e in fs.find('/', kind='directory')}
+    files = {e.name for e in fs.find('/pkg', kind=PathKind.FILE)}
+
+    assert dirs == {'pkg', 'sub'}
+    assert files == {'mod.py', 'deep.py', 'readme.txt'}
+
+
+def test_glob_matches_direct_children_recursive_and_subdirs(fs: Storix):
+    _nested_tree(fs)
+
+    direct = {str(p) for p in fs.glob('*.py', '/pkg')}
+    recursive = {str(p) for p in fs.glob('**/*.py', '/pkg')}
+    subdir = {str(p) for p in fs.glob('sub/*', '/pkg')}
+
+    assert direct == {'/pkg/mod.py'}  # '*' stops at a separator
+    assert recursive == {'/pkg/mod.py', '/pkg/sub/deep.py'}  # '**' spans depth
+    assert subdir == {'/pkg/sub/deep.py'}
+
+
 # --- cat ---
 
 

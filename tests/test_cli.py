@@ -123,6 +123,74 @@ def test_du_and_stat():
     assert 'File: a.txt' in run('stat', '/a.txt').stdout
 
 
+def _small_project() -> None:
+    """/proj/src/main.py (5 bytes) and /proj/readme.txt (3 bytes)."""
+    run('mkdir', '-p', '/proj/src')
+    run('echo', 'aaaa', '-f', '/proj/src/main.py')  # 'aaaa\n' -> 5 bytes
+    run('echo', 'bb', '-f', '/proj/readme.txt')  # 'bb\n' -> 3 bytes
+
+
+def _du_lines(out: str) -> list[list[str]]:
+    """Non-empty du lines split into (size, path); tolerant of tab/space."""
+    return [line.split() for line in out.splitlines() if line.strip()]
+
+
+def test_du_default_breakdown_lists_subdirs_with_total_last():
+    _small_project()
+    lines = _du_lines(run('du', '/proj').stdout)
+
+    # every subdirectory appears with its cumulative size
+    assert ['5', '/proj/src'] in lines
+    # the argument's grand total is the last line
+    assert lines[-1] == ['8', '/proj']
+    # default is directories only, no file lines
+    assert all(not cols[-1].endswith('.py') for cols in lines)
+
+
+def test_du_summary_is_total_only():
+    _small_project()
+    lines = _du_lines(run('du', '-s', '/proj').stdout)
+
+    assert lines == [['8', '/proj']]
+
+
+def test_du_all_includes_files():
+    _small_project()
+    out = run('du', '-a', '/proj').stdout
+
+    assert '/proj/src/main.py' in out
+    assert '/proj/readme.txt' in out
+
+
+def test_find_by_name_and_type():
+    _small_project()
+
+    by_name = run('find', '/proj', '--name', '*.py').stdout
+    assert '/proj/src/main.py' in by_name
+    assert 'readme.txt' not in by_name
+
+    dirs = run('find', '/proj', '--type', 'd').stdout
+    assert '/proj/src' in dirs
+    assert 'main.py' not in dirs
+
+
+def test_tree_level_caps_depth():
+    _small_project()
+    out = run('tree', '-L', '1', '/proj').stdout
+
+    assert 'src' in out
+    assert 'main.py' not in out  # depth 2 is not shown at level 1
+
+
+def test_tree_long_shows_sizes():
+    run('mkdir', '/proj')
+    run('echo', 'aaaa', '-f', '/proj/main.py')  # 5 bytes
+    out = run('tree', '-l', '/proj').stdout
+
+    assert 'main.py' in out
+    assert '5' in out  # the file's size column
+
+
 def test_data_url_works_but_presigned_needs_capability():
     run('echo', 'hi', '-f', '/a.txt')
     assert run('url', '--data', '/a.txt').stdout.startswith('data:')

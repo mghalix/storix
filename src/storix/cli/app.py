@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 
+from collections import defaultdict
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Annotated, NoReturn
 
@@ -27,12 +28,14 @@ from rich.table import Table
 from rich.text import Text
 
 from storix import ObservabilityLayer
+from storix.enums import PathKind
 from storix.errors import StorageError
 
 from .config import load_prefs
 from .render import (
     console,
     dir_state_of,
+    entry_decor,
     entry_label,
     err,
     human_size,
@@ -163,23 +166,71 @@ def cd(path: Annotated[str | None, typer.Argument()] = None) -> None:
         _die('cd', exc)
 
 
+def _sorted_entries(fs: Storix, entries: list[DirEntry], sort: str) -> list[DirEntry]:
+    """Order a directory's entries for ``tree`` by the chosen key.
+
+    ``name`` sorts alphabetically; ``time`` newest first (one stat per
+    entry, since listings carry no mtime); ``size`` largest first, with
+    directories (no meaningful size) sinking to the bottom.
+    """
+    if sort == 'time':
+        mtime = {e.name: fs.backend.stat(e.path).modified for e in entries}
+        return sorted(entries, key=lambda e: mtime[e.name], reverse=True)
+    if sort == 'size':
+
+        def size_of(entry: DirEntry) -> int:
+            if entry.is_dir:
+                return -1
+            return entry.size if entry.size is not None else fs.stat(entry.path).size
+
+        return sorted(entries, key=size_of, reverse=True)
+    return sorted(entries, key=lambda e: e.name)
+
+
 @app.command()
 def tree(
     path: Annotated[str | None, typer.Argument()] = None,
     *,
     all_: Annotated[bool, typer.Option('-a', '--all')] = False,
+    level: Annotated[
+        int | None,
+        typer.Option('-L', '--level', help='descend at most this many levels'),
+    ] = None,
+    long: Annotated[
+        bool,
+        typer.Option('-l', '--long', help='show size and kind columns (eza-style)'),
+    ] = False,
+    sort: Annotated[
+        str, typer.Option('--sort', help='order siblings by name | time | size')
+    ] = 'name',
 ) -> None:
-    """Print a directory tree (unix tree style, with the closing count)."""
+    """Print a directory tree (unix tree style, with the closing count).
+
+    -L caps the depth, -l adds eza-style size and kind columns, --sort
+    orders siblings by name (default), time, or size.
+    """
     fs = _fs()
+    if sort not in {'name', 'time', 'size'}:
+        _die('tree', ValueError(f'sort must be name, time or size, got {sort!r}'))
     dirs, files = 1, 0  # unix tree counts the root directory
 
     def children_of(target: str) -> list[DirEntry]:
         try:
-            return sorted(fs.scandir(target, all=all_), key=lambda e: e.name)
+            return _sorted_entries(fs, list(fs.scandir(target, all=all_)), sort)
         except StorageError as exc:
             _die('tree', exc)
 
-    def walk(children: list[DirEntry], target: str, prefix: str = '') -> None:
+    def columns(entry: DirEntry) -> Text:
+        """The eza-style 'kind size' prefix for -l, else nothing."""
+        if not long:
+            return Text('')
+        kind = Text('d ' if entry.is_dir else '- ', style='dim')
+        if entry.is_dir:
+            return kind + Text(f'{"-":>7}  ', style='dim')
+        size = entry.size if entry.size is not None else fs.stat(entry.path).size
+        return kind + Text(f'{human_size(size):>7}  ', style='green')
+
+    def walk(children: list[DirEntry], target: str, prefix: str, depth: int) -> None:
         nonlocal dirs, files
         for i, child in enumerate(children):
             last = i == len(children) - 1
@@ -187,22 +238,54 @@ def tree(
             if child.is_dir:
                 dirs += 1
                 inner = f'{target}/{child.name}'
-                sub = children_of(inner)
-                label = entry_label(
-                    child, slash=False, dir_state='full' if sub else 'empty'
-                )
-                console.print(Text(f'{prefix}{branch}') + label)
-                walk(sub, inner, prefix + ('    ' if last else '│   '))
+                expand = level is None or depth < level
+                sub = children_of(inner) if expand else []
+                # only claim empty/full when we actually looked inside
+                state = 'closed' if not expand else ('full' if sub else 'empty')
+                label = entry_label(child, slash=False, dir_state=state)
+                console.print(columns(child) + Text(f'{prefix}{branch}') + label)
+                if expand:
+                    walk(sub, inner, prefix + ('    ' if last else '│   '), depth + 1)
             else:
                 files += 1
-                console.print(Text(f'{prefix}{branch}') + entry_label(child))
+                console.print(
+                    columns(child) + Text(f'{prefix}{branch}') + entry_label(child)
+                )
 
     root = str(fs.resolve(path))
     console.print(f'[bold blue]{root}[/bold blue]')
-    walk(children_of(root), root)
+    walk(children_of(root), root, '', 1)
     d = 'directory' if dirs == 1 else 'directories'
     f = 'file' if files == 1 else 'files'
     console.print(f'\n{dirs} {d}, {files} {f}')
+
+
+@app.command()
+def find(
+    path: Annotated[str | None, typer.Argument()] = None,
+    *,
+    name: Annotated[
+        str | None,
+        typer.Option('--name', help='glob matched against the basename (e.g. "*.py")'),
+    ] = None,
+    type_: Annotated[
+        str | None,
+        typer.Option('--type', help='restrict to f (files) or d (directories)'),
+    ] = None,
+) -> None:
+    """Recursively find entries by name glob and/or type (unix find)."""
+    fs = _fs()
+    kind = {'f': PathKind.FILE, 'd': PathKind.DIRECTORY}.get(type_) if type_ else None
+    if type_ is not None and kind is None:
+        _die('find', ValueError(f"type must be 'f' or 'd', got {type_!r}"))
+    try:
+        entries = list(fs.find(path, name=name, kind=kind))
+    except StorageError as exc:
+        _die('find', exc)
+    for entry in entries:
+        icon, style = entry_decor(entry)
+        text = f'{icon} {entry.path}' if icon else str(entry.path)
+        console.print(Text(text, style=style))
 
 
 # --- creating / writing ---
@@ -292,18 +375,57 @@ def stat(path: Annotated[str, typer.Argument()]) -> None:
 def du(
     path: Annotated[str | None, typer.Argument()] = None,
     *,
+    summary: Annotated[
+        bool, typer.Option('-s', '--summary', help='one grand total only (du -s)')
+    ] = False,
+    all_: Annotated[
+        bool, typer.Option('-a', '--all', help='include files, not just directories')
+    ] = False,
+    max_depth: Annotated[
+        int | None,
+        typer.Option('-d', '--max-depth', help='report entries at most this deep'),
+    ] = None,
     human: Annotated[
         bool, typer.Option('-h', '--human', help='human-readable size (e.g. 165M)')
     ] = False,
 ) -> None:
-    """Total size in bytes of a tree (apparent content bytes)."""
+    """Disk usage: a cumulative size per directory, ending with the total.
+
+    Bottom-up like unix du (apparent content bytes). -s for the grand
+    total only, -a to include files, -d to cap the reported depth.
+    """
     fs = _fs()
+    target = fs.resolve(path)
+    shown = path if path is not None else str(target)
+
+    def emit(size: int, entry_path: StorixPath) -> None:
+        if entry_path == target:
+            label = shown
+        else:
+            label = f'{shown.rstrip("/")}/{entry_path.relative_to(target).as_posix()}'
+        console.print(f'{human_size(size) if human else size}\t{label}')
+
     try:
-        total = fs.du(path)
+        if summary or fs.isfile(target):
+            emit(fs.du(target), target)
+            return
+        # one post-order walk: children accumulate into their parent before
+        # the parent is emitted, so every subtree is summed exactly once.
+        sizes: dict[StorixPath, int] = defaultdict(int)
+        for entry in fs.walk(target, all=True, top_down=False):
+            if entry.is_dir:
+                size = sizes[entry.path]
+            elif entry.size is not None:
+                size = entry.size
+            else:
+                size = fs.stat(entry.path).size
+            sizes[entry.path.parent] += size
+            depth = len(entry.path.relative_to(target).parts)
+            if (entry.is_dir or all_) and (max_depth is None or depth <= max_depth):
+                emit(size, entry.path)
+        emit(sizes[target], target)
     except StorageError as exc:
         _die('du', exc)
-    shown = path if path is not None else str(fs.resolve(path))
-    console.print(f'{human_size(total) if human else total}\t{shown}')
 
 
 @app.command()
