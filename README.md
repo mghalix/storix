@@ -11,8 +11,9 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/mghalix/storix/actions/workflows/ci.yml"><img src="https://github.com/mghalix/storix/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pypi.org/project/storix/"><img src="https://badge.fury.io/py/storix.svg" alt="PyPI version"></a>
-  <a href="https://github.com/mghalix/storix"><img src="https://img.shields.io/github/stars/mghalix/storix.svg?style=social" alt="GitHub stars"></a>
+  <a href="https://pypi.org/project/storix/"><img src="https://img.shields.io/pypi/pyversions/storix.svg" alt="Supported Python versions"></a>
   <a href="https://github.com/mghalix/storix/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mghalix/storix.svg" alt="License"></a>
 </p>
 
@@ -132,7 +133,8 @@ Third-party backends implement the small `StorageBackend` port and register via
 ## Migrating from 0.1.x
 
 0.2.0 was a ground-up rework (hexagonal core, generated sync flavor, layers,
-capabilities). See the migration table in [release-notes.md](./release-notes.md).
+capabilities). See the migration table in the
+[release notes](https://storix.mghalix.com/release-notes/).
 
 ## License
 
