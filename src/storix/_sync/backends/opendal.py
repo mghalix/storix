@@ -19,6 +19,7 @@ capabilities are derived from what the chosen service actually supports.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final
 
 from storix._sync._stream import batch_chunks, resolve_chunk_size
@@ -58,7 +59,6 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
-    from pathlib import PurePosixPath
 
     from opendal.types import Metadata
 
@@ -132,6 +132,7 @@ class OpendalBackend(BackendBase):
             content_type=cap.write_with_content_type,
             custom_metadata=cap.write_with_user_metadata,
             presigned_urls=cap.presign_read,
+            bulk_listing=cap.list_with_recursive,
         )
 
     @staticmethod
@@ -306,6 +307,28 @@ class OpendalBackend(BackendBase):
                 is_dir=is_dir,
                 size=None if is_dir else entry.metadata.content_length,
             )
+
+    def list_tree(self, path: PurePosixPath) -> Iterator[PurePosixPath]:
+        """Yield every descendant path via one recursive (delimiter-less) list.
+
+        Streams lazily so the core can stop at its key bound without
+        pulling the whole subtree into memory. opendal's directory-form
+        keys carry a trailing slash; the port yields slash-free absolute
+        paths and never the directory itself.
+        """
+        raw = self.stat(path)
+        if raw.kind is PathKind.FILE:
+            raise NotADirectoryError(path)
+        prefix = self._dir_key(path)
+        try:
+            entries = self._op.list(prefix, recursive=True)
+            for entry in entries:
+                key = entry.path.rstrip('/')
+                if not key or key == prefix.rstrip('/'):
+                    continue  # opendal may list the directory itself
+                yield PurePosixPath('/') / key
+        except _OPENDAL_ERRORS as exc:
+            raise _translate(exc, path) from exc
 
     def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
         """Create a directory (``parents=True`` behaves like mkdir -p).

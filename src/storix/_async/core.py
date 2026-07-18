@@ -14,6 +14,7 @@ from storix import pathops
 from storix._async._compat import concurrent
 from storix._async._stream import ensure_chunks, validate_chunk_size
 from storix._async.backends import generic
+from storix.constants import BULK_LISTING_KEY_LIMIT
 from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
@@ -449,6 +450,83 @@ class Storix:
         async for _ in self._backend.list_dir(self._resolve(path)):
             return False
         return True
+
+    async def empty_children(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        names: Iterable[str] | None = None,
+    ) -> dict[str, bool]:
+        """Emptiness of a directory's immediate child directories, in one pass.
+
+        The bulk sibling of ``is_empty`` (the point query): the folder-glyph
+        need for a whole listing. When the backend advertises ``bulk_listing``
+        and the subtree stays within the key bound, one recursive listing of
+        ``path`` answers every child at once (grouping the descendant keys by
+        immediate child, all path logic here in the core) - N round trips
+        collapse to one. Otherwise it falls back to a concurrent per-child
+        ``is_empty`` (the portable floor); correctness never depends on the
+        fast path, only latency does. The capability gate is silent: a
+        backend without it is never an error, just the slower path.
+
+        Args:
+            path: Directory whose children to test; the session cwd when None.
+            names: The immediate child directory names to report on. Omit to
+                report on every immediate child directory (one extra listing
+                to discover them); a caller that already listed - as ``sx``
+                does to render the entries - passes the names it has, so no
+                listing is repeated.
+
+        Returns:
+            A mapping of child directory name to whether that child is empty.
+            Empty when there are no children to report on.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+            NotADirectoryError: If ``path`` is a file.
+        """
+        directory = self._resolve(path)
+        if names is None:
+            children = [
+                entry.name
+                async for entry in self._backend.list_dir(directory)
+                if entry.is_dir
+            ]
+        else:
+            children = list(names)
+        if not children:
+            return {}
+        if self._backend.capabilities.supports(Capability.BULK_LISTING):
+            nonempty = await self._nonempty_children(directory)
+            if nonempty is not None:
+                return {name: name not in nonempty for name in children}
+        results = await concurrent(
+            partial(self.is_empty, directory / name) for name in children
+        )
+        return dict(zip(children, results, strict=True))
+
+    async def _nonempty_children(self, directory: StorixPath) -> set[str] | None:
+        """Immediate children that hold descendants, from one recursive listing.
+
+        Groups the backend's raw descendant keys by their immediate-child
+        component: a descendant two or more levels below ``directory`` proves
+        that child non-empty. Returns None to signal a fall back to the
+        concurrent floor when the listing exceeds ``BULK_LISTING_KEY_LIMIT``,
+        so a prefix holding millions of keys is never pulled whole.
+        """
+        nonempty: set[str] = set()
+        budget = BULK_LISTING_KEY_LIMIT
+        async for descendant in self._backend.list_tree(directory):
+            if budget <= 0:
+                return None
+            budget -= 1
+            relative = descendant.relative_to(directory)
+            # a descendant below an immediate child (its parent is a named
+            # subdirectory, not '.') proves that child non-empty; a direct
+            # child of ``directory`` does not
+            if relative.parent.name:
+                nonempty.add(relative.parts[0])
+        return nonempty
 
     async def ls(
         self,

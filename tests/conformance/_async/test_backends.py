@@ -308,6 +308,40 @@ async def test_list_dir_tolerates_delete_during_iteration(backend: StorageBacken
     assert [e async for e in backend.list_dir(P('/d'))] == []
 
 
+# --- list_tree (bulk_listing) ---
+
+
+async def test_list_tree_yields_every_descendant_file(backend: StorageBackend):
+    if not backend.capabilities.bulk_listing:
+        pytest.skip('backend does not advertise bulk_listing')
+    await backend.make_dir(P('/d'), parents=False)
+    await backend.make_dir(P('/d/sub'), parents=False)
+    await put(backend, '/d/a.txt')
+    await put(backend, '/d/sub/b.txt')
+
+    descendants = {str(p) async for p in backend.list_tree(P('/d'))}
+    # every file at any depth appears; directory markers may or may not,
+    # and the directory itself never does
+    assert {'/d/a.txt', '/d/sub/b.txt'} <= descendants
+    assert '/d' not in descendants
+
+
+async def test_list_tree_on_empty_dir_yields_nothing(backend: StorageBackend):
+    if not backend.capabilities.bulk_listing:
+        pytest.skip('backend does not advertise bulk_listing')
+    await backend.make_dir(P('/empty'), parents=False)
+    assert [p async for p in backend.list_tree(P('/empty'))] == []
+
+
+async def test_list_tree_on_file_raises(backend: StorageBackend):
+    if not backend.capabilities.bulk_listing:
+        pytest.skip('backend does not advertise bulk_listing')
+    await put(backend, '/a.txt')
+    with pytest.raises(NotADirectoryError):
+        async for _ in backend.list_tree(P('/a.txt')):
+            pass
+
+
 # --- stat ---
 
 

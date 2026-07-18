@@ -59,7 +59,7 @@ class MemoryBackend(BackendBase):
     for the capability.
     """
 
-    capabilities: Capabilities = Capabilities(custom_metadata=True)
+    capabilities: Capabilities = Capabilities(custom_metadata=True, bulk_listing=True)
 
     _nodes: dict[PurePosixPath, _Node]
 
@@ -156,6 +156,17 @@ class MemoryBackend(BackendBase):
                 is_dir=node.is_dir,
                 size=None if node.is_dir else node.size,
             )
+
+    @override
+    async def list_tree(self, path: PurePosixPath) -> AsyncIterator[PurePosixPath]:
+        """Yield every descendant path under a directory (one keyspace scan)."""
+        is_file = (await self.stat(path)).kind is PathKind.FILE
+        if is_file:
+            raise NotADirectoryError(path)
+
+        for node in list(self._nodes):
+            if node != path and node.is_relative_to(path):
+                yield node
 
     @override
     async def stat(self, path: PurePosixPath) -> RawStat:

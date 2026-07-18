@@ -124,20 +124,23 @@ def stat_all(fs: Storix, paths: Sequence[StorixPath]) -> list[RawStat]:
     return concurrent(partial(fs.backend.stat, path) for path in paths)
 
 
-def empty_all(fs: Storix, paths: Sequence[StorixPath]) -> list[bool | None]:
-    """Test each directory for emptiness concurrently.
+def empty_all(
+    fs: Storix, base: StorixPath, names: Sequence[str]
+) -> list[bool | None]:
+    """Emptiness of ``base``'s named child directories, in one core call.
 
-    ``None`` for a directory whose check failed (vanished or unreadable),
-    so the caller can render the neutral glyph rather than guess.
+    Delegates to ``fs.empty_children`` so the bulk (one recursive listing)
+    and concurrency logic lives in the core; the CLI only declares the
+    batch. ``None`` for every entry when the listing failed (the directory
+    vanished or is unreadable), so the caller renders the neutral glyph
+    rather than guess.
     """
-
-    def probe(path: StorixPath) -> bool | None:
-        try:
-            return fs.is_empty(path)
-        except StorageError:
-            return None
-
-    return concurrent(partial(probe, path) for path in paths)
+    names = list(names)
+    try:
+        emptiness = fs.empty_children(base, names=names)
+    except StorageError:
+        return [None] * len(names)
+    return [emptiness.get(name) for name in names]
 
 
 def apply_layers(

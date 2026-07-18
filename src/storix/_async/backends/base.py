@@ -150,6 +150,21 @@ class BackendBase(abc.ABC):
     async def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
         """Create a directory (``parents=True`` behaves like mkdir -p)."""
 
+    def list_tree(self, path: PurePosixPath) -> AsyncIterator[PurePosixPath]:
+        """Yield the absolute path of every descendant of a directory.
+
+        Capability-gated by ``bulk_listing`` (default: unsupported). Only
+        backends that advertise the capability override this, and the core
+        calls it exclusively on those, so this default never runs in
+        practice; it is the honest signal for a stray call.
+
+        Raises:
+            UnsupportedOperationError: Always, on a backend that does not
+                advertise ``bulk_listing``.
+        """
+        del path
+        raise UnsupportedOperationError(Capability.BULK_LISTING)
+
     async def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
         """Move a file or directory tree (fallback: copy then delete)."""
         await generic.move(self, src, dst)

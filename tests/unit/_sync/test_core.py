@@ -267,6 +267,69 @@ def test_is_empty_missing_raises(fs: Storix):
         fs.is_empty('/nope')
 
 
+# --- empty_children (bulk emptiness) ---
+#
+# The fs fixture runs each case against memory (advertises bulk_listing, the
+# one-request fast path) and local (does not, the concurrent fallback), so a
+# single assertion pins both paths to the same answer.
+
+
+def test_empty_children_reports_each_child(fs: Storix):
+    fs.mkdir('/d')
+    fs.mkdir('/d/empty')
+    fs.mkdir('/d/full')
+    fs.touch('/d/full/a.txt')
+    assert fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
+def test_empty_children_honors_explicit_names(fs: Storix):
+    fs.mkdir('/d')
+    fs.mkdir('/d/empty')
+    fs.mkdir('/d/full')
+    fs.touch('/d/full/a.txt')
+    assert fs.empty_children('/d', names=['full']) == {'full': False}
+
+
+def test_empty_children_ignores_file_children(fs: Storix):
+    fs.mkdir('/d')
+    fs.touch('/d/a.txt')
+    # only a file child: nothing to report emptiness for
+    assert fs.empty_children('/d') == {}
+
+
+def test_empty_children_counts_a_nested_subdir_as_nonempty(fs: Storix):
+    # a child holding only a subdirectory is non-empty, exactly like is_empty
+    fs.mkdir('/d')
+    fs.mkdir('/d/holder/sub', parents=True)
+    assert fs.empty_children('/d') == {'holder': False}
+
+
+def test_empty_children_still_correct_beyond_key_bound(
+    fs: Storix, monkeypatch: pytest.MonkeyPatch
+):
+    # a tiny bound forces the fast path to bail mid-listing; the concurrent
+    # fallback must still return the right answer
+    monkeypatch.setattr('storix._sync.core.BULK_LISTING_KEY_LIMIT', 1)
+    fs.mkdir('/d')
+    fs.mkdir('/d/empty')
+    fs.mkdir('/d/full')
+    fs.touch('/d/full/a.txt')
+    assert fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
+def test_empty_children_falls_back_without_capability():
+    import dataclasses
+
+    backend = MemoryBackend()
+    backend.capabilities = dataclasses.replace(backend.capabilities, bulk_listing=False)
+    fs = Storix(backend)
+    fs.mkdir('/d')
+    fs.mkdir('/d/empty')
+    fs.mkdir('/d/full')
+    fs.touch('/d/full/a.txt')
+    assert fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
 # --- walk / find / glob ---
 
 

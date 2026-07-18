@@ -1,6 +1,6 @@
 # 27. Listing performance: concurrent batch, bulk emptiness, cache cold path
 
-Status: accepted (bulk-emptiness port extension: designed here, staged)
+Status: accepted ((b) bulk emptiness: built; (c) concurrent walk: staged)
 
 ## Context
 
@@ -39,27 +39,35 @@ lookups (emptiness, `-t` mtime, `-l`/`--sort` size) through the core
 calls run at once. This is the portable floor: it needs no backend support and
 helps every provider. It took `sx ls` 11.1s -> 7.8s (bounded by (3) and (4)).
 
-**(b) Bulk emptiness - a capability-gated port extension (staged).** The real
+**(b) Bulk emptiness - a capability-gated port extension (built).** The real
 win: derive every immediate child's emptiness from ONE request instead of N.
 On an object store, a single delimiter-less LIST of the parent prefix returns
 all descendant keys; grouping them by immediate-child prefix says which
 children are non-empty. One round trip for the whole listing.
 
-- New port capability `bulk_list` (name TBD) and a port method that returns, for
-  a directory, its immediate children each tagged empty/non-empty - or the raw
-  recursive key stream the core groups. Adapters that can do it cheaply
-  advertise it: `opendal`/object stores (one recursive list), and it is a no-op
-  win for `LocalBackend` (a shallow `os.walk` or per-child `scandir` is already
-  cheap - it may simply not advertise and fall back to (a)).
-- Core: `Storix` exposes it so a consumer (the CLI icon path, a future UI) gets
-  emptiness for a whole listing in one call. `is_empty` (single) stays for the
-  point query.
-- Gating and bound: this reads the subtree's KEYS. Cheap for a moderately
-  crowded container (thousands of keys, one large response, one round trip),
-  but a container with millions of keys under one prefix should not pull them
-  all - so the capability is advertised per adapter and the bulk path takes a
-  key bound, falling back to (a) beyond it. Correctness never depends on it;
-  it is a speed path with a portable fallback.
+As built:
+
+- Port capability `bulk_listing` and port method `list_tree(path)`, which
+  yields the raw absolute path of every descendant under a directory in one
+  backend operation (no grouping - that path logic is the core's). Adapters
+  that can do it cheaply advertise it: the `opendal` object stores (one
+  recursive `list(prefix, recursive=True)`, gated on opendal's own
+  `list_with_recursive`, so `s3`/`gcs`/`azblob`/`opendal-memory` advertise it
+  and the `fs` service does not) and `MemoryBackend` (one keyspace scan).
+  `LocalBackend` and `AzureBackend` do not advertise it and fall back to (a);
+  local disk latency is not the round-trip cost this targets.
+- Core: `Storix.empty_children(path, names=...)` groups the descendant keys by
+  immediate child and returns each child directory's emptiness in one call.
+  `is_empty` (single) stays for the point query. The CLI `state.empty_all`
+  switches to it, so the CLI keeps declaring intent while grouping and
+  concurrency live in the core.
+- Gating and bound: the capability gate is an internal optimization - gated
+  silently, never a raised `UnsupportedOperationError`. The bulk path reads
+  the subtree's KEYS: cheap for a moderately crowded container (thousands of
+  keys, one response, one round trip), but a container with millions of keys
+  under one prefix should not pull them all, so the core counts against a
+  `BULK_LISTING_KEY_LIMIT` (10_000) key bound and falls back to (a) beyond it.
+  Correctness never depends on it; it is a speed path with a portable fallback.
 
 **(c) Cache cold path + concurrent walk - follow-ups.** The cache
 materialize-per-subdir cost (3) largely disappears once (b) makes it one parent

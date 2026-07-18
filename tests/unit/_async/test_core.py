@@ -265,6 +265,71 @@ async def test_is_empty_missing_raises(fs: Storix):
         await fs.is_empty('/nope')
 
 
+# --- empty_children (bulk emptiness) ---
+#
+# The fs fixture runs each case against memory (advertises bulk_listing, the
+# one-request fast path) and local (does not, the concurrent fallback), so a
+# single assertion pins both paths to the same answer.
+
+
+async def test_empty_children_reports_each_child(fs: Storix):
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
+async def test_empty_children_honors_explicit_names(fs: Storix):
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d', names=['full']) == {'full': False}
+
+
+async def test_empty_children_ignores_file_children(fs: Storix):
+    await fs.mkdir('/d')
+    await fs.touch('/d/a.txt')
+    # only a file child: nothing to report emptiness for
+    assert await fs.empty_children('/d') == {}
+
+
+async def test_empty_children_counts_a_nested_subdir_as_nonempty(fs: Storix):
+    # a child holding only a subdirectory is non-empty, exactly like is_empty
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/holder/sub', parents=True)
+    assert await fs.empty_children('/d') == {'holder': False}
+
+
+async def test_empty_children_still_correct_beyond_key_bound(
+    fs: Storix, monkeypatch: pytest.MonkeyPatch
+):
+    # a tiny bound forces the fast path to bail mid-listing; the concurrent
+    # fallback must still return the right answer
+    monkeypatch.setattr('storix._async.core.BULK_LISTING_KEY_LIMIT', 1)
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
+async def test_empty_children_falls_back_without_capability():
+    import dataclasses
+
+    backend = MemoryBackend()
+    backend.capabilities = dataclasses.replace(
+        backend.capabilities, bulk_listing=False
+    )
+    fs = Storix(backend)
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
 # --- walk / find / glob ---
 
 
