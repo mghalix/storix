@@ -89,11 +89,13 @@ Ship bundled as 0.4.1 or as successive patches:
   `sx url --data`
 - Range reads: `read_stream(start=, length=)` port extension ->
   `fs.stream`/`head`/`tail`; needed for video seeking / HTTP Range
-- [~] Recursive walk on `scandir`: `walk`/`find`/`glob` core methods, and the
-  consumers they feed - `sx du` 1:1 with unix (per-directory breakdown, `-s`/
-  `-a`/`-d`/`-h`) and eza-style `tree` flavors (`-L` depth, `-l` long with
-  size/kind, `--sort`). Dead `src/storix/core/` (Tree/Finder/word_count)
-  dropped in favor of it. In progress on `feat/core-find` (ADR 0026)
+- [x] Recursive walk on `scandir`: `walk`/`find`/`glob` core methods, and the
+  consumers they feed - `sx find`, `sx du` 1:1 with unix (per-directory
+  breakdown, `-s`/`-a`/`-d`/`-h`) and eza-style `tree` flavors (`-L` depth,
+  `-l` long with size/kind, `--sort`). Dead `src/storix/core/`
+  (Tree/Finder/word_count) dropped in favor of it. Landed in 0.4.5 (ADR 0026).
+  A concurrent walk (per-level fan-out via ADR 0025's `concurrent`) is the
+  deferred optimization - the walk is sequential today
 - `wc` and `|`-pipe composition: dropped for now (ADR 0023/0026 discussion) -
   content `wc` is `len(cat.splitlines())`, listing `wc` is `len(ls())`, and
   pipe composition belongs in the shell (`sx ls | wc`), not the Python API.

@@ -1,5 +1,37 @@
 # Release Notes
 
+## [0.4.5] - 2026-07-18
+
+Recursive search on the core, and the `du`/`tree` that consume it. One
+backward-compatible feature. See ADR 0026.
+
+### Added
+
+- `Storix.walk` streams every descendant of a directory lazily as `DirEntry`
+  objects (`top_down` for pre- or post-order), `Storix.find` filters that walk
+  by a `name` glob and/or `kind`, and `Storix.glob` matches pathlib-style
+  patterns (`*`, `?`, `**`) - the recursive family over `scandir`, named after
+  `os.walk`, unix `find`, and `pathlib.glob`. No new class; methods only.
+- `sx find [PATH] --name PATTERN --type f|d` - recursive search from the shell,
+  the headline power-user and agent feature.
+
+### Changed
+
+- `sx du` is now 1:1 with unix `du`: it prints a cumulative size per directory,
+  bottom-up, ending with the total (previously only the total, i.e. `du -s`),
+  computed in one post-order walk. New flags `-s/--summary` (the old
+  total-only), `-a/--all` (include files), `-d/--max-depth N`; `-h` unchanged.
+  Verified line-for-line against `du -b`.
+- `sx tree` gains eza-style flavors: `-L/--level N` (depth cap), `-l/--long`
+  (kind and size columns), `--sort name|time|size`. No-flag behavior unchanged.
+
+### Removed
+
+- The dead `src/storix/core/` (an unreferenced, untested, sync-only first pass
+  at `Tree`/`Finder`/`wc`) is gone, replaced by the walk family above. `wc` and
+  `|`-pipe composition stay dropped by design (roadmap); the shell is where
+  pipes belong (`sx ls | wc`).
+
 ## [0.4.4] - 2026-07-18
 
 Rich recursive-listing groundwork, Azure Blob URL parity, and real concurrency

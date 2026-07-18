@@ -221,14 +221,22 @@ def tree(
             _die('tree', exc)
 
     def columns(entry: DirEntry) -> Text:
-        """The eza-style 'kind size' prefix for -l, else nothing."""
+        """The eza-style 'kind size' prefix for -l, else nothing.
+
+        Built by appending styled spans onto a base-less ``Text``: a base
+        style would propagate through the ``+`` concatenation and dim the
+        branch lines and entry names too.
+        """
+        prefix = Text()
         if not long:
-            return Text('')
-        kind = Text('d ' if entry.is_dir else '- ', style='dim')
+            return prefix
+        prefix.append('d ' if entry.is_dir else '- ', style='dim')
         if entry.is_dir:
-            return kind + Text(f'{"-":>7}  ', style='dim')
-        size = entry.size if entry.size is not None else fs.stat(entry.path).size
-        return kind + Text(f'{human_size(size):>7}  ', style='green')
+            prefix.append(f'{"-":>7}  ', style='dim')
+        else:
+            size = entry.size if entry.size is not None else fs.stat(entry.path).size
+            prefix.append(f'{human_size(size):>7}  ', style='green')
+        return prefix
 
     def walk(children: list[DirEntry], target: str, prefix: str, depth: int) -> None:
         nonlocal dirs, files
