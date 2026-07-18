@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 
 from storix._dto import dto
 from storix.enums import Capability, PathKind
+from storix.types import StorixPath
 
 
 class Entry(NamedTuple):
@@ -54,6 +55,41 @@ class RawStat:
 
     metadata: Mapping[str, str] | None = None
     """Custom key/value metadata when the backend supports it; else None."""
+
+
+@dto
+class DirEntry:
+    """A single directory-listing entry, session-resolved and user-facing.
+
+    Mapped from the port's :class:`Entry` the way :class:`FileProperties`
+    maps from :class:`RawStat`: it carries the kind (and any size the
+    listing produced for free) so a consumer never stats every entry just
+    to tell files from directories. Deliberately a plain ``@dto`` rather
+    than a pydantic model - it crosses the port once per entry in a
+    listing and validating trusted data buys nothing.
+    """
+
+    name: str
+    """Entry basename, without any directory components."""
+
+    path: StorixPath
+    """Absolute, session-resolved path to the entry."""
+
+    kind: PathKind
+    """Whether the entry is a file or a directory (extensible: a future symlink)."""
+
+    size: int | None = None
+    """Size in bytes when the listing carried it for free; else None."""
+
+    @property
+    def is_dir(self) -> bool:
+        """True when the entry is a directory."""
+        return self.kind is PathKind.DIRECTORY
+
+    @property
+    def is_file(self) -> bool:
+        """True when the entry is a file."""
+        return self.kind is PathKind.FILE
 
 
 @dto

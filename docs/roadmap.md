@@ -51,24 +51,42 @@ Ship bundled as 0.4.1 or as successive patches:
   and library consumers with zero core churn. The consumer owns the total
   (a percentage needs one; storix only knows bytes-so-far). First slice of
   the audit story (op-level events later), not a throwaway (ADR 0019)
-- 0.4.2 `OpendalBackend`: first external adapter, async-native + presign,
+- [x] 0.4.2 `OpendalBackend`: first external adapter, async-native + presign,
   spike-gated (ADR 0020)
-- 0.4.3 `sx` UX: prompt_toolkit autocomplete + upload/download progress
-  bars over the ObservabilityLayer
+- [x] 0.4.3 `sx` UX: prompt_toolkit autocomplete + upload/download progress
+  bars over the ObservabilityLayer; grew into the full CLI revamp - Nerd
+  Font icons (data-driven), unix/coreutils-consistent output, persistent
+  prefs + declarative `[[cli.layers]]` config (ADR 0022), modular package
 
 ## 0.2.x - polish
 
 - `MountLayer`: unix-style multi-container compositor (designed, see
   deferred-decisions.md)
-- CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
+- [x] CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
   (ruff-style precedence) with an ordered `[[layers]]` DSL; backend
-  config stays shared, layer stack is CLI-scoped (ADR 0015)
+  config stays shared, layer stack is CLI-scoped (ADR 0015; landed
+  in 0.4.3, ADR 0022)
 - CLI cache store selection: swap the in-memory default for a persistent
   store via the `[[layers]]` `store=` (a cashews URL, or a new built-in
   disk-backed `CacheStore`). Lets one-shot `sx --cache` benefit across
   invocations; needs a cross-process staleness default (TTL/validation),
   since separate processes sharing a store reopen the single-writer
   assumption (ADR 0014/0015)
+- `AzureBlobBackend.url` with an account key. Today the backend derives
+  `presigned_urls` from opendal's `presign_read`, which azblob reports
+  False for an account key and True only for a SAS token - so the *same*
+  credential mints a URL on `AzureBackend` (ADLS, which signs locally via
+  `generate_file_sas`) and raises `UnsupportedOperationError` on Blob.
+  Same account, same key, different answer: storix's inconsistency, not
+  Azure's. Fix: override `make_url` with `generate_blob_sas` (local HMAC,
+  no request, mirrors the ADLS sibling) and advertise the capability when
+  the credential can sign, keeping opendal's presign for SAS-token
+  credentials. `azure-storage-blob` already ships under `storix[azure]`
+  (transitively via the datalake SDK), so only the lean `storix[azblob]`
+  (opendal-only) install would keep today's behavior - which makes the
+  capability dynamic per install, the part that needs a design pass.
+  Workaround now: `[[cli.layers]] name = "url"` (data: URLs), or
+  `sx url --data`
 - Range reads: `read_stream(start=, length=)` port extension ->
   `fs.stream`/`head`/`tail`; needed for video seeking / HTTP Range
 - `tree`, `find`, `wc` on the new core; `glob`; `ls`/`find` kind

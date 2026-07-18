@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import copy
 
+from functools import partial
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
 
 from storix import pathops
-from storix._sync._compat import gather
+from storix._sync._compat import concurrent
 from storix._sync._stream import ensure_chunks, validate_chunk_size
 from storix._sync.backends import generic
 from storix.enums import Capability, PathKind
@@ -21,7 +22,7 @@ from storix.errors import (
     PathNotFoundError,
     UnsupportedOperationError,
 )
-from storix.models import FileProperties
+from storix.models import DirEntry, FileProperties
 from storix.types import StorixPath
 
 
@@ -95,6 +96,43 @@ class Storix:
     def backend(self) -> StorageBackend:
         """Escape hatch: the raw port for backend-specific operations."""
         return self._backend
+
+    @property
+    def layers(self) -> tuple[StorageBackend, ...]:
+        """The active layers, outermost first (empty when there are none).
+
+        Reading the stack is a legitimate need - a UI naming what wraps a
+        session, an audit trail recording it - and the alternative is
+        duck-typing on a layer's private ``_inner``, which is nobody
+        else's business. A tuple, because this is a snapshot to read, not
+        the stack to edit: composition stays with ``with_layer`` /
+        ``without_layer``::
+
+            any(isinstance(layer, CacheLayer) for layer in fs.layers)
+
+        The base backend is *not* included; it is ``base_backend``. Layers
+        are identified structurally (anything wrapping an inner backend),
+        so custom layers appear alongside the built-ins.
+        """
+        stack: list[StorageBackend] = []
+        node = self._backend
+        while (inner := getattr(node, '_inner', None)) is not None:
+            stack.append(node)
+            node = inner
+        return tuple(stack)
+
+    @property
+    def base_backend(self) -> StorageBackend:
+        """The real backend under any layers - the actual provider.
+
+        ``backend`` hands back the outermost object, which is whatever
+        layer happens to wrap the session; this walks past them to the
+        thing that really talks to storage.
+        """
+        node = self._backend
+        while (inner := getattr(node, '_inner', None)) is not None:
+            node = inner
+        return node
 
     @property
     def root(self) -> StorixPath:
@@ -298,6 +336,86 @@ class Storix:
 
     # --- read ---
 
+    def scandir(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        all: bool = False,
+    ) -> Iterator[DirEntry]:
+        """Lazily list a directory as rich entries (after ``os.scandir``).
+
+        Yields a :class:`~storix.models.DirEntry` per child - name,
+        absolute path, kind, and any size the listing carried for free -
+        in backend order, unsorted (sorting would force the whole
+        directory to materialize; a caller sorts if it wants to, as ``sx``
+        does for display). Mirrors ``ls`` semantics otherwise: listing a
+        file yields that one entry, and hidden (dot-prefixed) entries are
+        excluded unless ``all`` is set. The lazy, rich sibling of ``ls``
+        (names only) and ``iterdir`` (lazy names).
+
+        Args:
+            path: Directory (or file) to list; the session cwd when None.
+            all: Include hidden (dot-prefixed) entries.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+        """
+        target = self._resolve(path)
+        raw = self._backend.stat(target)
+        if raw.kind is PathKind.FILE:
+            yield DirEntry(name=target.name, path=target, kind=raw.kind, size=raw.size)
+            return
+        for entry in self._backend.list_dir(target):
+            if not all and pathops.is_hidden(entry.name):
+                continue
+            yield DirEntry(
+                name=entry.name,
+                path=target / entry.name,
+                kind=PathKind.DIRECTORY if entry.is_dir else PathKind.FILE,
+                size=entry.size,
+            )
+
+    def iterdir(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        all: bool = False,
+    ) -> Iterator[StorixPath]:
+        """Lazily list a directory as absolute paths (after ``Path.iterdir``).
+
+        The lazy-names sibling of ``ls`` and sugar over ``scandir``: yields
+        absolute, session-resolved :class:`StorixPath`s in backend order,
+        hidden entries excluded unless ``all`` is set.
+
+        Args:
+            path: Directory (or file) to list; the session cwd when None.
+            all: Include hidden (dot-prefixed) entries.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+        """
+        for entry in self.scandir(path, all=all):
+            yield entry.path
+
+    def is_empty(self, path: StrPathLike | None = None) -> bool:
+        """Whether a directory holds no entries at all (hidden included).
+
+        Pulls only the first entry from the listing and stops - one round
+        trip, no full read. Counts *any* entry, including hidden ones: a
+        directory holding only a dotfile is not empty (``rmdir`` would fail
+        on it), so this ignores the hidden filter ``ls``/``scandir`` apply.
+
+        Args:
+            path: Directory to test; the session cwd when None.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+            NotADirectoryError: If ``path`` is a file.
+        """
+        for _ in self._backend.list_dir(self._resolve(path)):
+            return False
+        return True
+
     def ls(
         self,
         path: StrPathLike | None = None,
@@ -307,24 +425,19 @@ class Storix:
     ) -> list[StorixPath]:
         """List a directory (hidden entries excluded unless ``all=True``).
 
-        Like unix ls, listing a file returns the file itself.
+        Like unix ls, listing a file returns the file itself. Names only;
+        for each entry's kind and size use ``scandir``, and for a lazy
+        stream of names use ``iterdir``.
         """
-        target = self._resolve(path)
-        raw = self._backend.stat(target)
-        if raw.kind is PathKind.FILE:
-            return [target if abs else StorixPath(target.name)]
-
-        names = [entry.name for entry in self._backend.list_dir(target)]
-        if not all:
-            names = [name for name in names if not pathops.is_hidden(name)]
-        if abs:
-            return [target / name for name in names]
-        return [StorixPath(name) for name in names]
+        return [
+            entry.path if abs else StorixPath(entry.name)
+            for entry in self.scandir(path, all=all)
+        ]
 
     def cat(self, path: StrPathLike, /, *paths: StrPathLike) -> bytes:
         """Read one or more files, concatenated in argument order."""
         targets = [self._resolve(p) for p in (path, *paths)]
-        parts = gather(*(self._backend.read(target) for target in targets))
+        parts = concurrent(partial(self._backend.read, target) for target in targets)
         return b''.join(parts)
 
     def stream(
@@ -448,11 +561,9 @@ class Storix:
         targets = [self._resolve(p) for p in (path, *paths)]
         for target in targets:
             self._ensure_parent(target)
-        gather(
-            *(
-                self._backend.write(target, b'', mode='a', content_type=None)
-                for target in targets
-            )
+        concurrent(
+            partial(self._backend.write, target, b'', mode='a', content_type=None)
+            for target in targets
         )
 
     def echo(
@@ -517,7 +628,10 @@ class Storix:
         raises ``AlreadyExistsError`` on any existing target.
         """
         targets = [self._resolve(p) for p in (path, *paths)]
-        gather(*(self._backend.make_dir(target, parents=parents) for target in targets))
+        concurrent(
+            partial(self._backend.make_dir, target, parents=parents)
+            for target in targets
+        )
 
     # --- delete ---
 
@@ -529,17 +643,18 @@ class Storix:
         All targets are validated before anything is deleted.
         """
         targets = [self._resolve(p) for p in (path, *paths)]
-        stats = gather(*(self._backend.stat(target) for target in targets))
+        stats = concurrent(partial(self._backend.stat, target) for target in targets)
         for target, raw in zip(targets, stats, strict=True):
             if raw.kind is PathKind.DIRECTORY and not recursive:
                 raise IsADirectoryError(target)
-        gather(
-            *(
-                self._backend.delete_tree(target)
+        concurrent(
+            partial(
+                self._backend.delete_tree
                 if raw.kind is PathKind.DIRECTORY
-                else self._backend.delete(target)
-                for target, raw in zip(targets, stats, strict=True)
+                else self._backend.delete,
+                target,
             )
+            for target, raw in zip(targets, stats, strict=True)
         )
 
     def rmdir(self, path: StrPathLike, /, *paths: StrPathLike) -> None:
@@ -550,11 +665,11 @@ class Storix:
         ``NotADirectoryError``.
         """
         targets = [self._resolve(p) for p in (path, *paths)]
-        stats = gather(*(self._backend.stat(target) for target in targets))
+        stats = concurrent(partial(self._backend.stat, target) for target in targets)
         for target, raw in zip(targets, stats, strict=True):
             if raw.kind is not PathKind.DIRECTORY:
                 raise NotADirectoryError(target)
-        gather(*(self._backend.delete(target) for target in targets))
+        concurrent(partial(self._backend.delete, target) for target in targets)
 
     # --- move / copy ---
 
@@ -567,11 +682,9 @@ class Storix:
         """
         sources, dst = self._split_destination('mv', source, paths)
         targets = self._plan_destinations(sources, dst)
-        gather(
-            *(
-                self._backend.move(src, target)
-                for src, target in zip(sources, targets, strict=True)
-            )
+        concurrent(
+            partial(self._backend.move, src, target)
+            for src, target in zip(sources, targets, strict=True)
         )
 
     def cp(
@@ -583,18 +696,16 @@ class Storix:
         overlays into existing destination directories like unix does.
         """
         sources, dst = self._split_destination('cp', source, paths)
-        src_stats = gather(*(self._backend.stat(src) for src in sources))
+        src_stats = concurrent(partial(self._backend.stat, src) for src in sources)
         for src, raw in zip(sources, src_stats, strict=True):
             if raw.kind is PathKind.DIRECTORY and not recursive:
                 raise IsADirectoryError(src)
         targets = self._plan_destinations(sources, dst)
-        gather(
-            *(
-                generic.copy_tree(self._backend, src, target)
-                if raw.kind is PathKind.DIRECTORY
-                else self._backend.copy(src, target)
-                for src, raw, target in zip(sources, src_stats, targets, strict=True)
-            )
+        concurrent(
+            partial(generic.copy_tree, self._backend, src, target)
+            if raw.kind is PathKind.DIRECTORY
+            else partial(self._backend.copy, src, target)
+            for src, raw, target in zip(sources, src_stats, targets, strict=True)
         )
 
     def _split_destination(

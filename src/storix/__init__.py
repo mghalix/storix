@@ -28,7 +28,7 @@ from storix._sync import (
     when_missing,
 )
 from storix.enums import Capability, PathKind
-from storix.models import Capabilities, Entry, FileProperties, RawStat
+from storix.models import Capabilities, DirEntry, Entry, FileProperties, RawStat
 from storix.types import StorageProvider, StorixPath, StrPathLike
 
 
@@ -40,6 +40,7 @@ __all__ = (
     'Capabilities',
     'Capability',
     'DataUrlLayer',
+    'DirEntry',
     'Entry',
     'FileProperties',
     'InMemoryCacheStore',

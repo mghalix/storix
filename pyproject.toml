@@ -1,6 +1,6 @@
 [project]
 name = "storix"
-version = "0.4.2"
+version = "0.4.4"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
 license = { text = "Apache-2.0" }
@@ -44,6 +44,8 @@ azadls = [
 azblob = [
     # lean blob-only install (kind='blob'; auto-detection needs the SDK)
     "opendal>=0.47.0",
+    # local account-key SAS signing for url() (pure HMAC, no network)
+    "azure-storage-blob>=12.14.0",
 ]
 azure = [
     # the self-detecting azure provider can build either Azure backend,
@@ -53,11 +55,20 @@ azure = [
 s3 = [
     "opendal>=0.47.0",
 ]
+r2 = [
+    # Cloudflare R2 speaks the S3 API; the alias saves knowing that
+    "storix[s3]",
+]
+minio = [
+    # MinIO speaks the S3 API; the alias saves knowing that
+    "storix[s3]",
+]
 gcs = [
     "opendal>=0.47.0",
 ]
 cli = [
     "click>=8.1.7",
+    "prompt-toolkit>=3.0.0",
     "rich>=13.0.0",
     "typer>=0.13.0",
 ]

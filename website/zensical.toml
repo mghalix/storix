@@ -25,6 +25,7 @@ nav = [
     { "Reading and writing" = "guide/reading-and-writing.md" },
     { "Backends" = "guide/backends.md" },
     { "Layers" = "guide/layers.md" },
+    { "The sx CLI" = "guide/cli.md" },
   ] },
   { "Recipes" = [
     { "FastAPI" = "recipes/fastapi.md" },

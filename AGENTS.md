@@ -92,7 +92,27 @@ Hexagonal: one core engine over one small port.
 
 Design rationale is recorded as ADRs in `docs/adr/`; the roadmap is
 `docs/roadmap.md`. The public documentation site is a separate Zensical project
-under `website/` (not part of the shipped package).
+under `website/` (not part of the shipped package). The ports-and-adapters
+framing (what is the core, the driven port, an adapter, a driving adapter) is
+`docs/design/architecture.md`.
+
+### The core boundary: interfaces never grow logic the core should own
+
+`Storix` is the application core; `sx` (and any future front-end: a pathlike
+adapter, a flat facade, an MCP server) is a driving adapter over it. A driving
+adapter presents the core, it does not extend it. So when you are building an
+interface and reach for something that is missing - a listing that keeps the
+kind/size the port already produced, an "is this directory empty" check, a way
+to read the layer stack without touching a private `_inner` - that gap is in
+the core, not a thing to quietly reimplement in the interface.
+
+Do not silently add it to the interface. Stop, and take it to the maintainer
+with a proposed core change; a new ADR may be warranted (it usually is, since
+it is a core-interface change). Proceed only once it is agreed. A capability
+re-implemented in `sx` is a capability the next front-end re-implements again,
+and core semantics that live in two places drift. The one exception is a
+genuine "the core cannot express this" - state why in a comment, as
+`_sandboxed` does for constructor-time I/O in a pure layer.
 
 ## Testing
 
@@ -105,6 +125,24 @@ under `website/` (not part of the shipped package).
 - A parametrized conformance suite runs every backend and layer in both flavors.
   New backends and layers should slot into it rather than getting a bespoke
   harness.
+
+## Naming the public surface
+
+Two rules, both already visible in the existing API - follow them so new
+additions stay consistent.
+
+- **Borrow the established unix name.** A user-facing operation takes the name
+  of the unix command or well-known program that already means it: `ls`, `cat`,
+  `du`, `mv`, `cp`, `echo`, `touch`, `stat`, `tree`. When you add one, reach for
+  that vocabulary before inventing: an "absolute path" resolver is `realpath`,
+  not `get_absolute`; a lazy rich listing is `scandir` (after `os.scandir`), a
+  lazy name listing is `iterdir` (after `pathlib`). The names are the docs; a
+  unix user already knows them.
+- **Prefer an extensible `kind` over a boolean.** A classification that could
+  grow a case tomorrow is an enum, not a bool. `PathKind` (`file`/`directory`,
+  and a future `symlink`) is why user-facing entries carry `kind`, not
+  `is_dir` - a boolean cannot represent the third case without a breaking
+  change. Booleans are for genuinely two-valued facts.
 
 ## Writing style
 

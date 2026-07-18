@@ -159,3 +159,191 @@ painful.
 **Trigger:** deferred behind backend breadth (adoption comes first). Revisit
 only after closing the taxonomy; that migration is the gating work, not the
 Gate itself.
+
+## CLI packaging: workspace member / separate distribution
+
+The sx CLI lives at `src/storix/cli/` inside the one distribution, gated by
+the `cli` extra plus a launcher guard (missing deps exit with the install
+command). During the 0.4.3 revamp it was modularized into separate-concern
+modules (`app` commands, `state` session, `render` presentation, `config`
+prefs, `shell` REPL, `data/` assets), which raised the question: should it
+become its own package - a uv workspace member under `src/` (tau-style
+multi-package layout), or a separate repo like FastAPI's `fastapi-cli`?
+
+**Why deferred, not done:** the wanted decoupling already mostly exists.
+Install-time separation comes from the extra (without it the subpackage is
+inert); test separation is a directory split, not a packaging problem; and
+`from storix.cli import ...` being useless to library users is true but
+harmless. A second distribution costs a second PyPI project, a second
+version released in lockstep, and an extra that depends on a package that
+depends back on storix (workable - airflow providers, `fastapi[standard]`
+-> fastapi-cli - but real release ops) while buying a single-maintainer 0.x
+project nothing today. The modern pattern for "CLI over a library" IS the
+fastapi-cli / uv-workspace-member shape, so the destination is agreed; only
+the timing is deferred.
+
+**Prep already done:** the module boundaries mean the future split is a
+directory move plus a pyproject, not a redesign.
+
+**Trigger:** revisit when any of these arrives - sx grows its own release
+cadence (shipping CLI fixes without library releases), a heavy CLI-only
+dependency (a TUI), or a second front-end that should share the CLI's
+packaging (the MCP server from the 0.5.0 agent story). First step then:
+uv workspace member `storix-cli` under this repo; a separate repo only if
+its issue tracker and release notes stop overlapping storix's.
+
+## Standing session context in the shell (beyond the start banner)
+
+The `sx` prompt is deliberately minimal: the working directory and a glyph.
+Provider and layer stack are stable facts, so they print once in the start
+banner and on demand via `provider`. That leaves a real gap: fifty commands
+later the banner has scrolled away, and "what am I connected to, what is
+wrapping it, am I jailed" is exactly what you want to re-check before an
+`rm -r`.
+
+A prompt_toolkit `bottom_toolbar` was built and reverted in 0.4.3: it pins a
+status line under the prompt for free, but it repaints on every keystroke,
+occupies a row permanently, and reads as clutter for a shell whose whole
+appeal is that it looks like a shell. Not obviously better than nothing.
+
+**Options when this is revisited:** a toggleable toolbar (off by default, a
+`ctx` built-in or a key binding); a right-hand prompt (`rprompt`) carrying
+only the provider, which disappears as the line grows; a `Ctrl-G`-style
+one-shot context popover; or a genuine TUI mode (Textual) where a header is
+natural and the REPL becomes one pane. The TUI is the honest end state if
+`sx` grows past a REPL, and it subsumes the question.
+
+**Trigger:** revisit when a second person reports losing track of the session
+context, or when a TUI mode is on the table for other reasons. Whatever
+lands must keep the plain prompt as the default; the shell earning its keep
+by looking like a shell is the constraint, not a nice-to-have.
+
+## `scandir`: listing entries without throwing away what the port said
+
+`Storix.ls()` returns `list[StorixPath]` - names only. The port's `list_dir`
+already yields `Entry(name, is_dir, size)`, and backends fill `size` in for
+free where their listing carries it (LocalBackend's `scandir`, opendal's
+`list`). The core discards both facts on the way out.
+
+So any consumer that needs kind or size per entry has two bad options: stat
+every entry (N extra round trips on an object store), or drop to
+`fs.backend.list_dir()` and re-implement what `ls` does around it - resolve
+the target, handle "listing a file returns the file", filter hidden names via
+`pathops.is_hidden`, sort. The `sx` CLI does the second (`cli/state.py:
+list_entries`), which means core listing semantics now live in two places and
+can drift.
+
+**Shape:** a `scandir(path, *, all=False) -> list[Entry]` on the session -
+unix-flavored name, matching `os.scandir`, additive, and it keeps `ls` as the
+simple thing it should stay. `ls` becomes a thin projection of it. Then
+`list_entries` in the CLI deletes, and a future `pathlike` / flat facade / MCP
+front-end gets the same data without rediscovering the trick.
+
+**Open questions:** whether `Entry` (a port DTO) is the right thing to hand a
+user, or whether it should shape into a user-facing model the way `stat` maps
+`RawStat` -> `FileProperties`; and how `abs=` interacts (`Entry.name` is a
+basename, so the caller joins).
+
+**Related:** an `isempty(path)` / `has_children` primitive - "does this
+directory hold anything" answered with one listing stopped at the first entry.
+The CLI has it (`cli/state.py: has_children`) to drive its empty-vs-full
+folder icons, and it is generally useful (guarding an `rmdir`, deciding
+whether to recurse). Same question of where it belongs.
+
+**Trigger:** the second consumer. `sx` alone justified neither, but a
+`pathlike` adapter or the flat facade (both on the 0.4.0 adoption list) would
+need exactly this, and that is the moment to design it properly rather than
+copy `list_entries` a third time.
+
+## CLI observability sink from config (custom progress handling)
+
+`sx` attaches an `ObservabilityLayer` around `upload`/`download` with a
+built-in rich progress bar. A user might want to override that sink - push
+transfer events to a log, a status server, their own TUI. The sink is just
+`Callable[[TransferEvent], Any]`, so the config could name a dotted path:
+
+```toml
+[tool.storix.cli]
+progress_sink = "myproject.cli:make_progress_sink"   # -> a callable, or a factory
+```
+
+**Why deferred, not built:** this is config that imports and runs code, the
+exact posture ADR 0022 avoided for the `[[cli.layers]]` builders (curated
+names, never import paths, because a config file that imports anything is an
+execution vector). For a sink it is more defensible - explicitly the user's own
+script, opt-in - but it reopens that decision and deserves its own pass rather
+than riding in on 0.4.3.
+
+**Proposed shape when designed:**
+
+- A `ProgressSink` `Protocol` (`__call__(event: TransferEvent) -> Any`),
+  exported so users type their function against it.
+- Resolve `module:attr` to a callable; if it is a zero-arg factory, call it
+  once per transfer to get a fresh sink (lets a sink hold per-transfer state).
+- A hard failure to import or call exits naming the offending path (same
+  posture as an unknown layer), never a silent fallback that hides a typo.
+- Consider generalizing to a small `[tool.storix.cli.hooks]` table if a second
+  hook point appears (e.g. a post-write audit sink), rather than one bespoke
+  key. Decide that only when the second one exists.
+- Keep the built-in bar as the default; the config only overrides it.
+
+**Trigger:** a concrete ask for non-bar progress handling, or the first other
+CLI hook point - whichever comes first is the moment to design the import-from-
+config posture once, for both.
+
+## Concurrency in the sync flavor (and therefore the CLI)
+
+The async core fans out multi-target work concurrently: `cat`, `touch`, `mv`,
+`cp`, `rm`, multi-path `stat`, and `du`'s subtree walk all go through the
+`gather` shim, which in `_async/_compat.py` is `asyncio.gather` with a bounded
+semaphore. Real I/O concurrency - N Azure requests in flight at once.
+
+The sync flavor does none of it. `unasync.py` strips `await`, so a call
+expression like `backend.read(t)` executes immediately during `*` unpacking;
+by the time the sync `gather` (`_sync/_compat.py`) runs, every result is
+already computed, sequentially. The shim's own docstring says so. The CLI runs
+on the sync core, so `sx ls` with `dir_contents` does its per-subdirectory
+`is_empty` checks one after another, and `tree` walks sequentially - on cloud,
+fifty round trips where the async core would do them at once.
+
+**What this is and is not.** It is *not* the adapters being unoptimized: the
+sync backends are hand-written twins over real blocking libraries (`os`/`open`,
+the non-aio Azure SDK, `opendal.Operator`), so a *single* operation is as fast
+as the library allows, and those blocking calls release the GIL during I/O. It
+*is* the orchestration layer: concurrency across operations is the core's job
+(the `gather` sites), and sync Python has no built-in I/O concurrency. The
+bottleneck is exactly the `Storix`/`generic` fan-out, not the adapters - which
+matches the intuition that "the libraries are already optimized, the Storix
+class is the ceiling."
+
+**Codegen stays.** This does not argue for dropping unasync. The problem is
+one idiom: `gather(*(backend.op(x) for x in items))` pre-evaluates in sync
+because the arguments are computed before `gather` sees them.
+
+**Recommended fix (its own ADR + branch).** Replace the eager idiom with a
+deferred one: a `concurrent_map(fn, items, *, limit)` helper that takes the
+callable *un-invoked*.
+
+- `_async/_compat.py`: `asyncio.gather(*(fn(x) for x in items))`, bounded.
+- `_sync/_compat.py`: a bounded `ThreadPoolExecutor` mapping `fn` over `items`.
+  Because the sync backends do GIL-releasing blocking I/O, threads give genuine
+  I/O concurrency.
+
+Passing `fn` un-invoked is what lets sync defer to threads; codegen is
+untouched (only the two hand-written `_compat` twins differ, as they already
+do). Refactor the ~10 fan-out sites in `_async/core.py` and `generic.du` to the
+new helper, and move the batch-emptiness (`sx ls`) and tree traversal *into the
+core* so they use it too (today they are sequential CLI loops - the same
+"logic in the driving adapter that belongs in the core" the scandir work
+addressed for listing).
+
+**Caveats to settle in the ADR:** thread-safety of a shared backend client
+across threads (the sync Azure/opendal clients are built for concurrent calls;
+`MemoryBackend` is GIL-protected dict access - confirm each in the conformance
+suite under a thread pool); the pool bound (reuse `DEFAULT_CONCURRENCY`); and
+that error semantics stay unwrapped (first exception propagates, matching the
+async shim, so the storix taxonomy survives).
+
+**Trigger:** worth doing before the CLI is promoted for cloud-heavy use, or as
+soon as a user reports `sx ls`/`tree`/`du` being slow on a wide cloud tree.
+Independent of scandir, though scandir's `is_empty` is a prime beneficiary.

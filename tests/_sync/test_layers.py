@@ -74,6 +74,18 @@ def test_errors_are_rescoped_to_virtual_paths(
     assert 'jail' not in str(excinfo.value)
 
 
+def test_a_missing_root_says_so_instead_of_denying_the_root_exists():
+    # a jail over a root that is not there: rescoping alone would report
+    # "path '/' does not exist", true inside the jail and nonsense outside
+    layer = SandboxLayer(MemoryBackend(), root='/absent')
+
+    with pytest.raises(PathNotFoundError) as excinfo:
+        layer.stat(P('/'))
+
+    assert 'sandbox root does not exist' in str(excinfo.value)
+    assert 'absent' not in str(excinfo.value)  # the real root still never leaks
+
+
 def test_rescopes_parent_paths_from_inner_errors(
     jailed: tuple[MemoryBackend, SandboxLayer],
 ):
@@ -634,6 +646,35 @@ def test_observability_layer_awaits_an_async_sink():
     layer = ObservabilityLayer(MemoryBackend(), sink=sink)
     layer.write_stream(P('/a.bin'), _astream(b'abc'), mode='w', content_type=None)
     assert [e.transferred for e in events] == [3]
+
+
+# --- stack introspection ---
+
+
+def test_layers_reports_the_stack_outermost_first():
+    from storix._sync import Storix
+    from storix._sync.layers import CacheLayer, SandboxLayer
+
+    inner = MemoryBackend()
+    inner.make_dir(P('/jail'), parents=False)
+    fs = Storix(CacheLayer(SandboxLayer(inner, root='/jail')))
+
+    # reading the stack needs no duck-typing on a layer's private _inner
+    assert [type(layer).__name__ for layer in fs.layers] == [
+        'CacheLayer',
+        'SandboxLayer',
+    ]
+    assert fs.base_backend is inner  # past the layers, the real provider
+
+
+def test_layers_is_empty_without_any():
+    from storix._sync import Storix
+
+    inner = MemoryBackend()
+    fs = Storix(inner)
+
+    assert fs.layers == ()
+    assert fs.base_backend is inner is fs.backend
 
 
 # --- without_layer / uncached ---

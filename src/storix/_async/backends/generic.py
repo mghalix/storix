@@ -8,9 +8,11 @@ the port's primitives and rely on its error contract (storix errors only).
 
 from __future__ import annotations
 
+from functools import partial
+from itertools import chain
 from typing import TYPE_CHECKING
 
-from storix._async._compat import gather
+from storix._async._compat import concurrent
 from storix._async._stream import collect, ensure_chunks
 from storix.enums import PathKind
 from storix.errors import PathNotFoundError
@@ -83,9 +85,14 @@ async def copy_tree(
     async for entry in backend.list_dir(src):
         (subdirs if entry.is_dir else files).append(entry.name)
 
-    await gather(
-        *(copy_tree(backend, src / subdir, dst / subdir) for subdir in subdirs),
-        *(backend.copy(src / file, dst / file) for file in files),
+    await concurrent(
+        chain(
+            (
+                partial(copy_tree, backend, src / subdir, dst / subdir)
+                for subdir in subdirs
+            ),
+            (partial(backend.copy, src / file, dst / file) for file in files),
+        )
     )
 
 
@@ -93,16 +100,18 @@ async def delete_tree(backend: StorageBackend, path: PurePosixPath) -> None:
     """Delete ``path`` and everything below it, children first.
 
     Siblings are deleted concurrently (bounded per tree level by the
-    ``gather`` shim); the directory itself goes last, once empty.
+    ``concurrent`` helper); the directory itself goes last, once empty.
     """
     files: list[PurePosixPath] = []
     subdirs: list[PurePosixPath] = []
     async for entry in backend.list_dir(path):
         (subdirs if entry.is_dir else files).append(path / entry.name)
 
-    await gather(
-        *(backend.delete_tree(subdir) for subdir in subdirs),
-        *(backend.delete(file) for file in files),
+    await concurrent(
+        chain(
+            (partial(backend.delete_tree, subdir) for subdir in subdirs),
+            (partial(backend.delete, file) for file in files),
+        )
     )
     await backend.delete(path)
 
@@ -112,7 +121,7 @@ async def du(backend: StorageBackend, path: PurePosixPath) -> int:
 
     Uses listing-provided sizes when available, falling back to per-file
     ``stat`` calls; stats and subtree walks fan out concurrently (bounded
-    per tree level by the ``gather`` shim).
+    per tree level by the ``concurrent`` helper).
     """
     props = await backend.stat(path)
     if props.kind is PathKind.FILE:
@@ -130,8 +139,8 @@ async def du(backend: StorageBackend, path: PurePosixPath) -> int:
         else:
             stat_targets.append(child)
 
-    stats = await gather(*(backend.stat(target) for target in stat_targets))
-    subtotals = await gather(*(backend.du(subdir) for subdir in subdirs))
+    stats = await concurrent(partial(backend.stat, target) for target in stat_targets)
+    subtotals = await concurrent(partial(backend.du, subdir) for subdir in subdirs)
     return size + sum(s.size for s in stats) + sum(subtotals)
 
 

@@ -7,7 +7,7 @@
 
 <p align="center">
   One unix-flavored filesystem API over any storage: local disk, in-memory,<br>
-  Azure Data Lake. Python-first, sync and async, sandboxable, fully typed.
+  Azure, S3, GCS. Python-first, sync and async, sandboxable, fully typed.
 </p>
 
 <p align="center">
@@ -25,8 +25,8 @@
 Storix puts one unix filesystem interface in front of every storage backend, so
 you work with cloud storage the way you already work with local files: `ls`,
 `cd`, `cat`, `mkdir`, `mv`, `rm`. The backend can be your disk, an in-memory
-store for tests, or Azure Data Lake in production, behind one small, fully typed
-API, sync or async. Swap the backend, keep the code.
+store for tests, or Azure / S3 / GCS in production, behind one small, fully
+typed API, sync or async. Swap the backend, keep the code.
 
 It is not a plumbing competitor to the cloud SDKs. It is the ergonomic layer over
 them, the way FastAPI is a layer over the web rather than a new web server.
@@ -35,7 +35,9 @@ them, the way FastAPI is a layer over the web rather than a new web server.
 
 ```bash
 uv add storix            # local filesystem + in-memory
-uv add "storix[azure]"   # + Azure Data Lake Gen2 (HNS accounts)
+uv add "storix[azure]"   # + all of Azure Storage (ADLS Gen2 + Blob)
+uv add "storix[s3]"      # + Amazon S3 (r2 / minio alias it)
+uv add "storix[gcs]"     # + Google Cloud Storage
 uv add "storix[cli]"     # + the sx command-line interface
 uv add "storix[all]"     # all optional features
 ```
@@ -68,17 +70,41 @@ async with get_storage('azure') as fs:
     print(await fs.url('/report.csv', expires_in=600))   # presigned SAS link
 ```
 
+## The sx shell
+
+The `cli` extra puts the same core behind a command line, one-shot or
+interactive:
+
+```bash
+uv add "storix[cli]"
+
+sx                                    # interactive shell (tab completes paths)
+sx -p azure ls -l /media              # or a single command, any provider
+sx upload ./video.mp4 /media/         # host -> provider, with a progress bar
+```
+
+Listings carry Nerd Font icons and coreutils-style sizes (`165M`); transfers
+render progress through the `ObservabilityLayer`. Preferences and an always-on
+layer stack persist in `~/.config/storix/config.toml`, a project
+`storix.toml`, or `pyproject.toml`:
+
+```toml
+[tool.storix.cli]
+icons = true
+provider = 'azure'                          # what sx opens by default
+layers = [{ name = "cache", ttl = 300 }]    # every session, read-through
+```
+
 ## Highlights
 
 - **Unix semantics, everywhere.** `ls`/`cd`/`cat`/`du`/`mv` with a real session
-  and cwd, identical across local, memory, and cloud. The `cli` extra adds an
-  `sx` shell too.
+  and cwd, identical across local, memory, and cloud.
 - **Python-first and streaming.** `echo` takes `bytes`, `str`, an iterator, or an
   async iterator, so large files move through bounded memory instead of loading
   whole.
 - **Composable layers.** Sandbox a session (escape-proof chroot), add a
-  read-through cache, or backfill capabilities, all as middleware that wraps any
-  backend.
+  read-through cache, emit transfer progress, or backfill capabilities, all as
+  middleware that wraps any backend.
 - **Sync and async, one API**, generated from a single source and proven by one
   conformance suite across every backend.
 - **Typed and safe.** Fully typed and `py.typed`. Every failure raises a typed
@@ -94,7 +120,10 @@ backends), and the API reference live at
 | --- | --- | --- |
 | Local disk | `storix.backends.LocalBackend` | anchored at a base directory |
 | In-memory | `storix.backends.MemoryBackend` | reference backend, great for tests |
-| Azure ADLS Gen2 | `storix.backends.AzureBackend` | requires hierarchical namespaces |
+| Azure ADLS Gen2 | `storix.backends.AzureBackend` | HNS accounts; the `azure` provider self-detects the account kind |
+| Azure Blob | `storix.backends.AzureBlobBackend` | any account kind, blob API |
+| Amazon S3 | `storix.backends.S3Backend` | plus S3-compatible stores (MinIO, R2) |
+| Google Cloud Storage | `storix.backends.GcsBackend` | |
 
 Third-party backends implement the small `StorageBackend` port and register via
 `register_backend()`. See
