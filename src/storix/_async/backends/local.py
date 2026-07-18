@@ -33,6 +33,7 @@ from .base import BackendBase
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
     from pathlib import PurePosixPath
+    from typing import Literal
 
     from storix.types import EchoMode, StrPathLike
 
@@ -109,7 +110,7 @@ class LocalBackend(BackendBase):
         """
         del content_type, metadata  # capabilities not advertised; never sent
         size = resolve_chunk_size(chunk_size, self.default_write_chunk_size)
-        flags = 'wb' if mode == 'w' else 'ab'
+        flags: Literal['wb', 'ab'] = 'wb' if mode == 'w' else 'ab'
         try:
             handle = await aiofiles.open(self._to_os(path), flags)
         except OSError as exc:

@@ -24,6 +24,10 @@ Run:  uv run python samples/layers/configurable_cache.py
 
 import asyncio
 
+from collections.abc import AsyncIterator
+from pathlib import PurePosixPath
+from typing import ClassVar
+
 from storix.aio import CacheLayer, Storix, cache
 from storix.aio.backends import MemoryBackend
 from storix.models import Capabilities
@@ -33,22 +37,31 @@ class Counting(MemoryBackend):
     """Counts the expensive ops so we can see the cache working."""
 
     capabilities = Capabilities(custom_metadata=True, presigned_urls=True)
-    du_calls = 0
-    read_calls = 0
-    url_mints = 0
+    du_calls: ClassVar[int] = 0
+    read_calls: ClassVar[int] = 0
+    url_mints: ClassVar[int] = 0
 
-    async def du(self, path):  # noqa: ANN001, ANN201
+    async def du(self, path: PurePosixPath) -> int:
         Counting.du_calls += 1
         return await super().du(path)
 
-    async def read_stream(  # noqa: ANN001, ANN201
-        self, path, *, chunk_size=None
-    ):
+    async def read_stream(
+        self,
+        path: PurePosixPath,
+        *,
+        chunk_size: int | None = None,
+    ) -> AsyncIterator[bytes]:
         Counting.read_calls += 1
         async for chunk in super().read_stream(path, chunk_size=chunk_size):
             yield chunk
 
-    async def make_url(self, path, *, expires_in=None):  # noqa: ANN001, ANN201
+    async def make_url(
+        self,
+        path: PurePosixPath,
+        *,
+        expires_in: int | None = None,
+    ) -> str:
+        del expires_in
         Counting.url_mints += 1
         return f'https://signed.example/{path}?n={Counting.url_mints}'
 

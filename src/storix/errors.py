@@ -29,6 +29,7 @@ class PathError(StorageError):
 
     _template: ClassVar[str] = "'{path}': operation failed"
     _errno: ClassVar[int | None] = None
+    errno: int | None
 
     def __init__(self, path: StrPathLike, msg: str | None = None) -> None:
         super().__init__(msg or self._template.format(path=path))

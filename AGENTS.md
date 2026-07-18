@@ -5,61 +5,130 @@ CLAUDE.md is a symlink to this file.
 
 ## The one rule that matters: async is the source of truth
 
-storix is async-first. The sync flavor under `src/storix/_sync/` and
-`tests/_sync/` is GENERATED from `src/storix/_async/` and `tests/_async/` by
-`scripts/unasync.py` (token substitution: `async def` -> `def`, `await ` -> "",
-`storix._async` -> `storix._sync`, and so on).
+storix is async-first. The sync flavor under `src/storix/_sync/` (and each
+test `_sync/` twin) is GENERATED from `src/storix/_async/` (and each `_async/`)
+by `scripts/unasync.py` (token substitution: `async def` -> `def`, `await ` ->
+"", `storix._async` -> `storix._sync`, and so on). The generated test trees are
+`tests/unit/_sync/` (from `tests/unit/_async/`) and `tests/conformance/_sync/`
+(from `tests/conformance/_async/`).
 
 - Edit only the `_async` trees. Never edit `_sync/` by hand.
 - After any change under `_async`, regenerate:
-  `uv run python scripts/unasync.py` (or `just gen`).
+  `uv run --no-sync python scripts/unasync.py` (or `just gen`).
 - The codegen and CI fail if the committed `_sync` tree drifts
-  (`uv run python scripts/unasync.py --check`).
+  (`uv run --no-sync python scripts/unasync.py --check`).
 - Hand-written twins that are NOT generated: `_compat.py`, `local.py`,
   `azure.py`, `test_compat.py`. Their primitives differ per flavor, so the sync
   twin is maintained by hand and must exist.
 
 ## Commands
 
-- `uv run python scripts/unasync.py`   regenerate the sync tree (or `just gen`)
-- `uv run pytest -q`                    run the tests (or `just test`)
-- `uv run pytest tests/_async/test_layers.py -k without_layer`   a single test
-- `uv run pytest -m integration`        azure integration suite (needs STORIX_AZURE_* creds)
-- `uv run ruff check .` / `uv run ruff format .`   lint / format
-- `uv build`                            build the wheel and sdist
+- `uv sync --locked --all-extras --all-groups` install the reviewed toolchain
+- `uv run --no-sync python scripts/unasync.py` regenerate the sync tree (or `just gen`)
+- `uv run pytest tests/unit/_async/test_layers.py -k without_layer` run one test
+- `just test-unit` run local unit and conformance tests with branch coverage
+- `just test-integration` run credentialed provider tests
+- `just test-automation` run release and workflow contract tests
+- `just typing` run strict BasedPyright and mypy checks
+- `just dead-code` scan at 100 percent confidence
+- `just audit-actions` audit workflows offline with Zizmor
+- `just hooks` install the repository-managed commit message hook
+- `just hooks-check` validate and run every applicable hook
+- `just check` run the complete source and automation gate
+- `just release-check` run the side-effect-free release candidate gate
+- `just build` build the wheel and sdist with `uv build --no-sources`
+- `just smoke` install and test both artifacts in fresh environments
 
 Integration tests are opt-in; the default pytest config deselects them
-(`-m 'not integration'`). If a justfile is present, `just` lists the shortcuts
-(`just gen`, `just check`, `just lint`, `just fmt`, `just release`); `just check`
-is the full push gate (lint + format + codegen drift + tests).
+(`-m 'not integration'`). Run `just` to list the verification-only recipes.
+No local recipe changes a version, creates a tag, pushes, publishes, or creates
+a release.
+
+Test responsibilities stay separate:
+
+- Library and conformance tests cover behavior in both generated flavors.
+- Credentialed integration tests cover real optional providers.
+- `tests/automation/` covers repository and release tooling.
+- `tests/typing/` contains static typing fixtures, not Pytest tests.
+- `tests/smoke/` contains plain consumers of built artifacts.
+
+Artifact smoke tests install the exact wheel or sdist in a fresh temporary
+environment, run outside the checkout, clear inherited Python environment
+state, and use `--refresh`. Keep a core scenario, every meaningful extra, and
+the missing-extra message contract. Editable installs are not packaging tests.
 
 ## Releasing
 
 Versioning follows ADR 0021 (0.x shift-down): a breaking public API change
 bumps the MINOR (0.4.0 -> 0.5.0); a backward-compatible feature or a bug fix
 bumps the PATCH (0.4.0 -> 0.4.1). In 0.x, MINOR is the breaking-change dial.
-Published versions are immutable and monotonic: never tag a version <= the
-latest published one.
+Published versions are immutable and monotonic: never publish a version <= the
+latest published one. Between releases, `[project].version` stays at the latest
+published version. Do not bump the version by hand. Only the `Prepare release`
+workflow in `.github/workflows/prepare-release.yml` advances it.
 
-CI (`.github/workflows/ci.yml`) runs lint + format + codegen-drift + tests on
-3.12/3.13 for every push to main/dev and every PR.
+CI (`.github/workflows/ci.yml`) runs the supported Python matrix, default core,
+optional integrations, runtime lower bounds, typing, automation, strict docs,
+and isolated artifact smoke tests. Branch protection depends only on the
+stable aggregate job named `Required`.
 
-Releases are automated (`.github/workflows/release.yml`), mirroring
-pydantic/FastAPI:
+Normal changes use pull requests directly into the default branch. The
+repository accepts squash merges only, and the validated pull request title
+becomes the Conventional Commit on `main`. Do not merge `main` into a topic
+branch to satisfy strict checks; rebase it onto `origin/main`.
 
-1. bump `version` in pyproject.toml on a branch; PR into `dev`, then `dev` -> `main`;
-2. on `main`: `git tag v0.4.1 && git push origin v0.4.1`;
-3. the tag fires the workflow: it checks the tag matches the package version,
-   `uv build`s, publishes to PyPI via Trusted Publishing (OIDC, no stored token),
-   and cuts the GitHub release with generated notes.
+Releases are draft-first and fully automated:
 
-One-time PyPI setup: project -> Settings -> Publishing -> add a Trusted Publisher
-(owner `mghalix`, repo `storix`, workflow `release.yml`, Environment name
-`pypi`). After that, tagging is the entire release.
+1. Dispatch `Prepare release` and choose `patch`, `minor`, or `major`.
+2. The release App opens `release/vX.Y.Z...` with the version, lockfile, and
+   generated notes. Curate the notes and squash-merge after `Required` passes.
+3. GitHub Actions builds and smoke-tests that exact merge commit, attests one
+   wheel and one sdist, then attaches them to a draft GitHub Release.
+4. Review and publish the complete draft. Release immutability locks its tag
+   and assets.
+5. Approve the protected `pypi` environment. Trusted Publishing uploads those
+   exact verified assets without rebuilding.
 
-Manual fallback: `uv build` -> `uv publish` (needs `UV_PUBLISH_TOKEN`) ->
-`git tag vX.Y.Z && git push origin vX.Y.Z` -> `gh release create vX.Y.Z
---generate-notes`.
+Draft creation is implemented by
+`.github/workflows/create-draft-release.yml`. Publishing is implemented by
+`.github/workflows/release.yml`.
+
+Before starting a release, run exactly:
+
+```text
+uv sync --locked --all-extras --all-groups
+uv run coverage erase
+uv run --no-sync just release-check
+```
+
+Passing this gate means the repository is ready. It does not by itself mean a
+release is ready. Release readiness also requires confirmed GitHub rulesets,
+squash-only merging, the `Required` status check, the `release-automation` and
+`pypi` environments, GitHub App credentials, immutable releases, and the PyPI
+Trusted Publisher.
+
+Never create a release tag manually. If draft creation fails after the release
+pull request merges and before a tag or draft exists, fix the workflow through
+a normal pull request and use the guarded default-branch recovery dispatch.
+See `release/README.md` for setup, curation, recovery, and verification details.
+
+When guiding a future release, an agent must:
+
+1. Inspect the current version, latest tag or release, canonical notes, merged
+   user-facing changes, and worktree status.
+2. Recommend the bump from ADR 0021 and explain the compatibility reason.
+3. Run the complete local gate. Never bypass failure with a manual tag.
+4. Ask the maintainer to dispatch `Prepare release` with the chosen bump.
+5. Review the generated pull request version, lockfile, notes, Conventional
+   title, and `Required` result.
+6. Ask the maintainer to curate the notes and squash-merge with that title.
+7. Monitor draft creation and verify its tag, target commit, wheel, sdist,
+   attestations, and draft state.
+8. Ask the maintainer to publish the complete draft, approve `pypi`, and verify
+   a fresh installation from real PyPI.
+
+Confirm each remote setting before advancing to the next manual checkpoint.
+Never infer remote release readiness from repository files alone.
 
 ## Architecture (the big picture)
 
@@ -116,15 +185,43 @@ genuine "the core cannot express this" - state why in a comment, as
 
 ## Testing
 
+The tree splits by kind (explicit directories, not just marks):
+
+- `tests/unit/` offline, fast: the core-engine codegen twin (`_async/` ->
+  `_sync/`) plus flavor-agnostic loose tests (`test_cli.py`, `test_errors.py`,
+  ...). `just test-unit` runs `tests/unit tests/conformance` with coverage.
+- `tests/conformance/` the parametrized backend suite (codegen twin). Its
+  `memory`/`local` params run offline in `test-unit`; the cloud params
+  (`azure`/`azblob`/`s3`/`gcs`) are `@pytest.mark.integration` and run only
+  under `just test-integration` (`pytest tests/conformance -m integration`),
+  skipping when credentials are absent. Marks are right here because it is one
+  parametrized body over unit and cloud backends, not a separable suite.
+- `tests/automation/` release and workflow-contract tests (`just test-automation`).
+- `tests/typing/` static `assert_type` targets, checked by BasedPyright/mypy
+  (`just typing`), not collected by pytest. `tests/smoke/` are scripts, not
+  `test_*.py`, run by `just smoke`. Both sit outside `testpaths`.
+
+Integration credentials (per backend, all `STORIX_TEST_<BACKEND>_*` except s3's
+AWS keys): azure/ADLS `STORIX_TEST_AZURE_ACCOUNT_NAME`+`_CREDENTIAL`; azblob
+`STORIX_TEST_AZBLOB_CONTAINER` (+`_ACCOUNT_NAME`/`_CREDENTIAL`/`_ENDPOINT`); s3
+`STORIX_TEST_S3_BUCKET` (+`_REGION`/`_ENDPOINT`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`); gcs `STORIX_TEST_GCS_BUCKET`
+(+`_CREDENTIAL_PATH`/`_ENDPOINT`).
+
+`just test-integration` auto-loads `.env` when present (override the path with
+`STORIX_ENV_FILE=path.env`), so putting the `STORIX_TEST_*` vars there is
+enough locally; in CI, set them as real environment variables instead. Note
+this is the test namespace, separate from the library's `STORIX_*` connection
+config. Run one backend with `just test-integration -k azure`.
+
 - Mirror the source layout. A test for `_async/layers/cache.py` lives in
-  `tests/_async/test_layers.py`; its `tests/_sync/` twin is generated, never
-  written by hand.
+  `tests/unit/_async/test_layers.py`; its `tests/unit/_sync/` twin is generated,
+  never written by hand.
 - Keep test cases concise and meaningful, one behavior each, Given-When-Then.
 - Prefer pytest fixtures over mocking.
 - Async tests need no `@pytest.mark.asyncio`; it is configured in pyproject.
-- A parametrized conformance suite runs every backend and layer in both flavors.
-  New backends and layers should slot into it rather than getting a bespoke
-  harness.
+- New backends and layers slot into the conformance suite rather than getting a
+  bespoke harness.
 
 ## Naming the public surface
 

@@ -2,5 +2,4 @@
 
 set -x
 
-ruff check src --fix
-ruff format src
+uv run --no-sync just fmt
