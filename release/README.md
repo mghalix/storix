@@ -15,7 +15,7 @@ Run Prepare release and choose patch, minor, or major
     -> CI rebuilds and verifies the exact merge commit
     -> CI attests the wheel and sdist and attaches them to a draft release
     -> review and publish the complete draft
-    -> GitHub locks the release tag and assets
+    -> GitHub materializes and locks the public tag and assets
     -> CI verifies the immutable release and build provenance
     -> approve the protected pypi environment
     -> CI publishes those exact immutable assets through Trusted Publishing
@@ -24,6 +24,20 @@ Run Prepare release and choose patch, minor, or major
 There is one active release lane. Preparation stops when another release pull
 request or draft release exists.
 
+## Branch model
+
+`main` is the only permanent in-repository branch. Create short-lived topic
+branches from an up-to-date `main` and open every normal pull request directly
+back to `main`. Do not create or recreate `dev`, `develop`, staging, or another
+long-lived integration branch. Rebase a topic branch onto `origin/main` when
+strict checks require it; do not merge `main` into the topic.
+
+Branches matching `release/vX.Y.Z...` are short-lived and workflow-owned. Only
+Prepare release creates them. They target `main` directly and are deleted after
+merge by automatic head-branch deletion. If a release pull request is closed
+unmerged, explicitly delete its abandoned branch after confirming the candidate
+will not be resumed.
+
 ## Maintainer mental model
 
 The workflow has four deliberate authorization points:
@@ -31,8 +45,8 @@ The workflow has four deliberate authorization points:
 | Action | Meaning | Public effect |
 | --- | --- | --- |
 | Run `Prepare release` | Ask automation to propose a version and generated notes in a normal pull request. | None. No tag, release, or package exists. |
-| Merge the release pull request | Approve the version and curated notes. Automation verifies that exact merge commit, builds it, creates the tag, and attaches attested assets to a draft release. | The versioned notes can reach the website, but the release and package are still private. |
-| Publish the draft GitHub Release | Confirm that the tag, notes, wheel, and sdist are the intended public release. GitHub makes them immutable. | The GitHub Release becomes public and triggers the publishing workflow. |
+| Merge the release pull request | Approve the version and curated notes. Automation verifies that exact merge commit, builds it, and attaches attested assets to a draft candidate using the proposed tag name. | The versioned notes can reach the website, but no public release or package exists, and the Git tag ref may remain absent. |
+| Publish the draft GitHub Release | Confirm that the proposed tag, notes, wheel, and sdist are the intended public release. GitHub materializes the public tag and makes the tag and assets immutable. | The GitHub Release becomes public and triggers the publishing workflow. |
 | Approve the `pypi` environment | Authorize Trusted Publishing after the immutable release and provenance checks pass. | The exact reviewed assets become installable from PyPI. |
 
 Preparation is therefore a proposal, not a release. Merging selects the exact
@@ -67,9 +81,16 @@ selection and permissions narrow.
 
 Create a GitHub environment named `pypi` and configure:
 
-- required reviewers
-- prevent self-review; this requires a second trusted person
+- a second trusted required reviewer
+- prevent self-review
 - a deployment tag rule restricted to `v*`
+
+That is the strongest model. Storix currently uses an explicit solo transition
+mode while it has one trusted maintainer: the maintainer is the required
+reviewer and prevent self-review is disabled. This keeps a deliberate manual
+pause but provides no independent approval. Confirm the remote setting before
+each release and upgrade it as soon as a second trusted maintainer is
+available.
 
 Configure a PyPI Trusted Publisher for:
 
@@ -86,7 +107,9 @@ required part of the flow: the publishing workflow rejects a release without a
 valid GitHub release attestation.
 
 Release assets are attached while the release is a draft. Publishing then
-locks the tag and assets. Never move asset creation back after publication.
+materializes the public tag if needed and locks the tag and assets. A draft may
+reserve the tag name without a visible Git tag ref; that is expected, not a
+failed draft workflow. Never move asset creation back after publication.
 
 ### Default branch ruleset
 
@@ -97,6 +120,9 @@ Protect the default branch with:
 - require conversation resolution
 - require the squash merge type and linear history
 - block force pushes and deletion
+
+Keep `main` as the only permanent branch. Normal topic pull requests and
+workflow-owned release pull requests both target it directly.
 
 Under Settings -> General -> Pull Requests, allow squash merging only and set
 its default commit message to the pull request title. The validated title then
@@ -155,9 +181,11 @@ an empty generated release.
 5. Curate the generated release notes in the release pull request.
 6. Merge only after the single `Required` check passes.
 7. Wait for CI to build, smoke-test, attest, and attach both distributions to
-   the draft GitHub Release.
+   the draft GitHub Release. The visible Git tag ref may remain absent while
+   the release is a draft.
 8. Review the draft assets and notes, then select Publish release.
-9. Approve the `pypi` deployment when GitHub requests it.
+9. Verify that the public tag and immutable assets now exist.
+10. Approve the `pypi` deployment when GitHub requests it.
 
 The helper is `release/prepare.py`. Its read-only commands are:
 
@@ -184,15 +212,16 @@ Before publication, the workflows require all of the following:
 - an automatic release target is the merged release pull-request commit
 - a manual recovery target is the exact default-branch commit running the
   workflow
-- no release tag or draft already existed
-- the tag equals `v` plus `[project].version`
+- no Git tag ref or draft release already existed before candidate creation
+- the proposed tag name equals `v` plus `[project].version`
 - the canonical release notes have a non-empty section for that version
-- the tagged commit remains in default-branch history
+- the release target remains in default-branch history
 - tests, types, lint, examples, strict docs, metadata checks, and isolated
   wheel and source-distribution smoke tests pass
 - the draft contains the exact wheel and sdist built from the release target
 - both distributions have GitHub Actions build-provenance attestations
 - the published GitHub Release is immutable
+- the public tag exists after publication and targets the release commit
 - its release attestation covers the downloaded assets
 - the build-provenance signer and source commit match the draft workflow and
   release target
@@ -220,8 +249,9 @@ and runs the relevant suites without allowing uv to restore the lock.
   pull request. After it merges, open GitHub Actions -> Create draft release,
   select the default branch, and run the workflow manually. The recovery path
   releases that exact default-branch commit and refuses any other branch.
-- Bad draft -> do not publish it. Delete the draft and associated tag, fix the
-  problem through a pull request, and prepare again.
+- Bad draft -> do not publish it. Delete the draft and delete the associated
+  Git tag only if a tag ref actually exists, fix the problem through a pull
+  request, and prepare again.
 - Published release -> never replace its artifacts or tag. Fix the problem in
   a new version.
 
@@ -235,6 +265,8 @@ The release assumptions are intentionally explicit:
 - release headings supported as `X.Y.Z - DATE`, `[X.Y.Z] - DATE`,
   `X.Y.Z (DATE)`, or `vX.Y.Z (DATE)`
 - release tags prefixed with `v`
+- one permanent `main`; topic and workflow-owned release branches are
+  short-lived and target it directly
 - Conventional pull request titles
 - GitHub-generated notes reviewed in a release pull request
 - immutable GitHub Releases and PyPI Trusted Publishing
