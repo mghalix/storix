@@ -85,6 +85,12 @@ matching `release/vX.Y.Z...` are short-lived and workflow-owned. Only Prepare
 release creates them. Automatic head-branch deletion removes them after merge;
 delete an abandoned branch explicitly after its pull request closes unmerged.
 
+Give every pull request an intentional release-note label before merge. Use
+`skip-changelog` for internal-only CI, release automation, dependency,
+repository-tooling, and agent-guidance changes. Use `documentation` for
+user-facing docs. Before Prepare release, audit every merged pull request since
+the last tag and correct missed labels directly on those pull requests.
+
 Releases are draft-first and fully automated:
 
 1. Dispatch `Prepare release` and choose `patch`, `minor`, or `major`.
@@ -136,7 +142,7 @@ See `release/README.md` for setup, curation, recovery, and verification details.
 When guiding a future release, an agent must:
 
 1. Inspect the current version, latest tag or release, canonical notes, merged
-   user-facing changes, and worktree status.
+   user-facing changes, release-note labels, and worktree status.
 2. Recommend the bump from ADR 0021 and explain the compatibility reason.
 3. Run the complete local gate. Never bypass failure with a manual tag.
 4. Ask the maintainer to dispatch `Prepare release` with the chosen bump.

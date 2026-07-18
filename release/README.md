@@ -163,6 +163,13 @@ before preparation when a pull request belongs in a specific category:
 Unmatched pull requests appear under `Other changes`. Conventional pull
 request titles keep those entries meaningful even without a label.
 
+Release-note classification is part of every pull request. Use
+`skip-changelog` for internal-only CI, release automation, dependency
+maintenance, repository tooling, and agent guidance. Use `documentation` for
+user-facing docs. Before running Prepare release, audit every merged pull
+request since the last tag and correct any missed label directly on that pull
+request; labels remain editable after merge.
+
 Generated notes are a draft, not publish-ready truth. The release pull request
 must be curated: remove internal noise, improve wording, confirm breaking
 changes, and keep only information users need. The preparation helper rejects
@@ -170,7 +177,8 @@ an empty generated release.
 
 ## Prepare a release
 
-1. Confirm all intended pull requests are merged and labeled appropriately.
+1. Confirm all intended pull requests are merged and every pull request since
+   the last tag has an intentional release-note label.
 2. Open GitHub Actions -> Prepare release -> Run workflow.
 3. Choose the bump:
    - Below 1.0.0, breaking change -> minor.
