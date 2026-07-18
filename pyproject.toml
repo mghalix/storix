@@ -3,13 +3,13 @@ name = "storix"
 version = "0.4.4"
 description = "Storage Unix Style for Developers"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Mohanad Ghali", email = "mghalix@gmail.com" }]
 keywords = ["storage", "filesystem", "azure", "local", "async", "sandbox"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
@@ -28,7 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 core = [
     "loguru>=0.7.2",
-    "pydantic>=2.0.0",
+    "pydantic>=2.10.0",
     "pydantic-settings>=2.0.0",
     "python-magic>=0.4.27",
     "wrapt>=2.0.1",
@@ -67,7 +67,7 @@ gcs = [
     "opendal>=0.47.0",
 ]
 cli = [
-    "click>=8.1.7",
+    "click>=8.2.0",
     "prompt-toolkit>=3.0.0",
     "rich>=13.0.0",
     "typer>=0.13.0",
@@ -80,11 +80,15 @@ all = [
 dev = [
     "storix[all]",
     # --< tools >--
-    "pyright>=1.1.407",
-    "vulture>=2.14",
+    "basedpyright>=1.31.4,<2",
+    "commitizen>=4.16.5,<5",
+    "prek>=0.4.10,<1",
+    "rust-just>=1.56.0,<2",
+    "twine>=6.2.0,<7",
+    "vulture>=2.16",
+    "zizmor>=1.27.0,<2",
     "mypy>=1.18.2",
     "ruff>=0.14.6",
-    "pre-commit>=4.5.0",
     # --< test >--
     "coverage>=7.9.2",
     "pytest>=9.0.1",
@@ -97,24 +101,44 @@ dev = [
 ]
 #<------------------------------------------------>#
 [build-system]
-requires = ["uv_build>=0.8.13,<0.9.0"]
+requires = ["uv_build>=0.10.0,<0.12.0"]
 build-backend = "uv_build"
 #<------------------------------------------------>#
 [project.urls]
 Homepage = "https://github.com/mghalix/storix"
-Documentation = "https://github.com/mghalix/storix#readme"
+Documentation = "https://storix.mghalix.com"
 Repository = "https://github.com/mghalix/storix"
 Issues = "https://github.com/mghalix/storix/issues"
-Changelog = "https://github.com/mghalix/storix/blob/main/release-notes.md"
+Changelog = "https://github.com/mghalix/storix/blob/main/website/docs/release-notes.md"
 [project.scripts]
 sx = "storix.cli:main"
 #<------------------------------------------------>#
 
 #<--- tools --->#
-[tool.pyright]
-include = ["src"]
+[tool.basedpyright]
+include = [
+  "src",
+  "release",
+  "tests/automation",
+  "tests/smoke",
+  "tests/typing",
+  "samples/quickstart.py",
+  "samples/quickstart_async.py",
+  "samples/layers/configurable_cache.py",
+  "samples/recipes/custom_layer.py",
+]
+typeCheckingMode = "strict"
+pythonVersion = "3.12"
+venvPath = "."
+venv = ".venv"
+reportAny = false
+reportExplicitAny = false
 # opendal ships compiled modules with stubs only; source resolution is noise
 reportMissingModuleSource = false
+# opendal's compiled open methods expose untyped keyword arguments in their stubs.
+reportUnknownMemberType = false
+# Runtime guards also protect untyped callers, even when typed unions are exhaustive.
+reportUnnecessaryIsInstance = false
 exclude = [
   "**/__pycache__",
   "**/dist",
@@ -124,6 +148,16 @@ exclude = [
   "**/.venv",
   "**/playground",
 ]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version_provider = "pep621"
+tag_format = "v$version"
+
+[tool.vulture]
+# Names imposed by prompt-toolkit and pydantic callback protocols.
+ignore_names = ["complete_event", "source_type"]
+min_confidence = 100
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
@@ -136,12 +170,15 @@ module = "samples.*"
 follow_imports = "skip"
 
 [tool.pytest.ini_options]
-pythonpath = ["src/storix"]
-testpaths = ["tests"]
-# importlib mode lets tests/_async and the generated tests/_sync share
+pythonpath = [".", "src"]
+testpaths = ["tests/unit", "tests/conformance"]
+# importlib mode lets each _async tree and its generated _sync twin share
 # module basenames without __init__.py files; integration tests (real
-# cloud accounts) are opt-in via `pytest -m integration`
-addopts = "--import-mode=importlib -m 'not integration'"
+# cloud accounts) live in tests/conformance and are opt-in via
+# `pytest -m integration`. tests/automation, tests/typing and tests/smoke
+# are outside testpaths: run them via their own just recipes / the type
+# checker, not a bare `pytest`.
+addopts = "--import-mode=importlib --strict-config --strict-markers -m 'not integration'"
 python_files = "test_*.py"
 python_functions = "test_*"
 asyncio_mode = "auto"

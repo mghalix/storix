@@ -3,6 +3,4 @@
 set -e
 set -x
 
-mypy src
-ruff check src
-ruff format src --check
+uv run --no-sync just lint format-check typing

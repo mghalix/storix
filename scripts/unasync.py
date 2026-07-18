@@ -170,19 +170,24 @@ def generate() -> int:
 
 
 def check() -> int:
+    targets = [dst for _, dst in MAPPINGS]
+    before = {
+        path: path.read_bytes()
+        for target in targets
+        if target.exists()
+        for path in target.rglob('*.py')
+    }
     status = generate()
     if status:
         return status
-    targets = [str(dst) for _, dst in MAPPINGS]
-    drift = subprocess.run(
-        ['git', 'status', '--porcelain', '--', *targets],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    if drift:
+    after = {
+        path: path.read_bytes()
+        for target in targets
+        if target.exists()
+        for path in target.rglob('*.py')
+    }
+    if before != after:
         print('sync tree is out of date; run: uv run python scripts/unasync.py')
-        print(drift)
         return 1
     return 0
 

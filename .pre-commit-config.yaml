@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: commitizen
+        name: Validate Conventional Commit message
+        entry: uv run cz check --commit-msg-file
+        language: system
+        stages:
+          - commit-msg

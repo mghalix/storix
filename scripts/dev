@@ -1,4 +1,3 @@
 #!/usr/bin/env bash
 
-uv sync --dev
-uv pip install -e .
+uv sync --locked --all-extras --all-groups
