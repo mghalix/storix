@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate the sync tree from the async source of truth.
 
-Token-level unasync: reads ``src/storix/_async`` and ``tests/_async``,
-emits ``src/storix/_sync`` and ``tests/_sync``. Whitelist-driven: any
+Token-level unasync: reads each ``_async`` tree (``src/storix/_async``,
+``tests/unit/_async``, ``tests/conformance/_async``) and emits its ``_sync``
+twin (see ``MAPPINGS``). Whitelist-driven: any
 async-only construct without a registered translation aborts generation
 with file:line diagnostics instead of emitting silently-wrong sync code.
 
@@ -23,9 +24,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+
+def _pair(*parts: str) -> tuple[Path, Path]:
+    """The (_async, _sync) directory pair rooted at ``parts``."""
+    base = ROOT.joinpath(*parts)
+    return (base / '_async', base / '_sync')
+
+
 MAPPINGS: tuple[tuple[Path, Path], ...] = (
-    (ROOT / 'src' / 'storix' / '_async', ROOT / 'src' / 'storix' / '_sync'),
-    (ROOT / 'tests' / '_async', ROOT / 'tests' / '_sync'),
+    _pair('src', 'storix'),
+    _pair('tests', 'unit'),
+    _pair('tests', 'conformance'),
 )
 
 # Hand-written twin pairs. _compat/test_compat: the audited concurrency

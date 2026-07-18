@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import copy
+import fnmatch
+import re
 
 from functools import partial
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
@@ -29,7 +31,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractAsyncContextManager
 
     from storix._async.backends import StorageBackend
-    from storix.types import AsyncDataBuffer, EchoMode, StrPathLike
+    from storix.types import AsyncDataBuffer, EchoMode, PathKindStr, StrPathLike
 
 
 P = ParamSpec('P')
@@ -53,6 +55,40 @@ type BoundLayer = Callable[[StorageBackend], StorageBackend]
 
 
 _ROOT = StorixPath('/')
+
+
+def _glob_to_regex(pattern: str) -> re.Pattern[str]:
+    """Translate a pathlib-style glob into a full-match regex.
+
+    Matched against an entry's path relative to the glob base (posix
+    text). Supports ``*`` (a run of non-separator characters), ``?`` (one
+    non-separator character), and ``**`` (zero or more path segments), the
+    same wildcards ``pathlib.Path.glob`` understands. A plain ``*`` stops
+    at a separator, so ``*.py`` matches direct children only while
+    ``**/*.py`` reaches every depth.
+    """
+    i, n = 0, len(pattern)
+    parts: list[str] = []
+    while i < n:
+        char = pattern[i]
+        if char == '*':
+            if i + 1 < n and pattern[i + 1] == '*':
+                i += 2
+                if i < n and pattern[i] == '/':
+                    i += 1
+                    parts.append('(?:[^/]+/)*')  # '**/' spans zero or more dirs
+                else:
+                    parts.append('.*')  # trailing '**' spans the rest
+            else:
+                parts.append('[^/]*')
+                i += 1
+        elif char == '?':
+            parts.append('[^/]')
+            i += 1
+        else:
+            parts.append(re.escape(char))
+            i += 1
+    return re.compile('(?s:' + ''.join(parts) + ')')
 
 
 class Storix:
@@ -431,6 +467,121 @@ class Storix:
             entry.path if abs else StorixPath(entry.name)
             async for entry in self.scandir(path, all=all)
         ]
+
+    async def walk(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        all: bool = False,
+        top_down: bool = True,
+    ) -> AsyncIterator[DirEntry]:
+        """Lazily yield every descendant entry, recursively (after ``os.walk``).
+
+        The recursive sibling of ``scandir`` (one directory): streams a
+        :class:`~storix.models.DirEntry` per descendant of ``path``, never
+        the starting directory itself. ``top_down=True`` yields a directory
+        before its children (pre-order, for search and tree rendering);
+        ``top_down=False`` yields the children first (post-order, so a
+        consumer can accumulate a subtree before seeing its root, as ``du``
+        does). Recursion is sequential and lazy - nothing below a directory
+        is read until it is reached. Hidden (dot-prefixed) entries are
+        excluded unless ``all`` is set, and hidden directories are not
+        descended into. See ``find`` for filtering and ``glob`` for
+        pattern matching over this walk.
+
+        Args:
+            path: Directory to walk; the session cwd when None.
+            all: Include (and descend into) hidden entries.
+            top_down: Yield a directory before its children when True,
+                after them when False.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+        """
+        async for entry in self.scandir(path, all=all):
+            if not entry.is_dir:
+                yield entry
+                continue
+            if top_down:
+                yield entry
+            async for descendant in self.walk(entry.path, all=all, top_down=top_down):
+                yield descendant
+            if not top_down:
+                yield entry
+
+    async def find(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        name: str | None = None,
+        kind: PathKind | PathKindStr | None = None,
+        all: bool = False,
+    ) -> AsyncIterator[DirEntry]:
+        """Recursively find entries, a filtered ``walk`` (after unix ``find``).
+
+        Streams the descendants of ``path`` (pre-order) that pass the
+        filters: ``name`` is a glob matched against the basename with
+        ``fnmatch`` (``'*.py'``, ``'config.*'``), ``kind`` restricts to
+        files or directories. Both optional - no filter yields every entry,
+        exactly ``walk``. Hidden (dot-prefixed) entries, and everything under
+        a hidden directory, are excluded unless ``all`` is set - so
+        ``find(name='.env', all=True)`` reaches a dotfile. The power-user /
+        agent search method; use ``glob`` for pathlib-style path patterns
+        instead of a basename match.
+
+        Args:
+            path: Directory to search; the session cwd when None.
+            name: Glob for the basename (``fnmatch``); None matches any name.
+            kind: A :class:`~storix.enums.PathKind` (or its string) to keep
+                only files or only directories; None matches either.
+            all: Include hidden entries and descend into hidden directories.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+            ValueError: If ``kind`` is not a valid ``PathKind``.
+        """
+        wanted = PathKind(kind) if kind is not None else None
+        async for entry in self.walk(path, all=all):
+            if wanted is not None and entry.kind is not wanted:
+                continue
+            if name is not None and not fnmatch.fnmatch(entry.name, name):
+                continue
+            yield entry
+
+    async def glob(
+        self, pattern: str, path: StrPathLike | None = None, *, all: bool = False
+    ) -> AsyncIterator[StorixPath]:
+        """Yield paths matching a glob ``pattern`` (after ``Path.glob``).
+
+        Pattern matching over ``walk``, yielding absolute
+        :class:`StorixPath`s whose location relative to ``path`` matches:
+        ``*`` (a run of non-separator characters), ``?`` (one such
+        character), and ``**`` (any number of directory levels), the
+        pathlib wildcards. ``'*.py'`` matches direct children, ``'**/*.py'``
+        every depth, ``'sub/*'`` the children of ``sub``. The path sibling
+        of ``find`` (which matches a basename and yields rich entries).
+        Hidden entries, and everything under a hidden directory, are excluded
+        unless ``all`` is set (like ``pathlib.glob``, where a leading dot must
+        be explicit).
+
+        The whole subtree is walked and each entry tested, so a shallow
+        pattern still visits every descendant; a bounded walk is a later
+        optimization. Anchoring (``^``/``$``-style) and character classes
+        (``[abc]``) beyond ``*``/``?``/``**`` are not supported.
+
+        Args:
+            pattern: The glob, relative to ``path`` (``'**/*.txt'``).
+            path: Directory the pattern is relative to; the cwd when None.
+            all: Include hidden entries and descend into hidden directories.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+        """
+        base = self._resolve(path)
+        regex = _glob_to_regex(pattern)
+        async for entry in self.walk(base, all=all):
+            if regex.fullmatch(entry.path.relative_to(base).as_posix()):
+                yield entry.path
 
     async def cat(self, path: StrPathLike, /, *paths: StrPathLike) -> bytes:
         """Read one or more files, concatenated in argument order."""

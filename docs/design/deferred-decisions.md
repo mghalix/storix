@@ -347,3 +347,42 @@ async shim, so the storix taxonomy survives).
 **Trigger:** worth doing before the CLI is promoted for cloud-heavy use, or as
 soon as a user reports `sx ls`/`tree`/`du` being slow on a wide cloud tree.
 Independent of scandir, though scandir's `is_empty` is a prime beneficiary.
+
+## Listing performance on object stores: the ceilings past concurrent batching
+
+`sx ls` batches its per-entry lookups (emptiness, mtime, size) through the
+`concurrent` helper (0.4.5). That removed the N-serial-round-trips loop, but a
+measurement on a real Azure container (8 subdirs, `is_empty` per subdir)
+surfaced two further ceilings, filed here rather than chased blind:
+
+1. **opendal's per-client concurrency ceiling.** Bare (no layers), 8
+   concurrent `is_empty` calls ran ~2.4x faster than serial, not ~8x - the sync
+   `opendal.Operator` parallelizes only a few in-flight requests per client
+   (connection-pool / partial-GIL). Options to explore: an opendal client
+   option for more concurrent connections; or one `Operator` per worker.
+   Measure before assuming a fix helps.
+
+2. **The cache layer serializes the cold concurrent path.** Same 8 concurrent
+   `is_empty`: 2.8s with no layers vs 6.3s wrapped in the CLI `CacheLayer` on a
+   cold cache; the warm run (within TTL) was 0.00s. So the read-through cache
+   helps repeats hugely but makes the *first* concurrent listing slower than no
+   cache at all - a real cache-layer concurrency issue (a lock or per-call
+   overhead on the miss path that does not parallelize). Worth profiling the
+   cache store's get/set under a thread pool.
+
+**The bigger lever - object-store bulk emptiness.** Emptiness is N `is_empty`
+calls because each lists one subdirectory. On an object store, a single
+delimiter-less `LIST` of the parent returns every descendant key, from which
+every immediate child's emptiness is derivable in ONE request. That collapses
+cold `ls` emptiness from N round trips (even concurrent) to one - at the cost
+of reading the subtree's keys (bad for a container with millions of files under
+one prefix). A backend-capability-gated optimization (object stores opt in),
+not a universal default. This is the real fix for cold `ls` on a wide cloud
+container; the concurrent batch is the portable floor under it.
+
+**Also:** `walk` (and therefore `sx tree` and the `sx du` breakdown) is a
+sequential lazy generator in BOTH flavors - the async core does NOT get a
+concurrent walk for free (unlike `generic.du`, the du *total*, which already
+fans out via `concurrent`). The `sx du` breakdown using the sequential `walk`
+while the du total is concurrent is an inconsistency to resolve with the
+concurrent-walk work above.

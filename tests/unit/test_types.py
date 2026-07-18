@@ -30,3 +30,18 @@ def test_storixpath_guess_mimetype_unknown_returns_none(
     monkeypatch.setattr(mimetypes, 'guess_type', lambda _p: (None, None))
 
     assert StorixPath('file.unknownext').guess_mimetype() is None
+
+
+def test_path_kind_str_matches_enum():
+    """PathKindStr must list exactly PathKind's values (sync guard).
+
+    Add a PathKind case (e.g. a future symlink) and this fails until the
+    PathKindStr Literal lists it too - so the ergonomic string form never
+    drifts from the enum.
+    """
+    from typing import get_args
+
+    from storix.enums import PathKind
+    from storix.types import PathKindStr
+
+    assert set(get_args(PathKindStr.__value__)) == {kind.value for kind in PathKind}

@@ -89,8 +89,24 @@ Ship bundled as 0.4.1 or as successive patches:
   `sx url --data`
 - Range reads: `read_stream(start=, length=)` port extension ->
   `fs.stream`/`head`/`tail`; needed for video seeking / HTTP Range
-- `tree`, `find`, `wc` on the new core; `glob`; `ls`/`find` kind
-  filters (dirs-only / files-only)
+- [x] Recursive walk on `scandir`: `walk`/`find`/`glob` core methods, and the
+  consumers they feed - `sx find`, `sx du` 1:1 with unix (per-directory
+  breakdown, `-s`/`-a`/`-d`/`-h`) and eza-style `tree` flavors (`-L` depth,
+  `-l` long with size/kind, `--sort`). Dead `src/storix/core/`
+  (Tree/Finder/word_count) dropped in favor of it. Landed in 0.4.5 (ADR 0026).
+  A concurrent walk (per-level fan-out via ADR 0025's `concurrent`) is the
+  deferred optimization - the walk is sequential today
+- `wc` and `|`-pipe composition: dropped for now (ADR 0023/0026 discussion) -
+  content `wc` is `len(cat.splitlines())`, listing `wc` is `len(ls())`, and
+  pipe composition belongs in the shell (`sx ls | wc`), not the Python API.
+  Revisit only on a concrete need; write an ADR then, do not resurrect the
+  `__ror__` operator approach without one
+- CLI aliases (`l`, `ll`, `lt`, `..`, `...`), configurable in
+  `[tool.storix.cli]`; a shell-level expansion before dispatch, plus flavored
+  `ls`/`tree` presets, mirroring an eza/zsh alias set (ADR when built)
+- Shell input hygiene: discard or correctly buffer type-ahead so a command
+  typed while the previous one is still rendering is not echoed into the next
+  prompt (a prompt_toolkit paint/typeahead fix)
 - `echo(atomic=True)` (write-temp-then-move); `progress=` callbacks
 - BackendBase template-method refactor (shared stat-validate prologues)
 - docs site decision (zensical?) + honest comparison page

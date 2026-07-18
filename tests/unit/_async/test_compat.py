@@ -1,6 +1,6 @@
 """Tests for the async concurrency shim.
 
-Excluded from codegen (like the shim itself); tests/_sync/test_compat.py
+Excluded from codegen (like the shim itself); tests/unit/_sync/test_compat.py
 is the hand-written twin. The sync twin covers only ``concurrent`` - its
 ``gather`` was removed once every call site moved to thunks - so these
 ``gather`` tests have no sync counterpart, which hand-written twins allow.

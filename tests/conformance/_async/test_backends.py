@@ -147,8 +147,8 @@ async def backend(  # noqa: PLR0911, PLR0912, PLR0915 - one branch per backend p
             await gcs._op.remove_all('/')
         return
 
-    account = os.environ.get('ADLSG2_ACCOUNT_NAME')
-    token = os.environ.get('ADLSG2_TOKEN')
+    account = os.environ.get('STORIX_TEST_AZURE_ACCOUNT_NAME')
+    token = os.environ.get('STORIX_TEST_AZURE_CREDENTIAL')
     if not (account and token):
         pytest.skip('azure integration credentials not configured')
     from storix._async.backends.azure import AzureBackend

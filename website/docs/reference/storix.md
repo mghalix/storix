@@ -35,7 +35,35 @@ ls(path: StrPathLike | None = None, *, all: bool = False, abs: bool = False) -> 
 ```
 
 List a directory (the cwd by default). Dotfiles are hidden unless `all=True`.
-`abs=True` returns absolute paths instead of names.
+`abs=True` returns absolute paths instead of names. The eager, names-only
+member of the listing family below.
+
+### `scandir` / `iterdir` / `is_empty`
+
+```python
+scandir(path=None, *, all=False) -> Iterator[DirEntry]   # lazy, rich (name, path, kind, size)
+iterdir(path=None, *, all=False) -> Iterator[StorixPath]  # lazy names (pathlib-shaped)
+is_empty(path=None) -> bool                               # one round trip; counts hidden entries
+```
+
+`scandir` streams one directory as `DirEntry` objects carrying the kind and any
+size the listing produced for free, so a consumer never stats every entry.
+`iterdir` is its names-only sibling. `is_empty` answers whether a directory
+holds anything (a dotfile-only directory is not empty).
+
+### `walk` / `find` / `glob`
+
+```python
+walk(path=None, *, all=False, top_down=True) -> Iterator[DirEntry]  # recursive scandir
+find(path=None, *, name=None, kind=None) -> Iterator[DirEntry]      # walk filtered by glob/kind
+glob(pattern, path=None) -> Iterator[StorixPath]                    # *, ?, ** patterns
+```
+
+The recursive family, after `os.walk` / unix `find` / `pathlib.glob`. `walk`
+streams every descendant lazily (`top_down=False` for post-order, e.g. size
+accumulation). `find` filters it: `name` is a basename glob (`'*.py'`), `kind`
+restricts to files or directories. `glob` matches a path pattern. All exclude
+hidden entries by default, like the rest of the family.
 
 ### `resolve`
 

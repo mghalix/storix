@@ -32,6 +32,7 @@ reads, so `sx -p azure` talks to the account your code already talks to. See
 ```
 navigate   ls  pwd  cd  tree
 read       cat  stat  du  url
+search     find
 write      touch  echo  mkdir
 remove     rm  rmdir
 move       mv  cp
@@ -43,6 +44,36 @@ Every command supports `--help`. Familiar flags behave as they do in unix:
 `ls -l` (long), `-a` (hidden), `-t` (newest first), `-r` (reverse); `du -h`
 and `ls -l` humanize sizes in binary units like coreutils (`165M`); `tree`
 closes with the usual `N directories, M files`.
+
+### Search, `du`, and `tree`
+
+`find` searches recursively, the power-user (and agent) tool:
+
+```bash
+sx find /media --name '*.mp4' --type f   # every mp4 under /media
+sx find --type d                         # all directories from cwd
+```
+
+`du` is 1:1 with unix: a cumulative size per **directory**, bottom-up, ending
+with the total. Files are aggregated but not listed by default (like coreutils);
+`-a` lists them, `-s` prints only the grand total, `-d N` caps the reported
+depth, `-h` humanizes.
+
+```bash
+sx du /data          # per-directory sizes + total
+sx du -a /data       # include every file
+sx du -sh /data      # one human-readable total
+```
+
+For an itemized view - every file and directory with its size - use `tree -l`
+(eza-style), which is the "show me everything and how big it is" companion to
+`du`'s aggregate:
+
+```bash
+sx tree -l                 # kind + size columns on every entry
+sx tree -L 2               # cap the depth at 2 levels
+sx tree --sort size        # largest first (also: name, time)
+```
 
 ## The interactive shell
 
