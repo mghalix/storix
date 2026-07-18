@@ -516,6 +516,7 @@ class Storix:
         *,
         name: str | None = None,
         kind: PathKind | PathKindStr | None = None,
+        all: bool = False,
     ) -> Iterator[DirEntry]:
         """Recursively find entries, a filtered ``walk`` (after unix ``find``).
 
@@ -523,23 +524,25 @@ class Storix:
         filters: ``name`` is a glob matched against the basename with
         ``fnmatch`` (``'*.py'``, ``'config.*'``), ``kind`` restricts to
         files or directories. Both optional - no filter yields every entry,
-        exactly ``walk``. Hidden entries are excluded (the listing family's
-        default); pass a specific ``name`` to match a dotfile. The
-        power-user / agent search method; use ``glob`` for pathlib-style
-        path patterns instead of a basename match.
+        exactly ``walk``. Hidden (dot-prefixed) entries, and everything under
+        a hidden directory, are excluded unless ``all`` is set - so
+        ``find(name='.env', all=True)`` reaches a dotfile. The power-user /
+        agent search method; use ``glob`` for pathlib-style path patterns
+        instead of a basename match.
 
         Args:
             path: Directory to search; the session cwd when None.
             name: Glob for the basename (``fnmatch``); None matches any name.
             kind: A :class:`~storix.enums.PathKind` (or its string) to keep
                 only files or only directories; None matches either.
+            all: Include hidden entries and descend into hidden directories.
 
         Raises:
             PathNotFoundError: If ``path`` does not exist.
             ValueError: If ``kind`` is not a valid ``PathKind``.
         """
         wanted = PathKind(kind) if kind is not None else None
-        for entry in self.walk(path):
+        for entry in self.walk(path, all=all):
             if wanted is not None and entry.kind is not wanted:
                 continue
             if name is not None and not fnmatch.fnmatch(entry.name, name):
@@ -547,7 +550,7 @@ class Storix:
             yield entry
 
     def glob(
-        self, pattern: str, path: StrPathLike | None = None
+        self, pattern: str, path: StrPathLike | None = None, *, all: bool = False
     ) -> Iterator[StorixPath]:
         """Yield paths matching a glob ``pattern`` (after ``Path.glob``).
 
@@ -558,7 +561,9 @@ class Storix:
         pathlib wildcards. ``'*.py'`` matches direct children, ``'**/*.py'``
         every depth, ``'sub/*'`` the children of ``sub``. The path sibling
         of ``find`` (which matches a basename and yields rich entries).
-        Hidden entries are excluded, like the rest of the listing family.
+        Hidden entries, and everything under a hidden directory, are excluded
+        unless ``all`` is set (like ``pathlib.glob``, where a leading dot must
+        be explicit).
 
         The whole subtree is walked and each entry tested, so a shallow
         pattern still visits every descendant; a bounded walk is a later
@@ -568,13 +573,14 @@ class Storix:
         Args:
             pattern: The glob, relative to ``path`` (``'**/*.txt'``).
             path: Directory the pattern is relative to; the cwd when None.
+            all: Include hidden entries and descend into hidden directories.
 
         Raises:
             PathNotFoundError: If ``path`` does not exist.
         """
         base = self._resolve(path)
         regex = _glob_to_regex(pattern)
-        for entry in self.walk(base):
+        for entry in self.walk(base, all=all):
             if regex.fullmatch(entry.path.relative_to(base).as_posix()):
                 yield entry.path
 

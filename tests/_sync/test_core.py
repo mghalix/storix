@@ -345,6 +345,19 @@ def test_find_filters_by_kind(fs: Storix):
     assert files == {'mod.py', 'deep.py', 'readme.txt'}
 
 
+def test_find_and_glob_reach_hidden_entries_only_with_all(fs: Storix):
+    fs.echo(b'x', '/.env')
+    fs.mkdir('/.git')
+    fs.echo(b'x', '/.git/config')
+
+    # excluded by default (and hidden directories are not descended)
+    assert [e.name for e in fs.find(name='.env')] == []
+    assert list(fs.glob('**/config')) == []
+    # all=True reaches the dotfile and descends the hidden directory
+    assert [e.name for e in fs.find(name='.env', all=True)] == ['.env']
+    assert [str(p) for p in fs.glob('**/config', all=True)] == ['/.git/config']
+
+
 def test_glob_matches_direct_children_recursive_and_subdirs(fs: Storix):
     _nested_tree(fs)
 

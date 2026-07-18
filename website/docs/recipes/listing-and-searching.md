@@ -57,8 +57,9 @@ They are the same recursive walk with two matching styles:
 Reach for `find` when you want the kind/size of each hit or a type filter;
 `glob` when you are thinking in path patterns.
 
-Both exclude hidden entries by default, like the rest of the family - pass an
-explicit `name`/pattern to match a dotfile.
+Both exclude hidden entries (and anything under a hidden directory) by
+default, like the rest of the family - pass `all=True` to reach dotfiles:
+`fs.find(name=".env", all=True)`.
 
 ## `DirEntry` is not a stat
 

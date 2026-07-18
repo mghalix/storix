@@ -295,6 +295,9 @@ def find(
         str | None,
         typer.Option('--type', help='restrict to f (files) or d (directories)'),
     ] = None,
+    all_: Annotated[
+        bool, typer.Option('-a', '--all', help='include hidden entries')
+    ] = False,
 ) -> None:
     """Recursively find entries by name glob and/or type (unix find)."""
     fs = _fs()
@@ -302,7 +305,7 @@ def find(
     if type_ is not None and kind is None:
         _die('find', ValueError(f"type must be 'f' or 'd', got {type_!r}"))
     try:
-        entries = list(fs.find(path, name=name, kind=kind))
+        entries = list(fs.find(path, name=name, kind=kind, all=all_))
     except StorageError as exc:
         _die('find', exc)
     for entry in entries:
