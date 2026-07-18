@@ -72,10 +72,18 @@ optional integrations, runtime lower bounds, typing, automation, strict docs,
 and isolated artifact smoke tests. Branch protection depends only on the
 stable aggregate job named `Required`.
 
-Normal changes use pull requests directly into the default branch. The
-repository accepts squash merges only, and the validated pull request title
-becomes the Conventional Commit on `main`. Do not merge `main` into a topic
-branch to satisfy strict checks; rebase it onto `origin/main`.
+`main` is the only permanent in-repository branch. Contributors and
+maintainers create short-lived topic branches from an up-to-date `main` and
+open pull requests directly back to `main`. Do not create or recreate `dev`,
+`develop`, staging, or another long-lived integration branch. Do not route
+topic branches through an intermediate branch.
+
+The repository accepts squash merges only, and the validated pull request
+title becomes the Conventional Commit on `main`. Do not merge `main` into a
+topic branch to satisfy strict checks; rebase it onto `origin/main`. Branches
+matching `release/vX.Y.Z...` are short-lived and workflow-owned. Only Prepare
+release creates them. Automatic head-branch deletion removes them after merge;
+delete an abandoned branch explicitly after its pull request closes unmerged.
 
 Releases are draft-first and fully automated:
 
@@ -93,6 +101,11 @@ Draft creation is implemented by
 `.github/workflows/create-draft-release.yml`. Publishing is implemented by
 `.github/workflows/release.yml`.
 
+An immutable draft may reserve `vX.Y.Z` without a visible Git tag ref. This is
+expected and is not, by itself, a failed draft workflow. Publishing the
+complete draft materializes the public tag and locks it with the reviewed
+assets.
+
 Before starting a release, run exactly:
 
 ```text
@@ -107,9 +120,17 @@ squash-only merging, the `Required` status check, the `release-automation` and
 `pypi` environments, GitHub App credentials, immutable releases, and the PyPI
 Trusted Publisher.
 
+While Storix has only one trusted maintainer, its explicit `pypi` transition
+mode uses that maintainer as the required reviewer with prevent self-review
+disabled. This preserves a deliberate manual pause but not independent
+approval. Agents must report it as the weaker solo mode and confirm the remote
+setting before each release. When a second trusted maintainer becomes
+available, make that person a required reviewer and enable prevent self-review.
+
 Never create a release tag manually. If draft creation fails after the release
-pull request merges and before a tag or draft exists, fix the workflow through
-a normal pull request and use the guarded default-branch recovery dispatch.
+pull request merges and before a tag or draft candidate exists, fix the
+workflow through a normal pull request and use the guarded default-branch
+recovery dispatch.
 See `release/README.md` for setup, curation, recovery, and verification details.
 
 When guiding a future release, an agent must:
@@ -122,10 +143,12 @@ When guiding a future release, an agent must:
 5. Review the generated pull request version, lockfile, notes, Conventional
    title, and `Required` result.
 6. Ask the maintainer to curate the notes and squash-merge with that title.
-7. Monitor draft creation and verify its tag, target commit, wheel, sdist,
-   attestations, and draft state.
-8. Ask the maintainer to publish the complete draft, approve `pypi`, and verify
-   a fresh installation from real PyPI.
+7. Monitor draft creation and verify its proposed tag name, target commit,
+   wheel, sdist, attestations, and draft state. Do not require a visible tag ref
+   until publication.
+8. Ask the maintainer to publish the complete draft, verify the public tag and
+   immutable assets, approve `pypi`, and verify a fresh installation from real
+   PyPI.
 
 Confirm each remote setting before advancing to the next manual checkpoint.
 Never infer remote release readiness from repository files alone.
