@@ -44,6 +44,8 @@ azadls = [
 azblob = [
     # lean blob-only install (kind='blob'; auto-detection needs the SDK)
     "opendal>=0.47.0",
+    # local account-key SAS signing for url() (pure HMAC, no network)
+    "azure-storage-blob>=12.14.0",
 ]
 azure = [
     # the self-detecting azure provider can build either Azure backend,

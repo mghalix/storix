@@ -1,3 +1,4 @@
+# ruff: noqa: A004 - storix error classes intentionally shadow stdlib names
 """Azure Blob Storage backend (flat namespace).
 
 A typed facade: explicit, documented parameters over the internal
@@ -14,6 +15,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from storix.enums import PathKind
+from storix.errors import IsADirectoryError
+
 
 try:
     from .opendal import OpendalBackend
@@ -23,6 +27,13 @@ except ImportError:  # pragma: no cover
         "`uv add 'storix[azure]'` (or the lean, blob-only `storix[azblob]`)."
     )
     raise ImportError(_msg) from None
+
+try:
+    import azure.storage.blob  # noqa: F401
+
+    _HAS_BLOB_SDK = True
+except ImportError:  # pragma: no cover
+    _HAS_BLOB_SDK = False
 
 
 if TYPE_CHECKING:
@@ -39,10 +50,11 @@ class AzureBlobBackend(OpendalBackend):
     appends) over the Data Lake endpoint.
 
     Advertises the ``custom_metadata`` and ``content_type``
-    capabilities always, and ``presigned_urls`` when the credential is
-    a SAS token (a bare account key cannot mint one here).
-    Construction is configuration-only; credentials are validated on
-    first I/O.
+    capabilities always, and ``presigned_urls`` when the credential can
+    sign one: a SAS token (opendal appends it) or, with the blob SDK
+    installed, an account key (a read SAS is signed locally, 1:1 with
+    ``AzureBackend``). Construction is configuration-only; credentials
+    are validated on first I/O.
     """
 
     def __init__(
@@ -85,6 +97,14 @@ class AzureBlobBackend(OpendalBackend):
             account_name=account_name,
             **options,
         )
+        # opendal reports presign_read False for an account key, but the blob
+        # SDK signs one locally (see make_url), so advertise it honestly.
+        if 'account_key' in self._options and _HAS_BLOB_SDK:
+            import dataclasses
+
+            self.capabilities = dataclasses.replace(
+                self.capabilities, presigned_urls=True
+            )
 
     def locate(self, path: PurePosixPath) -> str:
         """``wasbs://`` URI (the standard blob locator), root included."""
@@ -92,3 +112,60 @@ class AzureBlobBackend(OpendalBackend):
         account = self._options['account_name']
         prefix = self._options.get('root', '/').rstrip('/')
         return f'wasbs://{container}@{account}.blob.core.windows.net{prefix}{path}'
+
+    async def make_url(
+        self, path: PurePosixPath, *, expires_in: int | None = None
+    ) -> str:
+        """Mint a read-only SAS URL for a blob.
+
+        With an account-key credential the SAS is signed locally (HMAC,
+        no request), mirroring ``AzureBackend``; with a SAS-token
+        credential opendal's native presign is used instead. The
+        configured ``endpoint`` and ``root`` are honored, so Azurite and
+        sovereign clouds work and the URL points at the exact object the
+        backend reads and writes.
+
+        Args:
+            path: Port path of the blob to sign.
+            expires_in: URL lifetime in seconds; ``None`` applies the
+                storix default lifetime.
+
+        Raises:
+            IsADirectoryError: If ``path`` is a directory.
+        """
+        if 'account_key' not in self._options:
+            return await super().make_url(path, expires_in=expires_in)
+
+        if expires_in is None:
+            from storix.constants import DEFAULT_URL_EXPIRY_SECONDS
+
+            expires_in = DEFAULT_URL_EXPIRY_SECONDS
+        raw = await self.stat(path)
+        if raw.kind is PathKind.DIRECTORY:
+            raise IsADirectoryError(path)
+
+        import datetime as dt
+        import posixpath
+
+        from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+
+        from storix.utils import craft_blob_url_sas
+        from storix.utils.time import utcnow
+
+        blob_name = posixpath.join(
+            self._options.get('root', '/'), self._key(path)
+        ).lstrip('/')
+        token = generate_blob_sas(
+            account_name=self._options['account_name'],
+            container_name=self._options['container'],
+            blob_name=blob_name,
+            account_key=self._options['account_key'],
+            permission=BlobSasPermissions(read=True),
+            expiry=utcnow() + dt.timedelta(seconds=expires_in),
+        )
+        return craft_blob_url_sas(
+            endpoint=self._options['endpoint'],
+            container=self._options['container'],
+            blob_name=blob_name,
+            sas_token=token,
+        )

@@ -154,9 +154,13 @@ def test_azure_blob_credential_kind_is_sniffed():
 
     sas = AzureBlobBackend('raw', account_name='acct', credential='sv=2024&sig=abc')
     key = AzureBlobBackend('raw', account_name='acct', credential='aGVsbG8=')
-    # a SAS token can presign (append itself); a bare account key cannot
+    # the 'sig=' marker sorts a SAS token from a bare account key
+    assert 'sas_token' in sas._options
+    assert 'account_key' in key._options
+    # both presign: opendal appends the SAS token, and the account key is
+    # signed locally via the blob SDK (1:1 with AzureBackend)
     assert sas.capabilities.presigned_urls
-    assert not key.capabilities.presigned_urls
+    assert key.capabilities.presigned_urls
 
 
 def test_azure_blob_kind_does_not_require_a_credential(
