@@ -1,12 +1,16 @@
 # Example configuration for the sx CLI shell and Storix session.
 # Copy this file to storix.toml or ~/.config/storix/config.toml to set defaults.
 
-[tool.storix.cli]
 provider = "local"
-home = "~"
+icons = true
 
 # Declarative middleware layers applied to CLI sessions:
 # layers = [
 #   { name = "cache", ttl = 300 },
-#   { name = "sandbox", path = "./sandbox" }
+#   { name = "sandbox", root = "./sandbox" }
 # ]
+
+# Command shortcuts for the CLI and interactive shell:
+# [alias]
+# la = "ls -a"
+# lt = "tree --level=2 --long"

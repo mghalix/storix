@@ -152,13 +152,17 @@ not retype flags. Sources, strongest first:
 === "storix.toml"
 
     ```toml
-    [cli]
     icons = true
     provider = 'azure'    # which backend sx opens by default
     # every sx session gets the read-through cache - handy against cloud
     # providers, where a repeated ls or du is a real round trip
     layers = [{ name = "cache", ttl = 300 }]
+
+    [alias]
+    lt = "tree"
+    la = "ls -a"
     ```
+
 
 === "pyproject.toml"
 
@@ -237,6 +241,8 @@ shared with the library. Set it via STORIX_AZURE_* (env or .env).
 | `provider` | unset | Backend `sx` opens by default (`-p` still wins) |
 | `dir_contents` | `true` | Show whether a directory is empty in flat listings |
 | `layers` | `[]` | The always-on layer stack, innermost first |
+| `alias` | `{}` | Command shortcuts (e.g. `{ la = "ls -a", lt = "tree -L 2" }`) |
+
 
 #### `dir_contents`: the empty-folder icon, and what it costs
 
