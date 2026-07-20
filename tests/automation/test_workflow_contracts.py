@@ -210,7 +210,12 @@ def test_ci_has_one_stable_required_aggregate() -> None:
 
     # When / Then
     assert workflow.count('name: Required') == 1
-    assert 'if: always()' in workflow
+    assert 'if: ${{ !cancelled() }}' in workflow
+    assert (
+        'group: ci-${{ github.workflow }}-'
+        '${{ github.event.pull_request.number || github.ref }}' in workflow
+    )
+    assert 'cancel-in-progress: true' in workflow
     for dependency in (
         'core',
         'unit',
