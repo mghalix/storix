@@ -1,0 +1,132 @@
+name: Bug Report
+description: Report a bug in Storix
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+        Please fill out the sections below so we can reproduce and fix the issue.
+
+        > [!IMPORTANT]
+        > Do not include passwords, API keys, connection strings, SAS tokens, or signed URLs in your report.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear summary of the bug.
+      placeholder: What went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps or code to trigger the bug.
+      placeholder: |
+        import asyncio
+        from storix.aio import Storix
+        from storix.aio.backends import MemoryBackend
+
+        async def main() -> None:
+            fs = Storix(MemoryBackend())
+            await fs.echo(b"data", "/file.txt")
+            # ...
+
+        asyncio.run(main())
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: api-flavor
+    attributes:
+      label: API flavor
+      description: Are you using the synchronous or asynchronous API?
+      options:
+        - Async (storix.aio)
+        - Sync (storix)
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend / Provider
+      description: Which storage backend were you using?
+      options:
+        - LocalBackend
+        - MemoryBackend
+        - AzureBackend (ADLS Gen2)
+        - AzureBlobBackend
+        - S3Backend
+        - GcsBackend
+        - Multiple / Layered
+        - Not applicable
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproduces-offline
+    attributes:
+      label: Does it reproduce with MemoryBackend or LocalBackend?
+      description: Can the issue be reproduced offline without cloud credentials?
+      options:
+        - Yes (reproduces with MemoryBackend or LocalBackend)
+        - No (only occurs on cloud backend)
+        - Untested
+    validations:
+      required: true
+
+  - type: input
+    id: storix-version
+    attributes:
+      label: Storix version
+      description: "Output of: python -c \"import importlib.metadata; print(importlib.metadata.version('storix'))\""
+      placeholder: "0.4.5"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: "Output of: python --version"
+      placeholder: "3.12.0"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 24.04 / macOS 15.1 / Windows 11"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or traceback
+      description: Paste any error output, traceback, or log lines. Remember to sanitize secrets first.
+      render: shell
+    validations:
+      required: false
