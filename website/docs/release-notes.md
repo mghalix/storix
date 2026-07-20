@@ -1,5 +1,38 @@
 # Release Notes
 
+## [0.4.6] - 2026-07-20
+
+Storix now has a clearer public entry point for developers exploring typed,
+streaming storage workflows. This release focuses on documentation, examples,
+package discovery, and community participation. SDK runtime behavior is
+unchanged.
+
+### Added
+
+* A contribution guide and structured GitHub forms for bug reports and
+  workflow discussions.
+* Runnable streaming recipes demonstrating subprocess output written
+  incrementally through Storix, including an optional yt-dlp integration.
+* Clear maintainer priorities and community-driven workflow guidance in the
+  public roadmap.
+
+### Changed
+
+* The README and documentation homepage now present Storix as an async-first,
+  streaming-first storage SDK across local storage, Azure, S3, and GCS.
+* Package metadata, keywords, homepage links, and project URLs now match the
+  current documentation and provider support.
+* Community guidance now directs open-ended workflows and API ideas to GitHub
+  Discussions, while confirmed bugs remain in GitHub Issues.
+* FastAPI examples now distinguish chunked `UploadFile` reads from raw request
+  body streaming and avoid implying that multipart uploads bypass framework
+  spooling.
+
+### Fixed
+
+* The Workflows discussion category now loads its structured workflow form
+  correctly.
+
 ## [0.4.5] - 2026-07-18
 
 Recursive search is now a first-class core capability, with a faster and more
