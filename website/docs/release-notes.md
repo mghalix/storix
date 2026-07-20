@@ -1,5 +1,12 @@
 # Release Notes
 
+## [0.4.6] - 2026-07-20
+
+### What's Changed
+#### Documentation
+* docs: prepare Storix for community adoption by @mghalix in https://github.com/mghalix/storix/pull/19
+* docs: align package discovery metadata by @mghalix in https://github.com/mghalix/storix/pull/21
+
 ## [0.4.5] - 2026-07-18
 
 Recursive search is now a first-class core capability, with a faster and more
