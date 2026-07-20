@@ -1,158 +1,158 @@
 # Roadmap
 
-Value-ordered; conversion before novelty. Rationale for the positioning
-(ergonomic/agent layer over any plumbing, never a plumbing competitor)
-and for individual decisions: `docs/adr/`.
+What Storix is working toward, organized by the workflows it improves.
 
-## 0.2.0 (release gate)
+Items are grouped by status. Community feedback influences priorities - if
+your workflow needs something listed here (or something missing), start a
+[workflow discussion](https://github.com/mghalix/storix/discussions).
 
-- [x] CLI rewrite onto the sync core (`sx`, REPL)
-- [x] everything else: hexagonal core, codegen, backends
-      (memory/local/azure wire-verified), layers, capabilities,
-      metadata/URLs, config/factory, workspaces, teardown,
-      DataUrlLayer + MetadataLayer (portable capabilities via layers)
+No dates are promised. Items move between groups as design work progresses
+and real-world usage clarifies priorities.
 
-## 0.2.1
+---
 
-- [x] `CacheLayer`: configurable read-through cache. Per-op specs
-  (`metadata` on by default; `du`, `read`, `url` opt-in) as
-  `bool | CacheOp`, each with its own `ttl`/`store` (share one or split,
-  e.g. metadata in Redis + content on a bounded local store) and,
-  for `read`, a per-file `max_bytes` cap. Evict-on-mutation
-  (metadata: path+parent; du: ancestor chain; read: the file); `url` is
-  TTL-only and capped to the URL lifetime. Keys follow
-  `<namespace>[:<environment>]:<op>:<locator>`, keyed on the physical
-  `locate()` so sessions sharing a store never collide. Pluggable
-  `CacheStore` (cashews-shaped; in-memory default with optional
-  `maxsize` LRU, swap for Redis/etc.) - vroom (ADR 0014)
+## Current maintainer priorities
 
-- [x] CLI layers: `sx --cache [--cache-ttl N]` (metadata+du+read,
-  bounded) and `--sandbox PATH`, applied sandbox-innermost /
-  cache-outermost; REPL start banner + `refresh` command +
-  `provider` layers line. Opt-in, shell is where it pays off (ADR 0015)
+Community needs can change the order. When community feedback does not identify
+a more important workflow, default priorities are:
 
-## 0.2.2
+1. Strengthen and document existing streaming workflows.
+2. Add compelling, verified end-to-end recipes.
+3. Design consistent resilience and retry semantics across providers.
+4. Improve documentation discoverability for humans and coding agents.
+5. Continue improving provider consistency and DX as real workflows expose gaps.
 
-- [x] `Storix.without_layer(*types)` / `uncached` - per-op layer bypass
-  (a fresh-read view), gated by `removable` so a `SandboxLayer` can never
-  be stripped (`NonRemovableLayerError`). `BoundLayer` made a public
-  export; `CacheOp`/`CacheStore`/`InMemoryCacheStore` added to `__all__`
-  of both flavors (ADR 0016)
+---
 
-## 0.4.1 - 0.4.3 (next)
+## Available now
 
-Three backward-compatible features, so patches (0.4.0 is published;
-versions are monotonic, there is no going back to fill 0.2.x/0.3.x).
-Ship bundled as 0.4.1 or as successive patches:
+These ship in the current release and are covered by the conformance suite.
 
-- 0.4.1 `ObservabilityLayer` (v0: transfer events): a port-wrapping layer
-  that counts read/write bytes at the pull boundary and emits
-  `TransferEvent`s to a consumer-supplied sink - progress bars for `sx`
-  and library consumers with zero core churn. The consumer owns the total
-  (a percentage needs one; storix only knows bytes-so-far). First slice of
-  the audit story (op-level events later), not a throwaway (ADR 0019)
-- [x] 0.4.2 `OpendalBackend`: first external adapter, async-native + presign,
-  spike-gated (ADR 0020)
-- [x] 0.4.3 `sx` UX: prompt_toolkit autocomplete + upload/download progress
-  bars over the ObservabilityLayer; grew into the full CLI revamp - Nerd
-  Font icons (data-driven), unix/coreutils-consistent output, persistent
-  prefs + declarative `[[cli.layers]]` config (ADR 0022), modular package
+### Core operations
+- Unix-flavored session with `ls`, `cat`, `echo`, `mv`, `cp`, `rm`, `du`,
+  `mkdir`, `touch`, `stat`, `cd`, `pwd` across all backends
+- Streaming reads (`stream`) and writes (`echo` from any iterable/async
+  iterable/file-like/bytes) with bounded memory
+- Recursive traversal: `walk`, `find` (filtered), `glob` (pattern matching)
+- Path resolution: `resolve` (session path), `locate` (physical URI)
+- Presigned URLs via `url()` on capable backends
+- Custom metadata on capable backends
+- Data URLs on any backend via `DataUrlLayer`
 
-## 0.2.x - polish
+### Backends
+- **Local disk** - anchored at a base directory
+- **In-memory** - full reference backend, ideal for tests
+- **Azure ADLS Gen2** - HNS accounts, native streaming
+- **Azure Blob** - any account kind, via opendal
+- **Amazon S3** - also R2, MinIO, and S3-compatible stores
+- **Google Cloud Storage** - via opendal
+- Custom backends via `StorageBackend` protocol and `register_backend()`
 
-- `MountLayer`: unix-style multi-container compositor (designed, see
-  deferred-decisions.md)
-- [x] CLI declarative layer stack: `storix.toml` / `[tool.storix.cli]`
-  (ruff-style precedence) with an ordered `[[layers]]` DSL; backend
-  config stays shared, layer stack is CLI-scoped (ADR 0015; landed
-  in 0.4.3, ADR 0022)
-- CLI cache store selection: swap the in-memory default for a persistent
-  store via the `[[layers]]` `store=` (a cashews URL, or a new built-in
-  disk-backed `CacheStore`). Lets one-shot `sx --cache` benefit across
-  invocations; needs a cross-process staleness default (TTL/validation),
-  since separate processes sharing a store reopen the single-writer
-  assumption (ADR 0014/0015)
-- `AzureBlobBackend.url` with an account key. Today the backend derives
-  `presigned_urls` from opendal's `presign_read`, which azblob reports
-  False for an account key and True only for a SAS token - so the *same*
-  credential mints a URL on `AzureBackend` (ADLS, which signs locally via
-  `generate_file_sas`) and raises `UnsupportedOperationError` on Blob.
-  Same account, same key, different answer: storix's inconsistency, not
-  Azure's. Fix: override `make_url` with `generate_blob_sas` (local HMAC,
-  no request, mirrors the ADLS sibling) and advertise the capability when
-  the credential can sign, keeping opendal's presign for SAS-token
-  credentials. `azure-storage-blob` already ships under `storix[azure]`
-  (transitively via the datalake SDK), so only the lean `storix[azblob]`
-  (opendal-only) install would keep today's behavior - which makes the
-  capability dynamic per install, the part that needs a design pass.
-  Workaround now: `[[cli.layers]] name = "url"` (data: URLs), or
-  `sx url --data`
-- Range reads: `read_stream(start=, length=)` port extension ->
-  `fs.stream`/`head`/`tail`; needed for video seeking / HTTP Range
-- [x] Recursive walk on `scandir`: `walk`/`find`/`glob` core methods, and the
-  consumers they feed - `sx find`, `sx du` 1:1 with unix (per-directory
-  breakdown, `-s`/`-a`/`-d`/`-h`) and eza-style `tree` flavors (`-L` depth,
-  `-l` long with size/kind, `--sort`). Dead `src/storix/core/`
-  (Tree/Finder/word_count) dropped in favor of it. Landed in 0.4.5 (ADR 0026).
-  A concurrent walk (per-level fan-out via ADR 0025's `concurrent`) is the
-  deferred optimization - the walk is sequential today
-- `wc` and `|`-pipe composition: dropped for now (ADR 0023/0026 discussion) -
-  content `wc` is `len(cat.splitlines())`, listing `wc` is `len(ls())`, and
-  pipe composition belongs in the shell (`sx ls | wc`), not the Python API.
-  Revisit only on a concrete need; write an ADR then, do not resurrect the
-  `__ror__` operator approach without one
-- CLI aliases (`l`, `ll`, `lt`, `..`, `...`), configurable in
-  `[tool.storix.cli]`; a shell-level expansion before dispatch, plus flavored
-  `ls`/`tree` presets, mirroring an eza/zsh alias set (ADR when built)
-- Shell input hygiene: discard or correctly buffer type-ahead so a command
-  typed while the previous one is still rendering is not echoed into the next
-  prompt (a prompt_toolkit paint/typeahead fix)
-- `echo(atomic=True)` (write-temp-then-move); `progress=` callbacks
-- BackendBase template-method refactor (shared stat-validate prologues)
-- docs site decision (zensical?) + honest comparison page
+### Layers and composition
+- **SandboxLayer** - escape-proof chroot with real-path auditing
+  (`to_real`/`to_virtual`)
+- **CacheLayer** - read-through cache with per-operation specs, pluggable
+  `CacheStore`, evict-on-mutation
+- **ObservabilityLayer** - transfer events (bytes read/written) for progress
+  bars and metrics (ADR 0019)
+- **DataUrlLayer** / **MetadataLayer** - backfill capabilities on any provider
+- `with_layer` / `with_layer_missing` / `without_layer` / `uncached`
+  composition
+- `chroot()` convenience for sandboxed sessions
+- `scratch()` for ephemeral workspaces
 
-## 0.4.0 - adoption
+### Developer experience
+- Sync and async APIs generated from a single async source
+- Fully typed (`py.typed`), strict BasedPyright and mypy checked
+- Typed errors with stdlib dual inheritance (`PathNotFoundError` is also
+  `FileNotFoundError`)
+- `get_storage()` factory with env-driven configuration
+- `temporary()` for disposable sessions in tests and scripts
 
-Multiple ergonomic front-ends over the one core, and breadth of
-providers - the two levers that make storix promotable.
+### CLI (`sx`)
+- Interactive shell with path tab-completion
+- Upload/download with progress bars via `ObservabilityLayer`
+- Nerd Font icons and coreutils-style output
+- Declarative layer stack via `storix.toml` / `pyproject.toml`
 
-- [x] `when_missing` infers its capability from the layer's `provides`,
-  dropping the explicit argument and forwarding constructor args - the
-  pre-construction twin of `with_layer_missing` (breaking; ADR 0018)
-- `storix.pathlike`: pathlib-flavored adapter over the same core
-  (the cloudpathlib audience)
-- Stateless flat facade (working name `Boring[Storix]` / `storix.flat`):
-  drops cwd/session, exposes `read`/`write`/`size`/`read_stream`/
-  `write_stream`/`delete`/`exists`/`list` on absolute keys - the
-  object-store mental model for users unfamiliar with the unix metaphor.
-  A thin front-end over the same engine, not a new one; widens the
-  audience without diluting the identity (naming TBD)
-- `FsspecBackend` (opendal adapter lands first, in 0.4.2, ADR 0020): the
-  second ecosystem adapter, chosen for reach into the data crowd
-  (pandas/dask) and the inverse `AbstractFileSystem` lever - one adapter =
-  every provider fsspec supports (S3, GCS, SFTP...). storix stays the DX
-  layer, like FastAPI over Starlette
-- fsspec-compatible *interface* (storix *implementing* `AbstractFileSystem`,
-  the inverse of `FsspecBackend`): lets the data ecosystem
-  (pandas/pyarrow/polars/dask) read storix paths. Big adoption lever,
-  big surface - its own design pass
-- URI factory (`get_storage('azure://container/path')`) + entry-point
+---
+
+## Planned
+
+Designed or prototyped, not yet shipped.
+
+### Streaming and transfer reliability
+- Range reads: `read_stream(start=, length=)` port extension for `head`/
+  `tail`/video seeking
+- `echo(atomic=True)` - write-temp-then-move for safe overwrites
+- Define consistent resilience semantics across provider-native retries and an
+  optional Storix retry layer, including idempotency, cancellation, backoff,
+  provider error classification, and observability
+
+### Provider capabilities
+- **AzureBlobBackend.url** with account-key signing (local HMAC, no request)
+  - currently limited to SAS-token credentials (ADR 0024)
+- CLI persistent cache store across invocations
+
+### Cloud workflow ergonomics
+- **MountLayer** - unix-style multi-container compositor
+- URI factory: `get_storage('azure://container/path')` with entry-point
   plugin discovery
 
-## 0.5.0 - differentiators
+### Framework and tool integrations
+- **storix.pathlike** - pathlib-flavored adapter for the cloudpathlib audience
+- **Stateless flat facade** - `read`/`write`/`list` on absolute keys for users
+  who prefer the object-store mental model over the unix metaphor
+- **FsspecBackend** - use any fsspec-supported store as a storix backend
+- **fsspec interface** - storix implementing `AbstractFileSystem` so
+  pandas/pyarrow/polars can read storix paths
 
-- Agent story: capability-stripped sessions (a sandboxed session whose
-  backend handle cannot unmask paths), possible MCP server, and the audit
-  increment of the `ObservabilityLayer` (op-start/end/error events; the
-  transfer-event v0 shipped in 0.2.3, ADR 0019)
-- Staged-write transactions (`with fs.transaction():` - all-or-nothing
-  for new writes, honestly scoped)
+### Documentation for coding agents
+- Coding agent documentation (`llms.txt` and `llms-full.txt` generated from public docs)
+- Storix Agent Skill covering installation, sync versus async selection, providers, common workflows, public API constraints, and safe extension patterns
 
-## Likely never (recorded so it stops resurfacing)
+---
 
-- Connection pooling as a storix feature: the SDKs already pool
-  (aiohttp sessions); measure before building
-- Competing with fsspec/opendal on backend count or raw throughput
+## Under consideration
 
-(Release process and versioning policy live in AGENTS.md "Releasing"
-and ADR 0021, not here - the roadmap is plans only.)
+Ideas that need a concrete use case or design pass before committing.
+
+### Reliability and resilience
+- Resumable uploads for large files
+- Progress reporting with total-size awareness
+- Multipart upload tuning per provider
+
+### Observability
+- Operation-level events (start/end/error) beyond transfer bytes
+- Telemetry hooks (OpenTelemetry integration)
+
+### Agent and automation
+- Capability-stripped sessions (sandbox without path-unmask escape)
+- MCP server for AI agent workflows
+- Audit-grade operation logging
+- Open Knowledge Format export or bundle for LLM indexing
+
+### Transactions
+- Staged-write transactions (`with fs.transaction():` - all-or-nothing for
+  new writes, honestly scoped)
+
+### Performance
+- Concurrent walk (per-level fan-out for recursive operations)
+
+---
+
+## Likely never
+
+Recorded so these do not resurface without new evidence.
+
+- **Connection pooling as a storix feature** - the underlying SDKs already
+  pool (aiohttp sessions, opendal); measure before building
+- **Competing with fsspec/opendal on backend count or raw throughput** -
+  storix is the ergonomic layer, not the plumbing
+
+---
+
+Release process and versioning policy live in
+[AGENTS.md](../AGENTS.md) and
+[ADR 0021](adr/0021-versioning-policy.md).
+Rationale for individual decisions: [docs/adr/](adr/).

@@ -168,17 +168,21 @@ Hexagonal: one core engine over one small port.
   operation (`ls`/`cat`/`echo`/`du`/`mv`/`url`/...). It speaks only to a
   `StorageBackend`.
 - `StorageBackend` (the port, about 14 methods) is what backends implement:
-  `LocalBackend`, `MemoryBackend` (the reference backend, ideal for tests), and
-  `AzureBackend` (ADLS Gen2, HNS accounts only). Backends do zero path logic and
-  raise only `storix.errors`.
+  - **LocalBackend**: real disk filesystem anchored at a base directory
+  - **MemoryBackend**: reference backend, ideal for tests
+  - **AzureBackend**: ADLS Gen2 native (HNS accounts)
+  - **AzureBlobBackend**: Azure Blob Storage via OpenDAL engine
+  - **S3Backend**: Amazon S3 and S3-compatible stores (R2, MinIO) via OpenDAL engine
+  - **GcsBackend**: Google Cloud Storage via OpenDAL engine
+  Backends do zero path logic and raise only `storix.errors`.
 - Layers are backends that wrap backends (same port). Compose them with
   `Storix(be, layers=[...])`, `fs.with_layer(Layer, **kwargs)`, or
   `fs.with_layer_missing(Layer)` (native-preference, capability inferred).
   `SandboxLayer` is an escape-proof chroot, `CacheLayer` is a read-through cache,
-  `DataUrlLayer` and `MetadataLayer` backfill capabilities, `LayerBase` is the
-  delegating base for custom layers. `fs.without_layer(Layer)` / `fs.uncached`
-  strip layers for one session; a `SandboxLayer` is non-removable
-  (`removable = False`).
+  `ObservabilityLayer` emits transfer progress events, `DataUrlLayer` and
+  `MetadataLayer` backfill capabilities, `LayerBase` is the delegating base
+  for custom layers. `fs.without_layer(Layer)` / `fs.uncached` strip layers
+  for one session; a `SandboxLayer` is non-removable (`removable = False`).
 - Capabilities (`models.Capabilities`) gate optional features; requesting a
   missing one raises `UnsupportedOperationError` naming the capability.
 - Factory: `get_storage(provider, /, **overrides)` (env-driven through `STORIX_*`
@@ -251,6 +255,20 @@ config. Run one backend with `just test-integration -k azure`.
 - Async tests need no `@pytest.mark.asyncio`; it is configured in pyproject.
 - New backends and layers slot into the conformance suite rather than getting a
   bespoke harness.
+
+## Public communication & feature standards
+
+When writing public documentation, READMEs, issue templates, or release notes:
+
+- **Never oversell maturity.** Avoid buzzwords like "production-grade",
+  "enterprise-ready", or "zero-copy" unless backed by explicit benchmarks or evidence.
+- **Distinguish available vs planned capabilities.** Clearly separate shipped features
+  from items on the roadmap or under consideration.
+- **Verify every public example.** Public examples must either be executable and tested,
+  or explicitly marked as fragments. In both cases, verify their syntax, imports, types,
+  async usage, and actual API behavior.
+- **Maintain an honest maintainer voice.** Frame missing capabilities or errors as
+  opportunities for workflow improvements rather than hiding them.
 
 ## Naming the public surface
 

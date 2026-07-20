@@ -3,7 +3,7 @@
 
 [project]
 site_name = "Storix"
-site_description = "One unix-flavored filesystem API over any storage — local disk, in-memory, Azure Data Lake. Sync and async, sandboxable, fully typed."
+site_description = "A typed, streaming-first filesystem API for local storage, Azure, S3, and GCS, with sync and async Python interfaces."
 site_author = "Mohanad Ghali"
 site_url = "https://storix.mghalix.com/"
 copyright = "Copyright &copy; 2026 Mohanad Ghali"
