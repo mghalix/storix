@@ -2,7 +2,12 @@
 
 One session is created for the app's lifetime and injected into route
 handlers. Uploads are streamed to storage in chunks, so a large file never
-lands in memory whole.
+lands in application memory whole.
+
+Note: Reading `UploadFile` in chunks avoids accumulating large payloads in application
+memory. `UploadFile` is backed by Starlette's spooled temporary file for large requests.
+For raw unbuffered network body streaming without multipart parsing, `request.stream()`
+can be passed directly to `fs.echo()`.
 
 Run:  uv run --with "fastapi[standard]" fastapi dev samples/recipes/fastapi_di.py
 """
