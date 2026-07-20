@@ -722,4 +722,9 @@ def _main(  # pyright: ignore[reportUnusedFunction]
 
 def main() -> None:
     """Console-script entry point (`sx`)."""
+    from .config import expand_alias, load_prefs
+
+    prefs = load_prefs()
+    if prefs.alias and len(sys.argv) > 1:
+        sys.argv = [sys.argv[0], *expand_alias(sys.argv[1:], prefs.alias)]
     app()
