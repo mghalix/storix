@@ -1,6 +1,5 @@
 title: "[Workflow]: "
 labels: ["workflow"]
-category: "workflows"
 body:
   - type: markdown
     attributes:

@@ -1,12 +1,23 @@
 [project]
 name = "storix"
 version = "0.4.5"
-description = "Storage Unix Style for Developers"
+description = "An async-first, streaming-first storage SDK for modern Python applications"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Mohanad Ghali", email = "mghalix@gmail.com" }]
-keywords = ["storage", "filesystem", "azure", "local", "async", "sandbox"]
+keywords = [  
+  "python",
+  "storage",
+  "filesystem",
+  "async",
+  "streaming",
+  "cloud-storage",
+  "azure",
+  "s3",
+  "gcs",
+  "local"
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -105,10 +116,11 @@ requires = ["uv_build>=0.10.0,<0.12.0"]
 build-backend = "uv_build"
 #<------------------------------------------------>#
 [project.urls]
-Homepage = "https://github.com/mghalix/storix"
+Homepage = "https://storix.mghalix.com"
 Documentation = "https://storix.mghalix.com"
 Repository = "https://github.com/mghalix/storix"
 Issues = "https://github.com/mghalix/storix/issues"
+Discussions = "https://github.com/mghalix/storix/discussions"
 Changelog = "https://github.com/mghalix/storix/blob/main/website/docs/release-notes.md"
 [project.scripts]
 sx = "storix.cli:main"
