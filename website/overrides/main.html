@@ -1,12 +1,24 @@
 {% extends "base.html" %}
 
+{% block htmltitle %}
+  {% if not page or not page.url or page.url == "." or page.url == "index.html" %}
+    <title>Storix - Async-first storage SDK for Python</title>
+  {% elif page.meta and page.meta.title %}
+    <title>{{ page.meta.title }} - {{ config.site_name }}</title>
+  {% elif page.title %}
+    <title>{{ page.title | striptags }} - {{ config.site_name }}</title>
+  {% else %}
+    <title>{{ config.site_name }}</title>
+  {% endif %}
+{% endblock %}
+
 {% block extrahead %}
   {{ super() }}
   {% if page.meta and page.meta.social_preview %}
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Storix">
-    <meta property="og:title" content="Storix - Storage for Unix lovers.">
-    <meta property="og:description" content="One unix-flavored filesystem API over local disk, memory, and Azure Data Lake. Sync and async, sandboxable, fully typed.">
+    <meta property="og:title" content="Storix - Async-first storage SDK for Python">
+    <meta property="og:description" content="A typed, streaming-first filesystem API for local storage, Azure, S3, and GCS, with sync and async Python interfaces.">
     <meta property="og:url" content="{{ page.canonical_url }}">
     <meta property="og:image" content="https://storix.mghalix.com/assets/social-preview.png">
     <meta property="og:image:secure_url" content="https://storix.mghalix.com/assets/social-preview.png">
@@ -15,8 +27,8 @@
     <meta property="og:image:height" content="720">
     <meta property="og:image:alt" content="Storix - Storage for Unix lovers.">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Storix - Storage for Unix lovers.">
-    <meta name="twitter:description" content="One unix-flavored filesystem API over local disk, memory, and Azure Data Lake. Sync and async, sandboxable, fully typed.">
+    <meta name="twitter:title" content="Storix - Async-first storage SDK for Python">
+    <meta name="twitter:description" content="A typed, streaming-first filesystem API for local storage, Azure, S3, and GCS, with sync and async Python interfaces.">
     <meta name="twitter:image" content="https://storix.mghalix.com/assets/social-preview.png">
     <meta name="twitter:image:alt" content="Storix - Storage for Unix lovers.">
   {% endif %}
