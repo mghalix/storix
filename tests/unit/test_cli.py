@@ -1,3 +1,5 @@
+from collections.abc import Generator
+
 import pytest
 
 from typer.testing import CliRunner
@@ -13,7 +15,7 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def fresh_session(tmp_path, monkeypatch) -> None:
+def fresh_session(tmp_path, monkeypatch) -> Generator[None]:
     """Each test gets a clean in-memory session and no ambient config.
 
     The prefs loader searches upward from the cwd, so a test run from a
@@ -327,6 +329,16 @@ def test_unknown_preference_is_rejected_with_the_known_set(prefs_from):
         load_prefs()
 
     assert 'icons' in str(exc_info.value)
+
+
+def test_ls_long_format_outputs_kind_size_date_time():
+    run('echo', 'hello world', '-f', '/a.txt')
+    run('mkdir', '/docs')
+    out = run('ls', '-l').stdout
+    lines = out.splitlines()
+    assert len(lines) == 2
+    assert 'a.txt' in out
+    assert 'docs' in out
 
 
 def test_icons_lookup_and_namespace():
