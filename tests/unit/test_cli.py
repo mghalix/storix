@@ -338,7 +338,8 @@ def test_icons_lookup_and_namespace():
     assert Icons.FOLDER_OPEN == '\uf115'
 
     # Directory lookup
-    assert lookup_entry_decor('src', is_dir=True)[0] == Icons.WRENCH
+    assert lookup_entry_decor('src', is_dir=True)[0] == '\U000f08de'
+
     assert (
         lookup_entry_decor('random', is_dir=True, dir_state='closed')[0] == Icons.FOLDER
     )
@@ -356,8 +357,8 @@ def test_icons_lookup_and_namespace():
     )
 
     # Filename match
-    assert lookup_entry_decor('Dockerfile', is_dir=False) == (Icons.DOCKER, '')
-    assert lookup_entry_decor('.gitignore', is_dir=False) == (Icons.GIT, '')
+    assert lookup_entry_decor('Dockerfile', is_dir=False) == (Icons.DOCKER, 'cyan')
+    assert lookup_entry_decor('.gitignore', is_dir=False) == (Icons.GIT, 'cyan')
 
     # Generic fallback
     assert lookup_entry_decor('unknown_file', is_dir=False) == (Icons.FILE, '')
