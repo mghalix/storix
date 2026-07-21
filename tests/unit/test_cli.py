@@ -1,3 +1,5 @@
+from collections.abc import Generator
+
 import pytest
 
 from typer.testing import CliRunner
@@ -13,7 +15,7 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def fresh_session(tmp_path, monkeypatch) -> None:
+def fresh_session(tmp_path, monkeypatch) -> Generator[None]:
     """Each test gets a clean in-memory session and no ambient config.
 
     The prefs loader searches upward from the cwd, so a test run from a
@@ -337,3 +339,38 @@ def test_ls_long_format_outputs_kind_size_date_time():
     assert len(lines) == 2
     assert 'a.txt' in out
     assert 'docs' in out
+
+
+def test_icons_lookup_and_namespace():
+    from storix.cli.icons import Icons, lookup_entry_decor
+
+    # Check Icons constants
+    assert Icons.LANG_PYTHON == '\ue606'
+    assert Icons.FOLDER == '\ue5ff'
+    assert Icons.FOLDER_OPEN == '\uf115'
+
+    # Directory lookup
+    assert lookup_entry_decor('src', is_dir=True)[0] == '\U000f08de'
+
+    assert (
+        lookup_entry_decor('random', is_dir=True, dir_state='closed')[0] == Icons.FOLDER
+    )
+    assert (
+        lookup_entry_decor('random', is_dir=True, dir_state='empty')[0]
+        == Icons.FOLDER_OPEN
+    )
+
+    # Extension lookup
+    assert lookup_entry_decor('script.py', is_dir=False) == (Icons.LANG_PYTHON, 'green')
+    assert lookup_entry_decor('main.rs', is_dir=False) == (Icons.LANG_RUST, 'green')
+    assert lookup_entry_decor('archive.tar.gz', is_dir=False) == (
+        Icons.COMPRESSED,
+        'red',
+    )
+
+    # Filename match
+    assert lookup_entry_decor('Dockerfile', is_dir=False) == (Icons.DOCKER, 'cyan')
+    assert lookup_entry_decor('.gitignore', is_dir=False) == (Icons.GIT, 'cyan')
+
+    # Generic fallback
+    assert lookup_entry_decor('unknown_file', is_dir=False) == (Icons.FILE, '')
