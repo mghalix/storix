@@ -619,7 +619,7 @@ def pull(
         _die('pull', exc)
 
     if st.kind is PathKind.DIRECTORY:
-        dst = Path(local) if local else Path(src.name)
+        dst = Path(local).expanduser() if local else Path(src.name)
         remote_files = [e for e in fs.walk(src, all=True) if not e.is_dir]
         stats = stat_all(fs, [e.path for e in remote_files])
         total_bytes = sum(s.size for s in stats)
@@ -637,7 +637,7 @@ def pull(
         console.print(f'{remote} -> {dst} ({len(remote_files)} files)')
         return
 
-    dst = Path(local) if local else Path(src.name)
+    dst = Path(local).expanduser() if local else Path(src.name)
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         with (
@@ -674,7 +674,7 @@ def push(
 
     from storix.utils import detect_mimetype
 
-    src = Path(local)
+    src = Path(local).expanduser()
     if not src.exists():
         _die('push', FileNotFoundError(local))
 

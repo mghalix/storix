@@ -422,3 +422,19 @@ def test_push_and_pull_directory_recursive(tmp_path):
     assert res_pull.exit_code == 0
     assert (dest_dir / 'a.txt').read_text() == 'content A'
     assert (dest_dir / 'sub' / 'b.txt').read_text() == 'content B'
+
+
+def test_push_and_pull_user_tilde_expansion(monkeypatch, tmp_path):
+    monkeypatch.setenv('HOME', str(tmp_path))
+    local_file = tmp_path / 'home_file.txt'
+    local_file.write_text('tilde content')
+
+    # Push with ~/home_file.txt
+    res_push = run('push', '~/home_file.txt', '/remote_tilde.txt')
+    assert res_push.exit_code == 0
+    assert run('cat', '/remote_tilde.txt').stdout == 'tilde content'
+
+    # Pull with ~/pulled_tilde.txt
+    res_pull = run('pull', '/remote_tilde.txt', '~/pulled_tilde.txt')
+    assert res_pull.exit_code == 0
+    assert (tmp_path / 'pulled_tilde.txt').read_text() == 'tilde content'

@@ -123,15 +123,16 @@ def _get_local_completions(word: str) -> Iterator[Completion]:
     """Yield local host machine completions for `word` (starting from cwd)."""
     from pathlib import Path
 
+    if word == '~':
+        yield Completion(
+            '~/', start_position=-1, display='~/', style='fg:ansibrightblue bold'
+        )
+        return
+
     fragment = word.rpartition('/')[2]
     parent_str = word[: len(word) - len(fragment)]  # '' or ends with '/'
 
-    if not parent_str:
-        target_dir = Path.cwd()
-    elif parent_str.startswith('~/'):
-        target_dir = Path.home() / parent_str[2:]
-    else:
-        target_dir = Path(parent_str)
+    target_dir = Path.cwd() if not parent_str else Path(parent_str).expanduser()
 
     try:
         if not target_dir.is_dir():
