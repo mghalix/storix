@@ -1,3 +1,4 @@
+# ruff: noqa: S105
 """Nerd Font icon catalog and lookup for sx listings.
 
 Ported directly from eza's icon catalog (eza/src/output/icons.rs).
@@ -51,7 +52,7 @@ class Icons:
     FONT: Final[str]            = '\uF031'      # 
     FREECAD: Final[str]         = '\uF336'      # 
     GIMP: Final[str]            = '\uF338'      # 
-    GIST_SECRET: Final[str]     = '\uEAFA'      # noqa: S105  # 
+    GIST_SECRET: Final[str]     = '\uEAFA'      # 
     GIT: Final[str]             = '\U000F02A2'  # 󰊢
     GODOT: Final[str]           = '\uE65F'      # 
     GRADLE: Final[str]          = '\uE660'      # 
@@ -357,7 +358,8 @@ FILENAME_ICONS: Final[dict[str, tuple[str, str]]] = {
 
 def lookup_entry_decor(
     entry_name: str,
-    is_dir: bool,  # noqa: FBT001
+    *,
+    is_dir: bool,
     dir_state: str = 'closed',
 ) -> tuple[str, str]:
     """Look up the (icon, style) pair for an entry using eza-style rules.

@@ -328,6 +328,7 @@ def test_unknown_preference_is_rejected_with_the_known_set(prefs_from):
 
     assert 'icons' in str(exc_info.value)
 
+
 def test_icons_lookup_and_namespace():
     from storix.cli.icons import Icons, lookup_entry_decor
 
@@ -360,4 +361,3 @@ def test_icons_lookup_and_namespace():
 
     # Generic fallback
     assert lookup_entry_decor('unknown_file', is_dir=False) == (Icons.FILE, '')
-
