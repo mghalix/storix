@@ -1,6 +1,6 @@
 [project]
 name = "storix"
-version = "0.4.6"
+version = "0.4.7"
 description = "An async-first, streaming-first storage SDK for modern Python applications"
 readme = "README.md"
 license = "Apache-2.0"

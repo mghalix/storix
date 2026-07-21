@@ -1,5 +1,46 @@
 # Release Notes
 
+## [0.4.7] - 2026-07-21
+
+Storix 0.4.7 brings major CLI usability and performance upgrades to `sx`, featuring
+complete eza-grade icon coverage, rich `ls -l` long listings, custom subcommand aliases in
+`storix.toml`, recursive `push` and `pull` transfer commands and context-aware shell completions.
+
+### Added
+
+- **Full eza Icon Catalog**: Integrated 100% of eza's icon catalog (623 file extensions,
+270 exact filename mappings, and modeline definitions) into `sx` with Nerd Font icon
+rendering and aligned file classification.
+- **Rich `ls -l` Long Listing**: Formats Unix/eza style file permissions/kind, human-
+readable byte sizes, modification date/time, and icon-prefixed labels across single and
+multi-column terminal views.
+- **Subcommand Aliases (`[cli.alias]` / `[cli.aliases]`)**: Configure custom CLI shortcuts
+in `storix.toml`, `.storix.toml`, or `pyproject.toml` (e.g. `l = "ls -l"`, `ll = "ls -la"`,
+`lt = "tree --level=2"`), automatically expanded in both `sx` commands and the interactive
+REPL shell.
+- **`push` and `pull` Commands**: Transfer single files or entire directory trees
+recursively between host disk and remote storage backends (`sx push <local> [remote]` and
+`sx pull <remote> [local]`).
+
+### Changed
+
+- **Context-Aware Shell Completions**: `sx` shell tab completion dynamically detects
+argument context—completing local host disk paths for `push <1>` and `pull <2>`, and remote
+backend paths for `push <2>`, `pull <1>`, `cd`, `ls`, and all other backend operations.
+- **Path & Space Handling**: Tilde (`~`) home shortcuts and spaces/special characters in
+local and remote paths are automatically expanded and backslash-escaped during shell tab
+completion.
+
+### Fixed
+
+- **Monotonic Transfer Progress Bar**: Accumulated byte deltas across multi-file directory
+transfers so the Rich progress bar advances steadily from 0% to 100% without resetting per
+file stream.
+
+### Removed
+
+- **Legacy `upload` and `download` commands**: Replaced completely by `push` and `pull`.
+
 ## [0.4.6] - 2026-07-20
 
 Storix now has a clearer public entry point for developers exploring typed,
