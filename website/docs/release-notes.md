@@ -1,5 +1,15 @@
 # Release Notes
 
+## [0.4.7] - 2026-07-21
+
+### What's Changed
+#### Features
+* refactor(cli): improve and extend icons support by @mghalix in https://github.com/mghalix/storix/pull/23
+* feat(cli): enhance sx ls -l long listing format with kind, size, date… by @mghalix in https://github.com/mghalix/storix/pull/24
+* feat(cli): add aliases support by @mghalix in https://github.com/mghalix/storix/pull/25
+#### Other changes
+* feat(cli): push & pull commands by @mghalix in https://github.com/mghalix/storix/pull/26
+
 ## [0.4.6] - 2026-07-20
 
 Storix now has a clearer public entry point for developers exploring typed,
