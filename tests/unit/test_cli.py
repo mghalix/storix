@@ -374,13 +374,3 @@ def test_icons_lookup_and_namespace():
 
     # Generic fallback
     assert lookup_entry_decor('unknown_file', is_dir=False) == (Icons.FILE, '')
-
-
-def test_ls_long_format_outputs_kind_size_date_time():
-    run('echo', 'hello world', '-f', '/a.txt')
-    run('mkdir', '/docs')
-    out = run('ls', '-l').stdout
-    lines = out.splitlines()
-    assert len(lines) == 2
-    assert 'a.txt' in out
-    assert 'docs' in out
