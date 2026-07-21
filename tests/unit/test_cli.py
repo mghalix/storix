@@ -327,3 +327,37 @@ def test_unknown_preference_is_rejected_with_the_known_set(prefs_from):
         load_prefs()
 
     assert 'icons' in str(exc_info.value)
+
+def test_icons_lookup_and_namespace():
+    from storix.cli.icons import Icons, lookup_entry_decor
+
+    # Check Icons constants
+    assert Icons.LANG_PYTHON == '\ue606'
+    assert Icons.FOLDER == '\ue5ff'
+    assert Icons.FOLDER_OPEN == '\uf115'
+
+    # Directory lookup
+    assert lookup_entry_decor('src', is_dir=True)[0] == Icons.WRENCH
+    assert (
+        lookup_entry_decor('random', is_dir=True, dir_state='closed')[0] == Icons.FOLDER
+    )
+    assert (
+        lookup_entry_decor('random', is_dir=True, dir_state='empty')[0]
+        == Icons.FOLDER_OPEN
+    )
+
+    # Extension lookup
+    assert lookup_entry_decor('script.py', is_dir=False) == (Icons.LANG_PYTHON, 'green')
+    assert lookup_entry_decor('main.rs', is_dir=False) == (Icons.LANG_RUST, 'green')
+    assert lookup_entry_decor('archive.tar.gz', is_dir=False) == (
+        Icons.COMPRESSED,
+        'red',
+    )
+
+    # Filename match
+    assert lookup_entry_decor('Dockerfile', is_dir=False) == (Icons.DOCKER, '')
+    assert lookup_entry_decor('.gitignore', is_dir=False) == (Icons.GIT, '')
+
+    # Generic fallback
+    assert lookup_entry_decor('unknown_file', is_dir=False) == (Icons.FILE, '')
+

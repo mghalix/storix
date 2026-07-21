@@ -1,23 +1,19 @@
 """Presentation for the storix CLI: consoles, icons, sizes, labels.
 
-The icon and color table ships as package data (``data/icons.toml``,
-Nerd Font glyphs harvested from eza) rather than code; edit the TOML to
-retheme. Icons render only on a terminal and only when enabled
-(``--no-icons`` / persistent prefs), mirroring eza's ``--icons=auto``.
+Icons are provided by the eza-ported icon catalog (``icons.py``) using
+Nerd Font codepoints. Icons render only on a terminal and only when
+enabled (``--no-icons`` / persistent prefs), mirroring eza's ``--icons=auto``.
 """
 
 from __future__ import annotations
 
-import tomllib
-
-from functools import cache
-from importlib import resources
 from math import ceil
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Final
 
 from rich.console import Console
 from rich.text import Text
 
+from .icons import lookup_entry_decor
 from .state import icons_enabled
 
 
@@ -33,36 +29,16 @@ console = Console()
 err = Console(stderr=True)
 
 
-@cache
-def _icon_table() -> dict[str, Any]:
-    """The parsed icon/style table shipped as package data."""
-    text = resources.files('storix.cli').joinpath('data/icons.toml').read_text('utf-8')
-    return tomllib.loads(text)
-
-
 def entry_decor(entry: DirEntry, *, dir_state: DirState = 'closed') -> tuple[str, str]:
     """The (icon, rich style) pair for a directory-listing entry.
 
-    Files match by exact name first (``Makefile``), then extension, then
-    the generic file decor. ``dir_state`` picks the folder glyph, and only
-    a caller that *knows* should pass a knowing one: 'full' or 'empty'
-    when the contents were looked at, 'closed' when they were not, so the
-    glyph never claims what nobody checked. The icon is '' when icons are
+    Files match by exact name first, then extension, then generic file decor.
+    ``dir_state`` picks the folder glyph. The icon is '' when icons are
     disabled or output is not a terminal.
     """
-    table = _icon_table()
-    if entry.is_dir:
-        node = table['dir']
-        icon = node['icon'] if dir_state == 'closed' else node[dir_state]
-        style = node['style']  # same color for every state; only the glyph varies
-    else:
-        node = (
-            table['name'].get(entry.name)
-            or table['ext'].get(entry.name.rpartition('.')[2].lower())
-            or table['file']
-        )
-        icon = node['icon']
-        style = node.get('style', '')
+    icon, style = lookup_entry_decor(
+        entry.name, is_dir=entry.is_dir, dir_state=dir_state
+    )
     if not (icons_enabled() and console.is_terminal):
         icon = ''
     return icon, style
