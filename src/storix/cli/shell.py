@@ -20,6 +20,7 @@ from prompt_toolkit.styles import Style
 from typer.main import get_command
 
 from .app import app
+from .config import expand_alias, load_prefs
 from .icons import lookup_entry_decor
 from .render import console, entry_decor
 from .state import (
@@ -260,20 +261,28 @@ def _help() -> None:
     console.print('[dim]any command supports --help, e.g. `ls --help`[/dim]')
 
 
+def _parse_input(line: str, aliases: dict[str, str]) -> list[str]:
+    """Parse a prompt line into tokenized argv, expanding aliases if defined."""
+    argv = shlex.split(line)
+    return expand_alias(argv, aliases) if (argv and aliases) else argv
+
+
 def start_shell(fs: Storix | None = None) -> None:
     """Run the interactive shell over ``fs`` (or the default session)."""
     if fs is not None:
         use_fs(fs)
     fs = current_fs()
 
+    prefs = load_prefs()
     command = get_command(app)
     commands = (
         {name: sub.get_short_help_str(60) for name, sub in command.commands.items()}
         if isinstance(command, click.Group)
         else {}
     )
+    alias_cmds = {name: f"alias: '{target}'" for name, target in prefs.alias.items()}
     session: PromptSession[str] = PromptSession(
-        completer=_ShellCompleter({**commands, **_BUILTINS}),
+        completer=_ShellCompleter({**commands, **alias_cmds, **_BUILTINS}),
         complete_while_typing=False,
         complete_in_thread=True,
         style=_MENU_STYLE,
@@ -297,7 +306,7 @@ def start_shell(fs: Storix | None = None) -> None:
         if not line:
             continue
         try:
-            argv = shlex.split(line)
+            argv = _parse_input(line, prefs.alias)
         except ValueError as exc:
             console.print(f'[red]parse error: {exc}[/red]')
             continue

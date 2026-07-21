@@ -472,3 +472,60 @@ def test_local_completions_space_escaping(monkeypatch, tmp_path):
     completions = list(_get_local_completions('Bl'))
     assert len(completions) == 1
     assert completions[0].text == 'Black\\ Bird/'
+
+
+def test_expand_alias_subcommand_expansion():
+    from storix.cli.config import expand_alias
+
+    aliases = {'lt': 'tree -L 1', 'la': 'ls -a'}
+    assert expand_alias(['lt', '/docs'], aliases) == ['tree', '-L', '1', '/docs']
+    assert expand_alias(['sx', '-p', 'memory', 'lt'], aliases) == [
+        'sx',
+        '-p',
+        'memory',
+        'tree',
+        '-L',
+        '1',
+    ]
+
+
+def test_expand_alias_does_not_expand_positional_arguments():
+    from storix.cli.config import expand_alias
+
+    aliases = {'lt': 'tree -L 1'}
+    # 'lt' is a positional argument to 'touch', so it must NOT be expanded
+    assert expand_alias(['touch', 'lt'], aliases) == ['touch', 'lt']
+
+
+def test_expand_alias_handles_self_aliasing_and_cycles():
+    from storix.cli.config import expand_alias
+
+    # Self-aliasing: 'ls' -> 'ls -a'
+    assert expand_alias(['ls', '/docs'], {'ls': 'ls -a'}) == ['ls', '-a', '/docs']
+
+    # Cycle: 'a' -> 'b' and 'b' -> 'a'
+    assert expand_alias(['a'], {'a': 'b', 'b': 'a'}) == ['a']
+
+
+def test_config_alias_parsing(prefs_from):
+    from storix.cli.config import load_prefs
+
+    prefs_from('[cli.alias]\nla = "ls -a"\nlt = "tree -L 2"\n')
+    prefs = load_prefs()
+    assert prefs.alias == {'la': 'ls -a', 'lt': 'tree -L 2'}
+
+
+def test_config_top_level_alias_and_aliases_parsing(prefs_from):
+    from storix.cli.config import load_prefs
+
+    # Top level alias section in storix.toml
+    prefs_from('[alias]\nlt = "tree"\n')
+    assert load_prefs().alias == {'lt': 'tree'}
+
+    # Top level aliases section in storix.toml
+    prefs_from('[aliases]\nla = "ls -a"\n')
+    assert load_prefs().alias == {'la': 'ls -a'}
+
+    # Nested cli.aliases table in storix.toml
+    prefs_from('[cli.aliases]\nll = "ls -l"\n')
+    assert load_prefs().alias == {'ll': 'ls -l'}
