@@ -428,3 +428,35 @@ def test_push_and_pull_user_tilde_expansion(monkeypatch, tmp_path):
     res_pull = run('pull', '/remote_tilde.txt', '~/pulled_tilde.txt')
     assert res_pull.exit_code == 0
     assert (tmp_path / 'pulled_tilde.txt').read_text() == 'tilde content'
+
+
+def test_push_and_pull_paths_with_spaces(tmp_path):
+    space_dir = tmp_path / 'Black Bird'
+    space_dir.mkdir()
+    (space_dir / 'episode 1.mp4').write_text('video stream')
+
+    # Push local directory with spaces in path
+    res_push = run('push', str(space_dir), '/remote series/Black Bird')
+    assert res_push.exit_code == 0
+    assert (
+        run('cat', '/remote series/Black Bird/episode 1.mp4').stdout == 'video stream'
+    )
+
+    # Pull back to local path with spaces
+    pull_dest = tmp_path / 'pulled series' / 'Black Bird'
+    res_pull = run('pull', '/remote series/Black Bird', str(pull_dest))
+    assert res_pull.exit_code == 0
+    assert (pull_dest / 'episode 1.mp4').read_text() == 'video stream'
+
+
+def test_local_completions_space_escaping(monkeypatch, tmp_path):
+    from storix.cli.shell import _escape_shell_path, _get_local_completions
+
+    assert _escape_shell_path('Black Bird') == 'Black\\ Bird'
+
+    monkeypatch.setattr('pathlib.Path.cwd', lambda: tmp_path)
+    (tmp_path / 'Black Bird').mkdir()
+
+    completions = list(_get_local_completions('Bl'))
+    assert len(completions) == 1
+    assert completions[0].text == 'Black\\ Bird/'

@@ -61,6 +61,21 @@ _MENU_STYLE = Style.from_dict(
 """Completion menu colors (ansi names so they follow the terminal theme)."""
 
 
+def _escape_shell_path(name: str) -> str:
+    """Escape spaces and shell special characters for CLI completion."""
+    return (
+        name.replace(' ', '\\ ')
+        .replace('(', '\\(')
+        .replace(')', '\\)')
+        .replace('[', '\\[')
+        .replace(']', '\\]')
+        .replace("'", "\\'")
+        .replace('"', '\\"')
+        .replace('&', '\\&')
+        .replace('$', '\\$')
+    )
+
+
 def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
     """Parse text before cursor into (cmd_name, arg_index, current_word).
 
@@ -73,7 +88,6 @@ def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
     if not lstripped:
         return '', 0, ''
 
-    ends_with_space = text_before_cursor[-1].isspace()
     try:
         tokens = shlex.split(text_before_cursor)
     except ValueError:
@@ -84,11 +98,15 @@ def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
 
     cmd = tokens[0]
     if len(tokens) == 1:
-        if ends_with_space:
+        if text_before_cursor.rstrip() != text_before_cursor:
             return cmd, 1, ''
         return cmd, 0, tokens[0]
 
-    if ends_with_space:
+    raw_trailing_space = text_before_cursor[-1].isspace() and not (
+        len(text_before_cursor) > 1 and text_before_cursor[-2] == '\\'
+    )
+
+    if raw_trailing_space:
         return cmd, len(tokens), ''
 
     return cmd, len(tokens) - 1, tokens[-1]
@@ -111,8 +129,9 @@ def _get_remote_completions(word: str) -> Iterator[Completion]:
         icon = entry_decor(entry)[0]
         slash = '/' if entry.is_dir else ''
         label = f'{icon} {entry.name}{slash}' if icon else f'{entry.name}{slash}'
+        escaped_name = _escape_shell_path(entry.name)
         yield Completion(
-            f'{parent}{entry.name}{slash}',
+            f'{parent}{escaped_name}{slash}',
             start_position=-len(word),
             display=label,
             style='fg:ansibrightblue bold' if entry.is_dir else '',
@@ -157,9 +176,10 @@ def _get_local_completions(word: str) -> Iterator[Completion]:
         slash = '/' if is_dir else ''
         icon, _ = lookup_entry_decor(name, is_dir=is_dir)
         label = f'{icon} {name}{slash}' if icon else f'{name}{slash}'
+        escaped_name = _escape_shell_path(name)
 
         yield Completion(
-            f'{parent_str}{name}{slash}',
+            f'{parent_str}{escaped_name}{slash}',
             start_position=-len(word),
             display=label,
             style='fg:ansibrightblue bold' if is_dir else '',
