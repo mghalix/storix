@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
@@ -587,45 +587,112 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
 
 
 @app.command()
-def download(
-    remote: Annotated[str, typer.Argument()],
-    local: Annotated[str | None, typer.Argument()] = None,
+def pull(
+    remote: Annotated[
+        str, typer.Argument(help='Remote source file or directory path on backend')
+    ],
+    local: Annotated[
+        str | None, typer.Argument(help='Local destination path on host machine')
+    ] = None,
 ) -> None:
-    """Copy a file from the storix backend to the local disk."""
+    """Copy a file or directory from the storix backend to the local disk."""
     from pathlib import Path
 
     fs = _fs()
     src = fs.resolve(remote)
     try:
-        total = fs.stat(src).size
+        st = fs.stat(src)
     except StorageError as exc:
-        _die('download', exc)
+        _die('pull', exc)
+
+    if st.kind is PathKind.DIRECTORY:
+        dst = Path(local) if local else Path(src.name)
+        remote_files = [e for e in fs.walk(src, all=True) if not e.is_dir]
+        stats = stat_all(fs, [e.path for e in remote_files])
+        total_bytes = sum(s.size for s in stats)
+        try:
+            with _transfer_progress(fs, src.name, total_bytes) as obs:
+                for entry in remote_files:
+                    rel = entry.path.relative_to(src)
+                    out_path = dst / rel
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    with out_path.open('wb') as out:
+                        for chunk in obs.stream(entry.path):
+                            out.write(chunk)
+        except StorageError as exc:
+            _die('pull', exc)
+        console.print(f'{remote} -> {dst} ({len(remote_files)} files)')
+        return
+
     dst = Path(local) if local else Path(src.name)
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         with (
-            _transfer_progress(fs, src.name, total) as obs,
+            _transfer_progress(fs, src.name, st.size) as obs,
             dst.open('wb') as out,
         ):
             for chunk in obs.stream(src):
                 out.write(chunk)
     except StorageError as exc:
-        _die('download', exc)
+        _die('pull', exc)
     console.print(f'{remote} -> {dst}')
 
 
-@app.command()
-def upload(
-    local: Annotated[str, typer.Argument()],
-    remote: Annotated[str | None, typer.Argument()] = None,
+@app.command(hidden=True)
+def download(
+    remote: Annotated[str, typer.Argument()],
+    local: Annotated[str | None, typer.Argument()] = None,
 ) -> None:
-    """Copy a file from the local disk to the storix backend."""
+    """Legacy alias for `pull`."""
+    pull(remote=remote, local=local)
+
+
+@app.command()
+def push(
+    local: Annotated[
+        str, typer.Argument(help='Local source file or directory path on host machine')
+    ],
+    remote: Annotated[
+        str | None, typer.Argument(help='Remote destination path on backend')
+    ] = None,
+) -> None:
+    """Copy a file or directory from the local disk to the storix backend."""
     from pathlib import Path
 
+    from storix.utils import detect_mimetype
+
     src = Path(local)
-    if not src.is_file():
-        _die('upload', FileNotFoundError(local))
+    if not src.exists():
+        _die('push', FileNotFoundError(local))
+
     fs = _fs()
+
+    if src.is_dir():
+        dst = fs.resolve(remote) if remote else fs.pwd() / src.name
+        with suppress(StorageError):
+            fs.mkdir(dst, parents=True)
+        files = [f for f in src.rglob('*') if f.is_file()]
+        total_bytes = sum(f.stat().st_size for f in files)
+        try:
+            with _transfer_progress(fs, src.name, total_bytes) as obs:
+                for file_path in files:
+                    rel_path = file_path.relative_to(src)
+                    remote_file = dst / rel_path
+                    with suppress(StorageError):
+                        fs.mkdir(remote_file.parent, parents=True)
+                    with file_path.open('rb') as data:
+                        content_type = None
+                        if fs.backend.capabilities.content_type:
+                            content_type = detect_mimetype(
+                                buf=data.read(4096), path=file_path.name
+                            )
+                            data.seek(0)
+                        obs.echo(data, remote_file, content_type=content_type)
+        except StorageError as exc:
+            _die('push', exc)
+        console.print(f'{local} -> {dst} ({len(files)} files)')
+        return
+
     dst = fs.resolve(remote) if remote else fs.pwd() / src.name
     try:
         with (
@@ -634,15 +701,21 @@ def upload(
         ):
             content_type = None
             if fs.backend.capabilities.content_type:
-                from storix.utils import detect_mimetype
-
-                # extension first, libmagic sniff of the head as fallback
                 content_type = detect_mimetype(buf=data.read(4096), path=src.name)
                 data.seek(0)
             obs.echo(data, dst, content_type=content_type)
     except StorageError as exc:
-        _die('upload', exc)
+        _die('push', exc)
     console.print(f'{local} -> {dst}')
+
+
+@app.command(hidden=True)
+def upload(
+    local: Annotated[str, typer.Argument()],
+    remote: Annotated[str | None, typer.Argument()] = None,
+) -> None:
+    """Legacy alias for `push`."""
+    push(local=local, remote=remote)
 
 
 # --- session ---

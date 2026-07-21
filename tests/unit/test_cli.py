@@ -362,3 +362,63 @@ def test_icons_lookup_and_namespace():
 
     # Generic fallback
     assert lookup_entry_decor('unknown_file', is_dir=False) == (Icons.FILE, '')
+
+
+def test_push_and_pull_and_legacy_aliases(tmp_path):
+    local_file = tmp_path / 'sample.txt'
+    local_file.write_text('hello push pull')
+
+    # Push local file to backend
+    res_push = run('push', str(local_file), '/remote_sample.txt')
+    assert res_push.exit_code == 0
+    assert run('cat', '/remote_sample.txt').stdout == 'hello push pull'
+
+    # Pull backend file back to local file
+    out_file = tmp_path / 'pulled.txt'
+    res_pull = run('pull', '/remote_sample.txt', str(out_file))
+    assert res_pull.exit_code == 0
+    assert out_file.read_text() == 'hello push pull'
+
+    # Test legacy aliases upload and download
+    res_up = run('upload', str(local_file), '/remote_alias.txt')
+    assert res_up.exit_code == 0
+    assert run('cat', '/remote_alias.txt').stdout == 'hello push pull'
+
+    alias_out = tmp_path / 'alias_pulled.txt'
+    res_down = run('download', '/remote_alias.txt', str(alias_out))
+    assert res_down.exit_code == 0
+    assert alias_out.read_text() == 'hello push pull'
+
+
+def test_completion_context_parsing():
+    from storix.cli.shell import _parse_completion_context
+
+    assert _parse_completion_context('push') == ('push', 0, 'push')
+    assert _parse_completion_context('push ') == ('push', 1, '')
+    assert _parse_completion_context('push sr') == ('push', 1, 'sr')
+    assert _parse_completion_context('push sr ') == ('push', 2, '')
+    assert _parse_completion_context('push sr rem') == ('push', 2, 'rem')
+    assert _parse_completion_context('pull ') == ('pull', 1, '')
+    assert _parse_completion_context('pull rem ') == ('pull', 2, '')
+
+
+def test_push_and_pull_directory_recursive(tmp_path):
+    local_dir = tmp_path / 'my_dataset'
+    local_dir.mkdir()
+    (local_dir / 'a.txt').write_text('content A')
+    sub = local_dir / 'sub'
+    sub.mkdir()
+    (sub / 'b.txt').write_text('content B')
+
+    # Push directory to remote
+    res_push = run('push', str(local_dir), '/remote_dir')
+    assert res_push.exit_code == 0
+    assert run('cat', '/remote_dir/a.txt').stdout == 'content A'
+    assert run('cat', '/remote_dir/sub/b.txt').stdout == 'content B'
+
+    # Pull remote directory back to local
+    dest_dir = tmp_path / 'downloaded_dataset'
+    res_pull = run('pull', '/remote_dir', str(dest_dir))
+    assert res_pull.exit_code == 0
+    assert (dest_dir / 'a.txt').read_text() == 'content A'
+    assert (dest_dir / 'sub' / 'b.txt').read_text() == 'content B'
