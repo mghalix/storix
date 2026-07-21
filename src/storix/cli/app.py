@@ -27,7 +27,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from storix import ObservabilityLayer
+from storix import ObservabilityLayer, TransferEvent
 from storix.enums import PathKind
 from storix.errors import StorageError
 
@@ -580,9 +580,22 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
         transient=True,
     ) as progress:
         task = progress.add_task(label, total=total)
+
+        overall_bytes = 0
+        last_file_bytes = 0
+
+        def on_event(event: TransferEvent) -> None:
+            nonlocal overall_bytes, last_file_bytes
+            if event.transferred < last_file_bytes:
+                last_file_bytes = 0
+            delta = event.transferred - last_file_bytes
+            last_file_bytes = event.transferred
+            overall_bytes += delta
+            progress.update(task, completed=overall_bytes)
+
         yield fs.with_layer(
             ObservabilityLayer,
-            sink=lambda event: progress.update(task, completed=event.transferred),
+            sink=on_event,
         )
 
 
