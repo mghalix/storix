@@ -60,7 +60,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from storix import Storix
-    from storix.models import DirEntry
+    from storix.models import DirEntry, RawStat
     from storix.types import StorixPath
 
 
@@ -133,10 +133,14 @@ def ls(
             )
         )
 
+    entry_stats: dict[str, RawStat] = {}
+
+    if (time_sort and len(entries) > 1) or long:
+        fetched_stats = stat_all(fs, [base / e.name for e in entries])
+        entry_stats = {e.name: s for e, s in zip(entries, fetched_stats, strict=True)}
+
     if time_sort and len(entries) > 1:
-        stats = stat_all(fs, [base / e.name for e in entries])
-        mtimes = {e.name: s.modified for e, s in zip(entries, stats, strict=True)}
-        entries.sort(key=lambda e: mtimes[e.name], reverse=True)
+        entries.sort(key=lambda e: entry_stats[e.name].modified, reverse=True)
     if reverse:
         entries.reverse()
 
@@ -154,21 +158,20 @@ def ls(
         console.print(Columns(cells, padding=(0, 2))) if cells else None
         return
 
-    # -l: batch the file sizes the listing did not carry, concurrently too
-    missing = [base / e.name for e in entries if not e.is_dir and e.size is None]
-    sizes = dict(zip(missing, (s.size for s in stat_all(fs, missing)), strict=True))
     table = Table(show_header=False, box=None, pad_edge=False)
-    table.add_column()  # kind
+    table.add_column()  # kind ('d' or '-')
     table.add_column(justify='right')  # size
+    table.add_column(style='dim')  # date & time
     table.add_column()  # icon + name
     for entry in entries:
+        s = entry_stats[entry.name]
+        kind = Text('d' if entry.is_dir else '-', style='dim')
         if entry.is_dir:
             size_text = Text('-', style='dim')
         else:
-            size = entry.size if entry.size is not None else sizes[base / entry.name]
-            size_text = Text(human_size(size), style='green')
-        kind = Text('d' if entry.is_dir else '-', style='dim')
-        table.add_row(kind, size_text, label(entry))
+            size_text = Text(human_size(s.size), style='green')
+        mtime_text = Text(s.modified.strftime('%d %b %H:%M'), style='dim')
+        table.add_row(kind, size_text, mtime_text, label(entry))
     console.print(table)
 
 
