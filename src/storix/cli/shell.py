@@ -77,7 +77,7 @@ def _escape_shell_path(name: str) -> str:
     )
 
 
-def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
+def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:  # noqa: PLR0911
     """Parse text before cursor into (cmd_name, arg_index, current_word).
 
     arg_index is 1-based index of the argument being typed:
@@ -89,6 +89,7 @@ def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
     if not lstripped:
         return '', 0, ''
 
+    ends_with_space = text_before_cursor[-1].isspace()
     try:
         tokens = shlex.split(text_before_cursor)
     except ValueError:
@@ -108,6 +109,11 @@ def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
     )
 
     if raw_trailing_space:
+        if ends_with_space:
+            return cmd, 1, ''
+        return cmd, 0, tokens[0]
+
+    if ends_with_space:
         return cmd, len(tokens), ''
 
     return cmd, len(tokens) - 1, tokens[-1]
@@ -153,6 +159,15 @@ def _get_local_completions(word: str) -> Iterator[Completion]:
     parent_str = word[: len(word) - len(fragment)]  # '' or ends with '/'
 
     target_dir = Path.cwd() if not parent_str else Path(parent_str).expanduser()
+    fragment = word.rpartition('/')[2]
+    parent_str = word[: len(word) - len(fragment)]  # '' or ends with '/'
+
+    if not parent_str:
+        target_dir = Path.cwd()
+    elif parent_str.startswith('~/'):
+        target_dir = Path.home() / parent_str[2:]
+    else:
+        target_dir = Path(parent_str)
 
     try:
         if not target_dir.is_dir():
