@@ -651,15 +651,6 @@ def pull(
     console.print(f'{remote} -> {dst}')
 
 
-@app.command(hidden=True)
-def download(
-    remote: Annotated[str, typer.Argument()],
-    local: Annotated[str | None, typer.Argument()] = None,
-) -> None:
-    """Legacy alias for `pull`."""
-    pull(remote=remote, local=local)
-
-
 @app.command()
 def push(
     local: Annotated[
@@ -720,15 +711,6 @@ def push(
     except StorageError as exc:
         _die('push', exc)
     console.print(f'{local} -> {dst}')
-
-
-@app.command(hidden=True)
-def upload(
-    local: Annotated[str, typer.Argument()],
-    remote: Annotated[str | None, typer.Argument()] = None,
-) -> None:
-    """Legacy alias for `push`."""
-    push(local=local, remote=remote)
 
 
 # --- session ---

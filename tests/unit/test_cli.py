@@ -379,16 +379,6 @@ def test_push_and_pull_and_legacy_aliases(tmp_path):
     assert res_pull.exit_code == 0
     assert out_file.read_text() == 'hello push pull'
 
-    # Test legacy aliases upload and download
-    res_up = run('upload', str(local_file), '/remote_alias.txt')
-    assert res_up.exit_code == 0
-    assert run('cat', '/remote_alias.txt').stdout == 'hello push pull'
-
-    alias_out = tmp_path / 'alias_pulled.txt'
-    res_down = run('download', '/remote_alias.txt', str(alias_out))
-    assert res_down.exit_code == 0
-    assert alias_out.read_text() == 'hello push pull'
-
 
 def test_completion_context_parsing():
     from storix.cli.shell import _parse_completion_context
