@@ -1,16 +1,14 @@
-# Example configuration for the sx CLI shell and Storix session.
-# Copy this file to storix.toml or ~/.config/storix/config.toml to set defaults.
-
-provider = "local"
+[cli]
 icons = true
+provider = 'azure'    # which backend sx opens by default
+# every sx session gets the read-through cache - handy against cloud
+# providers, where a repeated ls or du is a real round trip
+layers = [{ name = "cache", ttl = 300 }]
 
-# Declarative middleware layers applied to CLI sessions:
-# layers = [
-#   { name = "cache", ttl = 300 },
-#   { name = "sandbox", root = "./sandbox" }
-# ]
 
-# Command shortcuts for the CLI and interactive shell:
-# [alias]
-# la = "ls -a"
-# lt = "tree --level=2 --long"
+[cli.alias]
+l="ls -l"
+ll="ls -la"   # list all (including hidden - aka files starting with '.')
+lsn="ls -lr"  # list newly created first
+lt="tree --level=2"
+lT="tree --long"
