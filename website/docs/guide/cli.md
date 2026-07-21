@@ -36,7 +36,7 @@ search     find
 write      touch  echo  mkdir
 remove     rm  rmdir
 move       mv  cp
-transfer   upload  download
+transfer   push  pull
 session    provider  exists
 ```
 
@@ -99,13 +99,13 @@ not a terminal (`sx ls | grep ...` stays plain). Turn them off with
 
 ## Transfers with progress
 
-`upload` and `download` move files between the local host and the provider,
+`push` and `pull` move files between the local host and the provider,
 rendering a live bar driven by the
 [`ObservabilityLayer`](../recipes/progress.md):
 
 ```bash
-sx upload ./video.mp4 /media/video.mp4     # host -> provider
-sx download /media/video.mp4 ./video.mp4   # provider -> host
+sx push ./video.mp4 /media/video.mp4     # host -> provider
+sx pull /media/video.mp4 ./video.mp4   # provider -> host
 ```
 
 Both stream, so a file larger than memory moves fine. Uploads detect a

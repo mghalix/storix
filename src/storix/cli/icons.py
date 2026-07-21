@@ -14,7 +14,6 @@ from typing import Final
 # fmt: off
 class Icons:
     """Nerd Font glyph constants (complete eza icon set)."""
-
     AUDIO: Final[str]           = '\uF001'      # 
     BINARY: Final[str]          = '\uEAE8'      # 
     BOOK: Final[str]            = '\uE28B'      # 
@@ -158,10 +157,7 @@ class Icons:
     XORG: Final[str]            = '\uF369'      # 
     YAML: Final[str]            = '\uE8EB'      # 
     YARN: Final[str]            = '\uE6A7'      # 
-# fmt: on
 
-
-# fmt: off
 DIRECTORY_ICONS: Final[dict[str, tuple[str, str]]] = {
     '.config': (Icons.FOLDER_CONFIG, 'bold blue'),        # 
     '.exercism': (Icons.FOLDER_EXERCISM, 'bold blue'),    # 
@@ -204,9 +200,7 @@ DIRECTORY_ICONS: Final[dict[str, tuple[str, str]]] = {
     'xorg.conf.d': (Icons.FOLDER_CONFIG, 'bold blue'),    # 
     'cabal': (Icons.LANG_HASKELL, 'bold blue'),           # 
 }
-# fmt: on
 
-# fmt: off
 FILENAME_ICONS: Final[dict[str, tuple[str, str]]] = {
     '.aliases': (Icons.SHELL, ''),                      # 󱆃
     '.atom': ('\uE764', ''),                            # 
@@ -479,9 +473,7 @@ FILENAME_ICONS: Final[dict[str, tuple[str, str]]] = {
     'zshenv': (Icons.SHELL, ''),                        # 󱆃
     'zshrc': (Icons.SHELL, ''),                         # 󱆃
 }
-# fmt: on
 
-# fmt: off
 EXTENSION_ICONS: Final[dict[str, tuple[str, str]]] = {
     '123dx': (Icons.CAD, ''),                           # 󰻫
     '3dm': (Icons.CAD, ''),                             # 󰻫

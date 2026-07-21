@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
@@ -27,7 +27,7 @@ from rich.progress import (
 from rich.table import Table
 from rich.text import Text
 
-from storix import ObservabilityLayer
+from storix import ObservabilityLayer, TransferEvent
 from storix.enums import PathKind
 from storix.errors import StorageError
 
@@ -583,52 +583,123 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
         transient=True,
     ) as progress:
         task = progress.add_task(label, total=total)
+
+        overall_bytes = 0
+        last_file_bytes = 0
+
+        def on_event(event: TransferEvent) -> None:
+            nonlocal overall_bytes, last_file_bytes
+            if event.transferred < last_file_bytes:
+                last_file_bytes = 0
+            delta = event.transferred - last_file_bytes
+            last_file_bytes = event.transferred
+            overall_bytes += delta
+            progress.update(task, completed=overall_bytes)
+
         yield fs.with_layer(
             ObservabilityLayer,
-            sink=lambda event: progress.update(task, completed=event.transferred),
+            sink=on_event,
         )
 
 
 @app.command()
-def download(
-    remote: Annotated[str, typer.Argument()],
-    local: Annotated[str | None, typer.Argument()] = None,
+def pull(
+    remote: Annotated[
+        str, typer.Argument(help='Remote source file or directory path on backend')
+    ],
+    local: Annotated[
+        str | None, typer.Argument(help='Local destination path on host machine')
+    ] = None,
 ) -> None:
-    """Copy a file from the storix backend to the local disk."""
+    """Copy a file or directory from the storix backend to the local disk."""
     from pathlib import Path
 
     fs = _fs()
     src = fs.resolve(remote)
     try:
-        total = fs.stat(src).size
+        st = fs.stat(src)
     except StorageError as exc:
-        _die('download', exc)
-    dst = Path(local) if local else Path(src.name)
+        _die('pull', exc)
+
+    if st.kind is PathKind.DIRECTORY:
+        dst = Path(local).expanduser() if local else Path(src.name)
+        remote_files = [e for e in fs.walk(src, all=True) if not e.is_dir]
+        stats = stat_all(fs, [e.path for e in remote_files])
+        total_bytes = sum(s.size for s in stats)
+        try:
+            with _transfer_progress(fs, src.name, total_bytes) as obs:
+                for entry in remote_files:
+                    rel = entry.path.relative_to(src)
+                    out_path = dst / rel
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    with out_path.open('wb') as out:
+                        for chunk in obs.stream(entry.path):
+                            out.write(chunk)
+        except StorageError as exc:
+            _die('pull', exc)
+        console.print(f'{remote} -> {dst} ({len(remote_files)} files)')
+        return
+
+    dst = Path(local).expanduser() if local else Path(src.name)
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         with (
-            _transfer_progress(fs, src.name, total) as obs,
+            _transfer_progress(fs, src.name, st.size) as obs,
             dst.open('wb') as out,
         ):
             for chunk in obs.stream(src):
                 out.write(chunk)
     except StorageError as exc:
-        _die('download', exc)
+        _die('pull', exc)
     console.print(f'{remote} -> {dst}')
 
 
 @app.command()
-def upload(
-    local: Annotated[str, typer.Argument()],
-    remote: Annotated[str | None, typer.Argument()] = None,
+def push(
+    local: Annotated[
+        str, typer.Argument(help='Local source file or directory path on host machine')
+    ],
+    remote: Annotated[
+        str | None, typer.Argument(help='Remote destination path on backend')
+    ] = None,
 ) -> None:
-    """Copy a file from the local disk to the storix backend."""
+    """Copy a file or directory from the local disk to the storix backend."""
     from pathlib import Path
 
-    src = Path(local)
-    if not src.is_file():
-        _die('upload', FileNotFoundError(local))
+    from storix.utils import detect_mimetype
+
+    src = Path(local).expanduser()
+    if not src.exists():
+        _die('push', FileNotFoundError(local))
+
     fs = _fs()
+
+    if src.is_dir():
+        dst = fs.resolve(remote) if remote else fs.pwd() / src.name
+        with suppress(StorageError):
+            fs.mkdir(dst, parents=True)
+        files = [f for f in src.rglob('*') if f.is_file()]
+        total_bytes = sum(f.stat().st_size for f in files)
+        try:
+            with _transfer_progress(fs, src.name, total_bytes) as obs:
+                for file_path in files:
+                    rel_path = file_path.relative_to(src)
+                    remote_file = dst / rel_path
+                    with suppress(StorageError):
+                        fs.mkdir(remote_file.parent, parents=True)
+                    with file_path.open('rb') as data:
+                        content_type = None
+                        if fs.backend.capabilities.content_type:
+                            content_type = detect_mimetype(
+                                buf=data.read(4096), path=file_path.name
+                            )
+                            data.seek(0)
+                        obs.echo(data, remote_file, content_type=content_type)
+        except StorageError as exc:
+            _die('push', exc)
+        console.print(f'{local} -> {dst} ({len(files)} files)')
+        return
+
     dst = fs.resolve(remote) if remote else fs.pwd() / src.name
     try:
         with (
@@ -637,14 +708,11 @@ def upload(
         ):
             content_type = None
             if fs.backend.capabilities.content_type:
-                from storix.utils import detect_mimetype
-
-                # extension first, libmagic sniff of the head as fallback
                 content_type = detect_mimetype(buf=data.read(4096), path=src.name)
                 data.seek(0)
             obs.echo(data, dst, content_type=content_type)
     except StorageError as exc:
-        _die('upload', exc)
+        _die('push', exc)
     console.print(f'{local} -> {dst}')
 
 

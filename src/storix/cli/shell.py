@@ -21,6 +21,7 @@ from typer.main import get_command
 
 from .app import app
 from .config import expand_alias, load_prefs
+from .icons import lookup_entry_decor
 from .render import console, entry_decor
 from .state import (
     cache_layer,
@@ -61,15 +62,152 @@ _MENU_STYLE = Style.from_dict(
 """Completion menu colors (ansi names so they follow the terminal theme)."""
 
 
-class _ShellCompleter(Completer):
-    """Tab candidates: command names first, remote paths everywhere else.
+def _escape_shell_path(name: str) -> str:
+    """Escape spaces and shell special characters for CLI completion."""
+    return (
+        name.replace(' ', '\\ ')
+        .replace('(', '\\(')
+        .replace(')', '\\)')
+        .replace('[', '\\[')
+        .replace(']', '\\]')
+        .replace("'", "\\'")
+        .replace('"', '\\"')
+        .replace('&', '\\&')
+        .replace('$', '\\$')
+    )
 
-    Commands complete with their one-line description; paths come from a
-    single ``list_dir`` on the directory part of the word being completed
-    (the session's cwd when there is none), so entries keep their kind and
-    directories complete with a trailing slash, an icon, and color. An
-    active cache layer makes repeat listings cheap. Hidden entries appear
-    only when the typed fragment starts with a dot, like unix completion.
+
+def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:  # noqa: PLR0911
+    """Parse text before cursor into (cmd_name, arg_index, current_word).
+
+    arg_index is 1-based index of the argument being typed:
+    - 0 if cursor is on the command name itself
+    - 1 for the first argument after command
+    - 2 for the second argument after command, etc.
+    """
+    lstripped = text_before_cursor.lstrip()
+    if not lstripped:
+        return '', 0, ''
+
+    ends_with_space = text_before_cursor[-1].isspace()
+    try:
+        tokens = shlex.split(text_before_cursor)
+    except ValueError:
+        tokens = text_before_cursor.split()
+
+    if not tokens:
+        return '', 0, ''
+
+    cmd = tokens[0]
+    if len(tokens) == 1:
+        if text_before_cursor.rstrip() != text_before_cursor:
+            return cmd, 1, ''
+        return cmd, 0, tokens[0]
+
+    raw_trailing_space = text_before_cursor[-1].isspace() and not (
+        len(text_before_cursor) > 1 and text_before_cursor[-2] == '\\'
+    )
+
+    if raw_trailing_space:
+        if ends_with_space:
+            return cmd, 1, ''
+        return cmd, 0, tokens[0]
+
+    if ends_with_space:
+        return cmd, len(tokens), ''
+
+    return cmd, len(tokens) - 1, tokens[-1]
+
+
+def _get_remote_completions(word: str) -> Iterator[Completion]:
+    """Yield remote backend completions for `word`."""
+    fragment = word.rpartition('/')[2]
+    parent = word[: len(word) - len(fragment)]  # '' or ends with '/'
+    try:
+        entries = sorted(
+            current_fs().scandir(parent or None, all=fragment.startswith('.')),
+            key=lambda entry: entry.name,
+        )
+    except Exception:  # noqa: BLE001 - completion must never break the prompt
+        return
+    for entry in entries:
+        if not entry.name.startswith(fragment):
+            continue
+        icon = entry_decor(entry)[0]
+        slash = '/' if entry.is_dir else ''
+        label = f'{icon} {entry.name}{slash}' if icon else f'{entry.name}{slash}'
+        escaped_name = _escape_shell_path(entry.name)
+        yield Completion(
+            f'{parent}{escaped_name}{slash}',
+            start_position=-len(word),
+            display=label,
+            style='fg:ansibrightblue bold' if entry.is_dir else '',
+        )
+
+
+def _get_local_completions(word: str) -> Iterator[Completion]:
+    """Yield local host machine completions for `word` (starting from cwd)."""
+    from pathlib import Path
+
+    if word == '~':
+        yield Completion(
+            '~/', start_position=-1, display='~/', style='fg:ansibrightblue bold'
+        )
+        return
+
+    fragment = word.rpartition('/')[2]
+    parent_str = word[: len(word) - len(fragment)]  # '' or ends with '/'
+
+    target_dir = Path.cwd() if not parent_str else Path(parent_str).expanduser()
+    fragment = word.rpartition('/')[2]
+    parent_str = word[: len(word) - len(fragment)]  # '' or ends with '/'
+
+    if not parent_str:
+        target_dir = Path.cwd()
+    elif parent_str.startswith('~/'):
+        target_dir = Path.home() / parent_str[2:]
+    else:
+        target_dir = Path(parent_str)
+
+    try:
+        if not target_dir.is_dir():
+            return
+        entries = sorted(target_dir.iterdir(), key=lambda p: p.name)
+    except Exception:  # noqa: BLE001 - completion must never break prompt
+        return
+
+    show_hidden = fragment.startswith('.')
+    for path in entries:
+        name = path.name
+        if not show_hidden and name.startswith('.'):
+            continue
+        if not name.startswith(fragment):
+            continue
+
+        try:
+            is_dir = path.is_dir()
+        except OSError:
+            is_dir = False
+
+        slash = '/' if is_dir else ''
+        icon, _ = lookup_entry_decor(name, is_dir=is_dir)
+        label = f'{icon} {name}{slash}' if icon else f'{name}{slash}'
+        escaped_name = _escape_shell_path(name)
+
+        yield Completion(
+            f'{parent_str}{escaped_name}{slash}',
+            start_position=-len(word),
+            display=label,
+            style='fg:ansibrightblue bold' if is_dir else '',
+        )
+
+
+class _ShellCompleter(Completer):
+    """Tab candidates: command names first, context-aware path completion after.
+
+    - push <1> <2>: <1> local host machine, <2> remote backend
+    - pull <1> <2>: <1> remote backend, <2> local host machine
+    - all other commands: remote backend paths
     """
 
     def __init__(self, commands: Mapping[str, str]) -> None:
@@ -80,35 +218,27 @@ class _ShellCompleter(Completer):
     ) -> Iterator[Completion]:
         """Yield completions for the word before the cursor."""
         text = document.text_before_cursor
-        word = document.get_word_before_cursor(WORD=True)
-        if not text[: len(text) - len(word)].strip():  # first word: a command
+        cmd, arg_index, word = _parse_completion_context(text)
+
+        if arg_index == 0:
             yield from (
                 Completion(name, start_position=-len(word), display_meta=meta)
                 for name, meta in self._commands.items()
                 if name.startswith(word)
             )
             return
-        fragment = word.rpartition('/')[2]
-        parent = word[: len(word) - len(fragment)]  # '' or ends with '/'
-        try:
-            entries = sorted(
-                current_fs().scandir(parent or None, all=fragment.startswith('.')),
-                key=lambda entry: entry.name,
-            )
-        except Exception:  # noqa: BLE001 - completion must never break the prompt
-            return
-        for entry in entries:
-            if not entry.name.startswith(fragment):
-                continue
-            icon = entry_decor(entry)[0]
-            slash = '/' if entry.is_dir else ''
-            label = f'{icon} {entry.name}{slash}' if icon else f'{entry.name}{slash}'
-            yield Completion(
-                f'{parent}{entry.name}{slash}',
-                start_position=-len(word),
-                display=label,
-                style='fg:ansibrightblue bold' if entry.is_dir else '',
-            )
+
+        if cmd == 'push':
+            use_local = arg_index == 1
+        elif cmd == 'pull':
+            use_local = arg_index >= 2  # noqa: PLR2004
+        else:
+            use_local = False
+
+        if use_local:
+            yield from _get_local_completions(word)
+        else:
+            yield from _get_remote_completions(word)
 
 
 def _prompt(fs: Storix) -> FormattedText:
@@ -139,7 +269,7 @@ def _help() -> None:
         '  [cyan]write[/cyan]     touch  echo  mkdir\n'
         '  [cyan]remove[/cyan]    rm  rmdir\n'
         '  [cyan]move[/cyan]      mv  cp\n'
-        '  [cyan]transfer[/cyan]  upload  download\n'
+        '  [cyan]transfer[/cyan]  push  pull\n'
         '  [cyan]session[/cyan]   provider  exists\n'
         '  [cyan]shell[/cyan]     help  clear  refresh  exit\n'
     )
