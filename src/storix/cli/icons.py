@@ -14,7 +14,6 @@ from typing import Final
 # fmt: off
 class Icons:
     """Nerd Font glyph constants (complete eza icon set)."""
-
     AUDIO: Final[str]           = '\uF001'      # 
     BINARY: Final[str]          = '\uEAE8'      # 
     BOOK: Final[str]            = '\uE28B'      # 
