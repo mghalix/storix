@@ -11,7 +11,7 @@ import sys
 import threading
 
 from collections import defaultdict
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from functools import partial
 from typing import TYPE_CHECKING, Annotated, NoReturn
 
@@ -50,9 +50,11 @@ from .state import (
     build_base,
     build_session,
     current_fs,
+    debug_enabled,
     empty_all,
     icons_enabled,
     layer_summary,
+    set_debug,
     set_icons,
     stat_all,
     use_fs,
@@ -80,6 +82,14 @@ app = typer.Typer(
 
 
 def _die(cmd: str, exc: Exception) -> NoReturn:
+    if debug_enabled():
+        import traceback
+
+        # the raw provider detail (request IDs, HTTP context) lives on
+        # the cause chain the concise message deliberately leaves out
+        err.print(
+            ''.join(traceback.format_exception(exc)), markup=False, highlight=False
+        )
     err.print(f'[red]{cmd}: {exc}[/red]')
     raise typer.Exit(1) from exc
 
@@ -705,11 +715,13 @@ def push(
         total_bytes = sum(f.stat().st_size for f in files)
         targets = [(f, dst / f.relative_to(src)) for f in files]
         # each unique remote directory once, in one core-batched mkdir,
-        # not one round-trip-heavy mkdir per file
+        # not one round-trip-heavy mkdir per file; parents=True already
+        # makes existing directories a silent success, so any failure
+        # here is real (permission, an intermediate file, a missing
+        # bucket) and must die, not be suppressed (ADR 0029)
         dirs = {dst} | {remote_file.parent for _, remote_file in targets}
-        with suppress(StorageError):
-            fs.mkdir(*sorted(dirs), parents=True)
         try:
+            fs.mkdir(*sorted(dirs), parents=True)
             with _transfer_progress(fs, src.name, total_bytes) as obs:
 
                 def send(file_path: Path, remote_file: StorixPath) -> None:
@@ -735,6 +747,10 @@ def push(
 
     dst = fs.resolve(remote) if remote else fs.pwd() / src.name
     try:
+        # scaffold missing destination parents inside the storage root,
+        # exactly as the directory arm does (ADR 0029); echo() itself
+        # stays strict about them
+        fs.mkdir(dst.parent, parents=True)
         with (
             _transfer_progress(fs, src.name, src.stat().st_size) as obs,
             src.open('rb') as data,
@@ -798,9 +814,17 @@ def _main(  # pyright: ignore[reportUnusedFunction]
             help='Nerd Font icons in listings (default: persistent prefs)',
         ),
     ] = None,
+    debug: Annotated[
+        bool,
+        typer.Option(
+            '--debug',
+            help='print the full provider traceback when a command fails',
+        ),
+    ] = False,
     interactive: Annotated[bool, typer.Option('-i', '--interactive')] = False,
 ) -> None:
     """Set up the session; launch the shell when no command is given."""
+    set_debug(debug)
     if icons is not None:
         set_icons(icons)
     # rebuild on an explicit --provider or any layer flag, else keep the

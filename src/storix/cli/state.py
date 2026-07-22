@@ -43,6 +43,9 @@ class _Session:
     icons: bool | None = None
     """Whether listings decorate entries with icons; None = unresolved
     (falls back to the persistent preferences on first use)."""
+    debug: bool = False
+    """Whether failures print the full exception chain (``--debug``);
+    reset per invocation by the app callback."""
 
 
 _session = _Session()
@@ -105,6 +108,16 @@ def icons_enabled() -> bool:
 def set_icons(enabled: bool) -> None:  # noqa: FBT001 - a setter takes the value
     """Force icons on or off for this process (the flag override)."""
     _session.icons = enabled
+
+
+def debug_enabled() -> bool:
+    """Whether ``--debug`` asked for full exception chains on failures."""
+    return _session.debug
+
+
+def set_debug(enabled: bool) -> None:  # noqa: FBT001 - a setter takes the value
+    """Turn full-traceback error output on or off for this invocation."""
+    _session.debug = enabled
 
 
 # --- concurrent per-entry lookups ---
