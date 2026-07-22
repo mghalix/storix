@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
 from storix import pathops
 from storix._async._compat import concurrent
 from storix._async._stream import ensure_chunks, validate_chunk_size
-from storix._async.backends import generic
+from storix._async.backends import StorageProvisioner, generic
 from storix.constants import BULK_LISTING_KEY_LIMIT, DEFAULT_CONCURRENCY
 from storix.enums import Capability, PathKind
 from storix.errors import (
@@ -201,6 +201,46 @@ class Storix:
 
     async def __aexit__(self, *_: object) -> None:
         await self.close()
+
+    # --- provisioning ---
+
+    async def provision(self) -> bool:
+        """Ensure the backend's storage root exists. Idempotent.
+
+        A control-plane operation, distinct from the data-plane the port
+        exposes: it creates the bucket/container/filesystem the session is
+        anchored to, never a path inside it (``mkdir`` does that and never
+        creates a root). Runs against ``base_backend``, beneath any layers
+        - creating the container a sandbox jails is not an escape, since it
+        grants no data access outside the jail.
+
+        Only a backend implementing the ``StorageProvisioner`` protocol can
+        do this: ``AzureBackend`` (ADLS) creates a missing filesystem;
+        local and memory report already-present. The opendal backends
+        (S3/R2/GCS/Azure Blob) are data-plane only and cannot create a
+        root, so this raises for them.
+
+        Returns:
+            True if this call created the root, False if it already
+            existed.
+
+        Raises:
+            UnsupportedOperationError: If the backend cannot provision its
+                root (an opendal or custom backend); the message points to
+                the provider's own control-plane tooling.
+        """
+        base = self.base_backend
+        if not isinstance(base, StorageProvisioner):
+            operation = 'provision'
+            message = (
+                f'{type(base).__name__} cannot create its storage root from '
+                'storix (creating a bucket or container is a provider '
+                'control-plane operation); create it with your provider tooling '
+                '(aws s3 mb / az storage container create / gcloud storage '
+                'buckets create), then retry'
+            )
+            raise UnsupportedOperationError(operation, message)
+        return await base.provision()
 
     def chroot(self, path: StrPathLike, /) -> Self:
         """Return a *new* session whose root is ``path`` (resolved here).

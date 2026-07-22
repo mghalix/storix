@@ -216,3 +216,16 @@ class LocalBackend(BackendBase):
             await asyncio.to_thread(shutil.rmtree, self._to_os(path))
         except OSError as exc:
             raise from_os_error(exc, path) from exc
+
+    async def provision(self) -> bool:
+        """Ensure the base directory exists. Idempotent.
+
+        The base directory is created in the constructor, so this
+        re-affirms it (``mkdir -p`` semantics) and reports it already
+        present: a local root is provisioned when the backend is built.
+
+        Returns:
+            False, always: the local root exists by construction.
+        """
+        await aioos.makedirs(self._base, exist_ok=True)
+        return False

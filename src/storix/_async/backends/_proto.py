@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 
 if TYPE_CHECKING:
@@ -222,4 +222,34 @@ class StorageBackend(Protocol):
 
     async def close(self) -> None:
         """Release backend resources (network clients); idempotent."""
+        ...
+
+
+@runtime_checkable
+class StorageProvisioner(Protocol):
+    """The optional control-plane contract: create the storage root.
+
+    A separate protocol, deliberately not part of ``StorageBackend``.
+    Creating a bucket/container/filesystem is a control-plane operation
+    categorically different from the data-plane the port exposes: most
+    backends cannot honor it (opendal engines are data-plane only), and
+    folding it into the port would force every custom backend to grow an
+    administration method it usually cannot implement. A backend that can
+    create its own root implements this protocol; ``Storix.provision``
+    gates it with a ``runtime_checkable`` ``isinstance`` check.
+    """
+
+    async def provision(self) -> bool:
+        """Ensure the backend's storage root exists. Idempotent.
+
+        Creates the bucket/container/filesystem the session is anchored
+        to when it is missing, and does nothing when it already exists.
+        Safe to call repeatedly and race-safe against a concurrent
+        creator (a lost creation race reports already-present, not an
+        error).
+
+        Returns:
+            True if this call created the root, False if it already
+            existed.
+        """
         ...

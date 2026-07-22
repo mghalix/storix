@@ -7,7 +7,7 @@ load lazily - their engines are optional dependencies (``storix[azure]``,
 
 from typing import TYPE_CHECKING, Any
 
-from storix._sync.backends import BackendBase, StorageBackend
+from storix._sync.backends import BackendBase, StorageBackend, StorageProvisioner
 from storix._sync.backends.local import LocalBackend
 from storix._sync.backends.memory import MemoryBackend
 
@@ -28,6 +28,7 @@ __all__ = (
     'MemoryBackend',
     'S3Backend',
     'StorageBackend',
+    'StorageProvisioner',
 )
 
 

@@ -219,6 +219,17 @@ class MemoryBackend(BackendBase):
         node.metadata = dict(metadata) if metadata else None
         node.modified = utcnow()
 
+    async def provision(self) -> bool:
+        """Ensure the storage root exists (always present here). Idempotent.
+
+        The in-memory root is seeded at construction, so there is nothing
+        to create.
+
+        Returns:
+            False, always: the root already existed.
+        """
+        return False
+
     def _get(self, path: PurePosixPath) -> _Node:
         """Look up a node or raise ``PathNotFoundError``."""
         try:

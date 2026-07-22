@@ -425,6 +425,31 @@ class AzureBackend(BackendBase):
             sas_token=token,
         )
 
+    def provision(self) -> bool:
+        """Create the ADLS filesystem (container) if missing. Idempotent.
+
+        Attempts to create the filesystem on the native SDK client the
+        backend already holds. A pre-existing filesystem, or a concurrent
+        creator winning the race, surfaces as ``ResourceExistsError`` -
+        the already-present signal, not a failure. Any other SDK failure
+        is translated through the backend's error boundary.
+
+        Returns:
+            True if this call created the filesystem, False if it already
+            existed.
+
+        Raises:
+            StorageError: If the SDK reports any failure other than the
+                filesystem already existing (translated to the taxonomy).
+        """
+        try:
+            self._filesystem.create_file_system()
+        except ResourceExistsError:
+            return False
+        except AzureError as exc:
+            raise _translate(exc, PurePosixPath('/')) from exc
+        return True
+
     def close(self) -> None:
         """Close the underlying service client (idempotent)."""
         self._service.close()

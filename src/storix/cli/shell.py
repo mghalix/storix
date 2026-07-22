@@ -270,7 +270,7 @@ def _help() -> None:
         '  [cyan]remove[/cyan]    rm  rmdir\n'
         '  [cyan]move[/cyan]      mv  cp\n'
         '  [cyan]transfer[/cyan]  push  pull\n'
-        '  [cyan]session[/cyan]   provider  exists\n'
+        '  [cyan]session[/cyan]   provider  provision  exists\n'
         '  [cyan]shell[/cyan]     help  clear  refresh  exit\n'
     )
     console.print('[dim]any command supports --help, e.g. `ls --help`[/dim]')
