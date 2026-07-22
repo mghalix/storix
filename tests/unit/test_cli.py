@@ -604,11 +604,51 @@ def test_push_and_pull_and_legacy_aliases(tmp_path):
 def test_completion_context_parsing():
     from storix.cli.shell import _parse_completion_context
 
+    # command-name position
     assert _parse_completion_context('push') == ('push', 0, 'push')
+    # first argument
     assert _parse_completion_context('push ') == ('push', 1, '')
     assert _parse_completion_context('push sr') == ('push', 1, 'sr')
+    # second argument, mid-word (this already worked)
     assert _parse_completion_context('push sr rem') == ('push', 2, 'rem')
     assert _parse_completion_context('pull ') == ('pull', 1, '')
+    # regression: an empty word after a trailing space must count every
+    # completed token, not collapse to index 1 (that sent push<2>/pull<2>
+    # completion to the wrong side).
+    assert _parse_completion_context('push sr ') == ('push', 2, '')
+    assert _parse_completion_context('pull rem ') == ('pull', 2, '')
+    assert _parse_completion_context('cp a b ') == ('cp', 3, '')
+    # an escaped trailing space stays within the current token
+    assert _parse_completion_context('cat my\\ ') == ('cat', 1, 'my ')
+
+
+def test_push_pull_completion_side(monkeypatch):
+    """push<1>/pull<2> complete from the local host, push<2>/pull<1> remote."""
+    from prompt_toolkit.completion import CompleteEvent, Completion
+    from prompt_toolkit.document import Document
+
+    from storix.cli import shell
+
+    def fake_local(word):
+        yield Completion('LOCAL')
+
+    def fake_remote(word):
+        yield Completion('REMOTE')
+
+    monkeypatch.setattr(shell, '_get_local_completions', fake_local)
+    monkeypatch.setattr(shell, '_get_remote_completions', fake_remote)
+
+    completer = shell._ShellCompleter({'push': '', 'pull': ''})
+
+    def side(text: str) -> str | None:
+        doc = Document(text, len(text))
+        comps = list(completer.get_completions(doc, CompleteEvent()))
+        return comps[0].text if comps else None
+
+    assert side('push ') == 'LOCAL'  # push arg1 -> local host
+    assert side('push src ') == 'REMOTE'  # push arg2 -> remote backend
+    assert side('pull ') == 'REMOTE'  # pull arg1 -> remote backend
+    assert side('pull remote ') == 'LOCAL'  # pull arg2 -> local host
 
 
 def test_push_and_pull_directory_recursive(tmp_path):

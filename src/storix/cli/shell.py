@@ -77,45 +77,34 @@ def _escape_shell_path(name: str) -> str:
     )
 
 
-def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:  # noqa: PLR0911
+def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
     """Parse text before cursor into (cmd_name, arg_index, current_word).
 
-    arg_index is 1-based index of the argument being typed:
-    - 0 if cursor is on the command name itself
-    - 1 for the first argument after command
-    - 2 for the second argument after command, etc.
-    """
-    lstripped = text_before_cursor.lstrip()
-    if not lstripped:
-        return '', 0, ''
+    arg_index is the 1-based index of the argument being typed:
+    - 0 if the cursor is on the command name itself
+    - 1 for the first argument after the command
+    - 2 for the second argument after the command, etc.
 
-    ends_with_space = text_before_cursor[-1].isspace()
+    A trailing unescaped space means a fresh (empty) argument has begun, so the
+    index counts every completed token. An escaped trailing space (part of a
+    completed path that contains a space) still belongs to the last token, so
+    the index stays on that token.
+    """
+    if not text_before_cursor.lstrip():
+        return '', 0, ''
     try:
         tokens = shlex.split(text_before_cursor)
     except ValueError:
         tokens = text_before_cursor.split()
-
     if not tokens:
         return '', 0, ''
 
-    cmd = tokens[0]
-    if len(tokens) == 1:
-        if text_before_cursor.rstrip() != text_before_cursor:
-            return cmd, 1, ''
-        return cmd, 0, tokens[0]
-
-    raw_trailing_space = text_before_cursor[-1].isspace() and not (
+    ends_with_new_arg = text_before_cursor[-1].isspace() and not (
         len(text_before_cursor) > 1 and text_before_cursor[-2] == '\\'
     )
-
-    if raw_trailing_space:
-        if ends_with_space:
-            return cmd, 1, ''
-        return cmd, 0, tokens[0]
-
-    if ends_with_space:
+    cmd = tokens[0]
+    if ends_with_new_arg:
         return cmd, len(tokens), ''
-
     return cmd, len(tokens) - 1, tokens[-1]
 
 
