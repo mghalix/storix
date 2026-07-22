@@ -112,6 +112,34 @@ Both stream, so a file larger than memory moves fine. Uploads detect a
 content type (from the extension, else by sniffing the head) and set it on
 backends that support it.
 
+Both ends scaffold their destination: `push` creates missing destination
+parents inside the storage root (directories, or key prefixes on an object
+store), and `pull` creates missing local ones, so this works with no prior
+`mkdir`:
+
+```bash
+sx -p s3 push ./video.mp4 /storix/demos/video.mp4
+```
+
+What neither does is create the storage root itself - the configured S3/R2
+bucket, Azure container, or ADLS filesystem must already exist. Creating one
+is a provider control-plane operation (`aws s3 mb`, `az storage container
+create`, the R2 dashboard), not a filesystem operation, and `sx mkdir` only
+ever creates directories *inside* the root. When the root is missing, every
+command says so in one line:
+
+```console
+$ sx -p s3 ls
+ls: configured s3 bucket 'media' does not exist
+```
+
+Pass `--debug` to any invocation to get the full provider traceback
+(request IDs, HTTP context) behind that one line:
+
+```bash
+sx --debug -p s3 ls
+```
+
 ## Layers
 
 Two flags wrap the session for one invocation:

@@ -386,3 +386,38 @@ concurrent walk for free (unlike `generic.du`, the du *total*, which already
 fans out via `concurrent`). The `sx du` breakdown using the sequential `walk`
 while the du total is concurrent is an inconsistency to resolve with the
 concurrent-walk work above.
+
+## Storage-root provisioning (`sx provision`)
+
+**What:** creating the backend's storage root - the S3/R2/GCS bucket, Azure
+Blob container, ADLS Gen2 filesystem - from storix, instead of pointing the
+user at provider tooling. ADR 0029 shipped the diagnostic half (a missing
+root raises `StorageRootNotFoundError` naming it); creation was deliberately
+left out.
+
+**Agreed shape when adopted:** a separate, optional control-plane protocol
+beside the port (e.g. `exists()` / `create()` implemented by capable
+backends), surfaced as an explicit, idempotent `sx provision [--if-missing]`.
+Absence of the protocol is the unsupported path for custom backends. It must
+never run implicitly at session start (a typo'd bucket name must fail, not
+materialize), and `mkdir` never pretends to create a root - it is not a
+filesystem operation. `StorageBackend` itself does not grow administration
+methods: credentials that allow object I/O often cannot create roots, and
+creation options (region, tier, HNS) are provider-specific. Living beside
+the backend keeps it reusable by library users and future front-ends (MCP,
+pathlike) without each re-implementing it.
+
+**Trigger:** a second concrete request for in-tool provisioning, or the
+agent/MCP story needing programmatic root setup.
+
+## Batch runner (`sx run commands.sx`)
+
+**What:** a fail-fast runner for a file of sx commands sharing one session.
+Rejected alongside it, permanently: `&&`, `;`, pipes, redirections, and
+command substitution inside sx - the host shell already composes one-shot
+invocations, the interactive shell already sequences over one session, and
+a partial bash inside sx is a worse bash (ADR 0029).
+
+**Trigger:** a real workflow the host shell plus the interactive session
+demonstrably cannot serve (e.g. paying session/auth setup once across many
+commands at scale).

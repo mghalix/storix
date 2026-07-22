@@ -126,6 +126,12 @@ Ideas that need a concrete use case or design pass before committing.
 - Operation-level events (start/end/error) beyond transfer bytes
 - Telemetry hooks (OpenTelemetry integration)
 
+### Provisioning
+- Explicit storage-root provisioning (`sx provision`, an optional
+  control-plane protocol beside `StorageBackend`) - a missing root
+  currently raises a typed `StorageRootNotFoundError` pointing at the
+  provider's own tooling; see deferred-decisions for the agreed shape
+
 ### Agent and automation
 - Capability-stripped sessions (sandbox without path-unmask escape)
 - MCP server for AI agent workflows
