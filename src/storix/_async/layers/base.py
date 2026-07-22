@@ -173,3 +173,7 @@ class LayerBase:
     async def close(self) -> None:
         """Release the inner backend's resources."""
         await self._inner.close()
+
+    async def provision(self) -> bool:
+        """Ensure the inner backend's storage root exists (control-plane)."""
+        return await self._inner.provision()

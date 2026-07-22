@@ -117,6 +117,15 @@ def test_backend_without_either_write_form_fails_clearly():
         backend.write_stream(P('/a.txt'), _astream(b'x'), mode='w', content_type=None)
 
 
+def test_provision_is_idempotent_noop():
+    # Given a memory backend whose root is seeded at construction
+    backend = MemoryBackend()
+    # When provision runs
+    created = backend.provision()
+    # Then it reports the root already present, creating nothing
+    assert created is False
+
+
 def test_append_updates_modified_preserves_created():
     """Memory-specific: POSIX ctime shifts on append, so only the memory
     backend can promise creation-time stability across appends.

@@ -595,3 +595,19 @@ def test_fan_out_read_round_trips(backend: StorageBackend):
     joined = fs.cat(*names)
 
     assert joined == b''.join(f'content-{i}'.encode() for i in range(10))
+
+
+# --- provisioning (control-plane; capability-gated) ---
+
+
+def test_local_provision_ensures_base_and_reports_present(tmp_path: Path):
+    # Given a local backend anchored at a base created in the constructor
+    root = tmp_path / 'store'
+    backend = LocalBackend(root)
+    # Then it advertises the capability the core gate consults
+    assert backend.capabilities.provisioning is True
+    # When provision runs
+    created = backend.provision()
+    # Then it reports the root already present and the base still exists
+    assert created is False
+    assert root.is_dir()

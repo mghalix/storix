@@ -59,7 +59,9 @@ class MemoryBackend(BackendBase):
     for the capability.
     """
 
-    capabilities: Capabilities = Capabilities(custom_metadata=True, bulk_listing=True)
+    capabilities: Capabilities = Capabilities(
+        custom_metadata=True, bulk_listing=True, provisioning=True
+    )
 
     _nodes: dict[PurePosixPath, _Node]
 
@@ -218,6 +220,17 @@ class MemoryBackend(BackendBase):
             raise IsADirectoryError(path)
         node.metadata = dict(metadata) if metadata else None
         node.modified = utcnow()
+
+    async def provision(self) -> bool:
+        """Ensure the storage root exists (always present here). Idempotent.
+
+        The in-memory root is seeded at construction, so there is nothing
+        to create.
+
+        Returns:
+            False, always: the root already existed.
+        """
+        return False
 
     def _get(self, path: PurePosixPath) -> _Node:
         """Look up a node or raise ``PathNotFoundError``."""

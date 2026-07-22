@@ -825,6 +825,24 @@ def provider() -> None:
 
 
 @app.command()
+def provision() -> None:
+    """Create the backend's storage root if missing (idempotent).
+
+    ADLS creates a missing filesystem; local and memory report it already
+    present. S3/R2/GCS and Azure Blob (opendal, data-plane only) cannot
+    create a root - use your provider tooling. ``mkdir`` never creates a
+    root.
+    """
+    fs = _fs()
+    try:
+        created = fs.provision()
+    except StorageError as exc:
+        _die('provision', exc)
+    root = fs.locate('/')
+    console.print(f'provisioned: {root}' if created else f'already present: {root}')
+
+
+@app.command()
 def shell() -> None:
     """Start the interactive shell."""
     from .shell import start_shell

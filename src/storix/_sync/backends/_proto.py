@@ -221,3 +221,22 @@ class StorageBackend(Protocol):
     def close(self) -> None:
         """Release backend resources (network clients); idempotent."""
         ...
+
+    def provision(self) -> bool:
+        """Ensure the backend's storage root exists. Idempotent.
+
+        A control-plane operation: create the bucket/container/filesystem
+        the backend is anchored to, distinct from the data-plane the rest
+        of this port exposes (``make_dir`` creates a directory *inside* the
+        root, never the root itself). Capability-gated by ``provisioning``:
+        the core calls this only on backends that advertise it, and
+        ``BackendBase`` supplies a raising default for the rest, so a
+        backend whose engine cannot create its root (the opendal engines)
+        need not implement it. Race-safe against a concurrent creator (a
+        lost creation race reports already-present, not an error).
+
+        Returns:
+            True if this call created the root, False if it already
+            existed.
+        """
+        ...

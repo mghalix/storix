@@ -123,6 +123,15 @@ class Capabilities:
     child emptiness from one request when set, and falls back silently
     when it is not (ADR 0027)."""
 
+    provisioning: bool = False
+    """Can create its own storage root on demand - the bucket, container,
+    or filesystem the backend is anchored to (a control-plane operation,
+    distinct from ``mkdir`` inside the root). Advertised only when the
+    backend's engine can do it: the native ADLS SDK and local/memory can;
+    the opendal engines (S3/GCS/Azure Blob) are data-plane only and cannot.
+    The core gates ``provision`` on this, raising when it is absent
+    (ADR 0030)."""
+
     def supports(self, capability: Capability) -> bool:
         """Whether the given capability is advertised."""
         return bool(getattr(self, capability))

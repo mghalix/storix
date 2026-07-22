@@ -90,6 +90,47 @@ def _astream(*chunks: bytes) -> Iterator[bytes]:
     yield from chunks
 
 
+def test_provision_creates_filesystem_returns_true(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Given an ADLS backend whose filesystem does not yet exist
+    class Filesystem:
+        def __init__(self) -> None:
+            self.created = False
+
+        def create_file_system(self) -> None:
+            self.created = True
+
+    filesystem = Filesystem()
+    backend = AzureBackend('raw', account_name='acct', credential='token')
+    monkeypatch.setattr(backend, '_filesystem', filesystem)
+
+    # When provision runs
+    created = backend.provision()
+
+    # Then it creates the filesystem and reports it new
+    assert created is True
+    assert filesystem.created
+
+
+def test_provision_existing_filesystem_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Given an ADLS backend whose filesystem already exists (or a lost race)
+    class Filesystem:
+        def create_file_system(self) -> None:
+            raise ResourceExistsError(message='filesystem exists')
+
+    backend = AzureBackend('raw', account_name='acct', credential='token')
+    monkeypatch.setattr(backend, '_filesystem', Filesystem())
+
+    # When provision runs, the race-safe create surfaces already-present
+    created = backend.provision()
+
+    # Then it reports the root already existed, not a failure
+    assert created is False
+
+
 def test_read_stream_splits_without_coalescing_provider_chunks(
     monkeypatch: pytest.MonkeyPatch,
 ):

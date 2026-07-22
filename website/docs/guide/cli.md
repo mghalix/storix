@@ -37,7 +37,7 @@ write      touch  echo  mkdir
 remove     rm  rmdir
 move       mv  cp
 transfer   push  pull
-session    provider  exists
+session    provider  provision  exists
 ```
 
 Every command supports `--help`. Familiar flags behave as they do in unix:
@@ -74,6 +74,33 @@ sx tree -l                 # kind + size columns on every entry
 sx tree -L 2               # cap the depth at 2 levels
 sx tree --sort size        # largest first (also: name, time)
 ```
+
+### Provisioning the storage root
+
+`sx provision` creates the backend's storage root if it is missing, and is
+idempotent (safe to run in CI or a setup script):
+
+```bash
+sx -p azure provision   # provisioned: abfss://raw@acct.dfs.core.windows.net/
+```
+
+What it does depends on the backend, and the honest picture is narrow:
+
+- **ADLS Gen2** (`azure`): creates the missing filesystem (container). This is
+  the one real cloud provisioner. Already there: `already present: <uri>`.
+- **local** and **memory**: report `already present` - the local base directory
+  is created when the session opens, and the in-memory root always exists.
+- **S3 / R2 / GCS / Azure Blob** (`s3`, `gcs`, `azblob`): **not supported**.
+  These run on the opendal engine, which is data-plane only and has no
+  create-bucket / create-container operation. `sx provision` exits non-zero with
+  a message pointing you at your provider's own tooling (`aws s3 mb`,
+  `gcloud storage buckets create`, `az storage container create`), rather than
+  pretending it can create the bucket.
+
+`sx mkdir` never creates a bucket or container - it operates *inside* an
+existing root and creates a directory (or a directory marker on object stores).
+Creating the root itself is a control-plane operation, which is exactly what
+`provision` is for.
 
 ## The interactive shell
 

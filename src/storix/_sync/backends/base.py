@@ -167,6 +167,20 @@ class BackendBase(abc.ABC):
         del path
         raise UnsupportedOperationError(Capability.BULK_LISTING)
 
+    def provision(self) -> bool:
+        """Ensure the backend's storage root exists (control-plane).
+
+        Capability-gated by ``provisioning`` (default: unsupported). Only
+        backends whose engine can create their root override this, and the
+        core calls it exclusively on those, so this default never runs in
+        practice; it is the honest signal for a stray call.
+
+        Raises:
+            UnsupportedOperationError: Always, on a backend that does not
+                advertise ``provisioning``.
+        """
+        raise UnsupportedOperationError(Capability.PROVISIONING)
+
     def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
         """Move a file or directory tree (fallback: copy then delete)."""
         generic.move(self, src, dst)
