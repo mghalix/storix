@@ -158,3 +158,45 @@ it. Calling `local.url(...)` directly raises `UnsupportedOperationError` because
 local storage cannot mint a presigned URL. A
 [capability layer](layers.md#portable-capabilities) can backfill `url()` when one
 code path must work across providers.
+
+## Provisioning the storage root
+
+Everything above operates *inside* an existing storage root - the bucket,
+container, or filesystem the backend is anchored to. Creating that root is a
+control-plane operation, exposed as `provision()` on the session and gated by
+the `provisioning` capability. It is idempotent and returns whether it created
+the root, so it is safe to call at application startup or in a setup script:
+
+```python
+fs = get_storage("azure")           # ADLS Gen2
+created = fs.provision()            # True if it made the filesystem, False if present
+```
+
+```python
+# async
+from storix.aio import get_storage
+
+fs = get_storage("azure")
+await fs.provision()
+```
+
+Only a backend whose engine can create its own root advertises the capability:
+`AzureBackend` (ADLS) creates a missing filesystem; `LocalBackend` and
+`MemoryBackend` report already-present. The opendal-engine backends
+(`S3Backend`, `GcsBackend`, `AzureBlobBackend`) are data-plane only and cannot
+create a bucket or container, so `provision()` raises `UnsupportedOperationError`
+pointing at your provider's own tooling (`aws s3 mb`,
+`gcloud storage buckets create`, `az storage container create`). Check first
+when you want to branch rather than catch:
+
+```python
+if fs.backend.capabilities.provisioning:
+    fs.provision()
+```
+
+Provisioning never runs implicitly when a session opens: a missing root fails
+loudly (`StorageRootNotFoundError`, see [Errors](../reference/errors.md)) rather
+than being silently created, so a typo in a bucket name can never materialize a
+new empty bucket. The same operation is available on the command line as
+[`sx provision`](cli.md#provisioning-the-storage-root). `mkdir` never creates a
+root - it only makes directories inside one.

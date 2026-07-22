@@ -59,7 +59,9 @@ class MemoryBackend(BackendBase):
     for the capability.
     """
 
-    capabilities: Capabilities = Capabilities(custom_metadata=True, bulk_listing=True)
+    capabilities: Capabilities = Capabilities(
+        custom_metadata=True, bulk_listing=True, provisioning=True
+    )
 
     _nodes: dict[PurePosixPath, _Node]
 

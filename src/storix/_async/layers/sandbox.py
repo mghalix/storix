@@ -265,3 +265,13 @@ class SandboxLayer:
     async def close(self) -> None:
         """Release the inner backend's resources."""
         await self._inner.close()
+
+    async def provision(self) -> bool:
+        """Ensure the inner backend's storage root exists (control-plane).
+
+        No path to translate: provisioning creates the whole root the jail
+        lives in, which grants no data access outside the jail, so it is not
+        an escape. In practice the core provisions ``base_backend`` directly
+        and bypasses this.
+        """
+        return await self._inner.provision()

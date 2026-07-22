@@ -29,3 +29,4 @@ class Capability(StorixEnum):
     CUSTOM_METADATA = auto()
     PRESIGNED_URLS = auto()
     BULK_LISTING = auto()
+    PROVISIONING = auto()

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
 from storix import pathops
 from storix._sync._compat import concurrent
 from storix._sync._stream import ensure_chunks, validate_chunk_size
-from storix._sync.backends import StorageProvisioner, generic
+from storix._sync.backends import generic
 from storix.constants import BULK_LISTING_KEY_LIMIT, DEFAULT_CONCURRENCY
 from storix.enums import Capability, PathKind
 from storix.errors import (
@@ -216,24 +216,25 @@ class Storix:
         - creating the container a sandbox jails is not an escape, since it
         grants no data access outside the jail.
 
-        Only a backend implementing the ``StorageProvisioner`` protocol can
-        do this: ``AzureBackend`` (ADLS) creates a missing filesystem;
-        local and memory report already-present. The opendal backends
-        (S3/R2/GCS/Azure Blob) are data-plane only and cannot create a
-        root, so this raises for them.
+        Gated by the ``provisioning`` capability of the *base* backend, so
+        it works only where the backend's engine can create its own root:
+        ``AzureBackend`` (ADLS) creates a missing filesystem; local and
+        memory report already-present. The opendal backends (S3/R2/GCS/Azure
+        Blob) are data-plane only and do not advertise it, so this raises
+        for them, pointing at the provider's own control-plane tooling.
 
         Returns:
             True if this call created the root, False if it already
             existed.
 
         Raises:
-            UnsupportedOperationError: If the backend cannot provision its
-                root (an opendal or custom backend); the message points to
-                the provider's own control-plane tooling.
+            UnsupportedOperationError: If the base backend does not
+                advertise ``provisioning`` (an opendal or custom backend);
+                the message points to the provider's own control-plane
+                tooling.
         """
         base = self.base_backend
-        if not isinstance(base, StorageProvisioner):
-            operation = 'provision'
+        if not base.capabilities.supports(Capability.PROVISIONING):
             message = (
                 f'{type(base).__name__} cannot create its storage root from '
                 'storix (creating a bucket or container is a provider '
@@ -241,7 +242,7 @@ class Storix:
                 '(aws s3 mb / az storage container create / gcloud storage '
                 'buckets create), then retry'
             )
-            raise UnsupportedOperationError(operation, message)
+            raise UnsupportedOperationError(Capability.PROVISIONING, message)
         return base.provision()
 
     def chroot(self, path: StrPathLike, /) -> Self:

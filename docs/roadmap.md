@@ -38,11 +38,11 @@ These ship in the current release and are covered by the conformance suite.
 - Presigned URLs via `url()` on capable backends
 - Custom metadata on capable backends
 - Data URLs on any backend via `DataUrlLayer`
-- Storage-root provisioning via the optional `StorageProvisioner` protocol and
-  `provision()`: creates a missing ADLS filesystem idempotently; local/memory
-  report already-present; the opendal backends (S3/R2/GCS/Azure Blob) are
-  data-plane only and report it unsupported, pointing at provider tooling
-  (ADR 0030)
+- Storage-root provisioning via the optional `provisioning` capability and
+  `fs.provision()` / `sx provision`: creates a missing ADLS filesystem
+  idempotently; local/memory report already-present; the opendal backends
+  (S3/R2/GCS/Azure Blob) are data-plane only and report it unsupported,
+  pointing at provider tooling (ADR 0030)
 
 ### Backends
 - **Local disk** - anchored at a base directory

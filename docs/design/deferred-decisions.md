@@ -389,14 +389,18 @@ concurrent-walk work above.
 
 ## Storage-root provisioning (`sx provision`)
 
-**Status:** adopted - see ADR 0030. Shipped as the optional
-`StorageProvisioner` protocol, `Storix.provision()`, and `sx provision`. The
+**Status:** adopted - see ADR 0030. Shipped as the optional `provisioning`
+capability, `Storix.provision()`, and `sx provision`. The
 design narrowed from the sketch here once opendal was confirmed data-plane
 only: S3/R2/GCS/azblob roots cannot be created from storix (no control-plane
 SDKs are pulled in), so ADLS is the one native cloud provisioner, local/memory
 are trivial, and the opendal backends report it unsupported and point at
-provider tooling. Idempotent by default, so no `--if-missing`; the "unsupported"
-path is the absent protocol, surfaced as `UnsupportedOperationError`.
+provider tooling. Idempotent by default, so no `--if-missing`; the
+"unsupported" path is the absent capability, surfaced as
+`UnsupportedOperationError` (the same gate every optional feature uses).
+Chosen as a capability rather than the sketched separate protocol so it
+matches every other optional feature and is discoverable via
+`backend.capabilities.provisioning`.
 
 ## Batch runner (`sx run commands.sx`)
 

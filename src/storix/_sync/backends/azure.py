@@ -115,7 +115,7 @@ class AzureBackend(BackendBase):
     """
 
     capabilities: Capabilities = Capabilities(
-        content_type=True, custom_metadata=True, presigned_urls=True
+        content_type=True, custom_metadata=True, presigned_urls=True, provisioning=True
     )
     default_read_chunk_size: int = DEFAULT_AZURE_READ_CHUNK_SIZE
     default_write_chunk_size: int = DEFAULT_AZURE_WRITE_CHUNK_SIZE

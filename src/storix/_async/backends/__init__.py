@@ -1,5 +1,5 @@
-from ._proto import StorageBackend, StorageProvisioner
+from ._proto import StorageBackend
 from .base import BackendBase
 
 
-__all__ = ('BackendBase', 'StorageBackend', 'StorageProvisioner')
+__all__ = ('BackendBase', 'StorageBackend')

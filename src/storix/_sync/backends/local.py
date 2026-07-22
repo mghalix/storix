@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from storix._sync._stream import batch_chunks, resolve_chunk_size
 from storix.enums import PathKind
 from storix.errors import PathNotFoundError, from_os_error
-from storix.models import Entry, RawStat
+from storix.models import Capabilities, Entry, RawStat
 
 from . import generic
 from .base import BackendBase
@@ -45,6 +45,10 @@ class LocalBackend(BackendBase):
     by the core's normalization, but symlinks inside the base can still
     point outside it - pair with SandboxLayer when that matters.
     """
+
+    capabilities: Capabilities = Capabilities(provisioning=True)
+    """Only ``provisioning``: the base directory is a root the backend can
+    create on demand (it does so at construction). No cloud-only features."""
 
     def __init__(self, base: StrPathLike) -> None:
         self._base = Path(base).expanduser().resolve()

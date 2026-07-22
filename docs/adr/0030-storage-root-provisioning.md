@@ -1,4 +1,4 @@
-# 30. Storage-root provisioning (StorageProvisioner, sx provision)
+# 30. Storage-root provisioning (provisioning capability, sx provision)
 
 Status: accepted
 
@@ -66,46 +66,56 @@ before merging, rather than discovering the limitation after.
 Ship a small, honest control-plane surface: an optional protocol capable
 backends implement, one core method that gates it, and one CLI command.
 
-### A. The `StorageProvisioner` protocol
+### A. `provision()` on the port, gated by a `provisioning` capability
 
-A separate, `@runtime_checkable` `Protocol` beside `StorageBackend` in
-`backends/_proto.py` (generated async -> sync like the port):
+Provisioning follows the exact idiom the codebase already uses for every
+optional backend feature (ADR 0027's `bulk_listing`, the earlier
+`content_type` / `custom_metadata` / `presigned_urls`): a capability flag
+plus a port method with a raising default on `BackendBase`.
 
-```python
-@runtime_checkable
-class StorageProvisioner(Protocol):
-    async def provision(self) -> bool:
-        """Ensure the backend's storage root exists. Idempotent.
+- New `provisioning: bool = False` field on `Capabilities` and a matching
+  `Capability.PROVISIONING` member (the alignment test keeps the two in
+  lockstep, as for every other capability).
+- `async def provision(self) -> bool` on the `StorageBackend` port
+  (generated async -> sync), with a `BackendBase` default that
+  `raise UnsupportedOperationError(Capability.PROVISIONING)` - identical to
+  how `list_tree` defaults for non-`bulk_listing` backends. Capable
+  backends override it and set the flag; the rest inherit the raising
+  default and never advertise it.
 
-        Returns True if it was created, False if it already existed.
-        """
-        ...
-```
+This was chosen over a separate `StorageProvisioner` `Protocol` +
+`isinstance` gate (the shape sketched in deferred-decisions). A bespoke
+protocol would reinvent a gate the codebase already has one blessed,
+tested idiom for; capabilities are equally additive and non-breaking (every
+field defaults False), they are *discoverable* (`backend.capabilities.
+provisioning`, which `sx` and library callers can check before calling),
+and they keep provisioning consistent with every other optional feature.
+The one cost - a control-plane method now sits on the data-plane port - is
+mild: the port already carries non-data-plane members (`locate`,
+`capabilities`), and `BackendBase`'s default keeps it a no-op for the
+backends and custom subclasses that cannot provision.
 
-- It is deliberately *not* part of `StorageBackend`: control-plane is a
-  different contract, most backends cannot honor it, and folding it into
-  the port would force every custom backend to grow an administration
-  method it usually cannot implement.
 - One method, idempotent, returning "did I create it". No separate
   `exists()`: `provision` subsumes the check, and a pure existence probe
   is already answerable at the data plane (ADR 0029's missing-root
   detection). No `deprovision`/delete: destroying a root is not a
-  workflow storix needs to own (YAGNI).
+  workflow storix needs to own (YAGNI - revisit only with a concrete
+  ephemeral-root use case, and only behind explicit confirmation).
 
-Implementers (this PR):
+Implementers (this PR) advertise `provisioning=True`:
 
-- **AzureBackend (ADLS)**: `self._filesystem.exists()` then
-  `create_file_system()` on the native SDK client it already holds. The
-  one real cloud provisioner.
+- **AzureBackend (ADLS)**: attempts `create_file_system()` on the native
+  SDK client it already holds, catching `ResourceExistsError` as
+  already-present (race-safe). The one real cloud provisioner.
 - **LocalBackend**: the base directory is created in the constructor, so
   `provision()` is idempotent and returns False (already present). Honest:
   a local root is provisioned at construction.
 - **MemoryBackend**: always present; `provision()` is a no-op returning
   False.
 
-Non-implementers: **S3Backend, GcsBackend, AzureBlobBackend** (opendal,
-data-plane only) and any custom backend. They simply do not define
-`provision`, so the `runtime_checkable` `isinstance` check is False.
+Non-advertisers: **S3Backend, GcsBackend, AzureBlobBackend** (opendal,
+data-plane only) and any custom backend. `provisioning` stays False, so the
+core gate raises for them.
 
 ### B. `Storix.provision()` - the single gate
 
@@ -115,9 +125,9 @@ provision, and if not, what do I say":
 ```python
 async def provision(self) -> bool:
     base = self.base_backend
-    if not isinstance(base, StorageProvisioner):
+    if not base.capabilities.supports(Capability.PROVISIONING):
         raise UnsupportedOperationError(
-            'provision',
+            Capability.PROVISIONING,
             f'{type(base).__name__} cannot create its storage root from '
             'storix (creating a bucket or container is a provider '
             'control-plane operation); create it with your provider tooling '
@@ -129,11 +139,12 @@ async def provision(self) -> bool:
 
 - Reuses `UnsupportedOperationError` from the ADR 0004 taxonomy rather than
   minting a new error class: nothing went wrong with a path, the backend
-  simply cannot do what was asked - exactly that error's meaning. No new
-  `Capability` is added; provisioning is a control-plane protocol, not a
-  data-plane capability gate.
-- Operates on `base_backend`, beneath any layers. A sandbox jails *paths*,
-  not the root's existence; creating the container the jail lives in is not
+  simply cannot do what was asked - exactly that error's meaning. The
+  custom message keeps the actionable provider-tooling pointer over the
+  generic default.
+- Gates on the *base* backend's capability, beneath any layers. A sandbox
+  jails *paths*, not the root's existence; creating the container the jail
+  lives in is not
   a sandbox escape (it grants no data access outside the jail), and it is
   the correct target. Provisioning is why a driving adapter reaches for the
   core, not `base_backend` directly - the "is it supported, else what"
@@ -166,9 +177,10 @@ buys nothing - the same reasoning ADR 0012 used to reject `exist_ok` on
 
 - No provider control-plane SDKs (boto3, google-cloud-storage, Azure mgmt)
   and therefore no S3/R2/GCS/azblob root creation.
-- No `StorageBackend` administration methods; the protocol stays separate.
-- No implicit provisioning at session build; `sx provision` is the only
-  trigger.
+- No implicit provisioning at session build (no factory / `storix.toml` /
+  env `create_if_missing`); `sx provision` and `fs.provision()` are the only
+  triggers. A silent create-on-connect would turn a typo'd bucket name into
+  a new empty bucket that hides the real data - the exact footgun.
 - No deprovision/delete-root; no `--if-missing`.
 
 ## Consequences
@@ -177,19 +189,22 @@ buys nothing - the same reasoning ADR 0012 used to reject `exist_ok` on
 names it; local/memory report already-present; S3/R2/GCS/azblob and custom
 backends get a clear, actionable unsupported message instead of a silent
 failure or a false success. Library users and future front-ends call
-`fs.provision()` and get the same gate. The `StorageProvisioner` protocol
-is the extension point: if a control-plane path for the opendal backends
-ever lands (an opendal admin API, or a user opting into a heavy extra), it
-implements the same protocol and `sx provision` covers it with no surface
-change.
+`fs.provision()` and get the same gate. The `provisioning` capability is the
+extension point: if a control-plane path for the opendal backends ever lands
+(an opendal admin API, or a user opting into a heavy extra), that backend
+advertises the capability and overrides `provision()`, and both
+`fs.provision()` and `sx provision` cover it with no surface change.
 
 The acknowledged limitation is that the headline cloud case (S3/R2) is
 unsupported; this ADR chooses an honest narrow capability over adding
 provider admin SDKs to storix.
 
-Compatibility (ADR 0021): purely additive - a new optional protocol, a new
-core method, a new CLI command, and `provision` methods on three backends.
-No existing behavior changes. Backward-compatible feature -> PATCH bump.
+Compatibility (ADR 0021): purely additive - a new `provisioning` capability
+(field + enum member), a `provision()` port method with a raising
+`BackendBase` default, a new core method and CLI command, and `provision`
+overrides on three backends. Existing custom backends subclassing
+`BackendBase` inherit the default and keep working. No existing behavior
+changes. Backward-compatible feature -> PATCH bump.
 
 Supersedes the "Storage-root provisioning" entry in
 `docs/design/deferred-decisions.md`.

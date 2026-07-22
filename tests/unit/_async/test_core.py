@@ -7,7 +7,7 @@ from storix._async import Storix
 from storix._async.backends.local import LocalBackend
 from storix._async.backends.memory import MemoryBackend
 from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_READ_CHUNK_SIZE
-from storix.enums import PathKind
+from storix.enums import Capability, PathKind
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -1037,8 +1037,8 @@ async def test_provision_unsupported_backend_names_provider_tooling():
     with pytest.raises(UnsupportedOperationError) as exc_info:
         await fs.provision()
 
-    # Then the error names the operation and points at provider tooling
-    assert exc_info.value.operation == 'provision'
+    # Then the error names the missing capability and points at provider tooling
+    assert exc_info.value.operation == Capability.PROVISIONING
     assert 'control-plane' in str(exc_info.value)
 
 

@@ -2,7 +2,7 @@
 # source of truth: src/storix/_async/backends/_proto.py
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol
 
 
 if TYPE_CHECKING:
@@ -222,29 +222,18 @@ class StorageBackend(Protocol):
         """Release backend resources (network clients); idempotent."""
         ...
 
-
-@runtime_checkable
-class StorageProvisioner(Protocol):
-    """The optional control-plane contract: create the storage root.
-
-    A separate protocol, deliberately not part of ``StorageBackend``.
-    Creating a bucket/container/filesystem is a control-plane operation
-    categorically different from the data-plane the port exposes: most
-    backends cannot honor it (opendal engines are data-plane only), and
-    folding it into the port would force every custom backend to grow an
-    administration method it usually cannot implement. A backend that can
-    create its own root implements this protocol; ``Storix.provision``
-    gates it with a ``runtime_checkable`` ``isinstance`` check.
-    """
-
     def provision(self) -> bool:
         """Ensure the backend's storage root exists. Idempotent.
 
-        Creates the bucket/container/filesystem the session is anchored
-        to when it is missing, and does nothing when it already exists.
-        Safe to call repeatedly and race-safe against a concurrent
-        creator (a lost creation race reports already-present, not an
-        error).
+        A control-plane operation: create the bucket/container/filesystem
+        the backend is anchored to, distinct from the data-plane the rest
+        of this port exposes (``make_dir`` creates a directory *inside* the
+        root, never the root itself). Capability-gated by ``provisioning``:
+        the core calls this only on backends that advertise it, and
+        ``BackendBase`` supplies a raising default for the rest, so a
+        backend whose engine cannot create its root (the opendal engines)
+        need not implement it. Race-safe against a concurrent creator (a
+        lost creation race reports already-present, not an error).
 
         Returns:
             True if this call created the root, False if it already
