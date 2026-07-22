@@ -10,12 +10,14 @@ import fnmatch
 import re
 
 from functools import partial
+from itertools import batched
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
 
 from storix import pathops
 from storix._sync._compat import concurrent
 from storix._sync._stream import ensure_chunks, validate_chunk_size
 from storix._sync.backends import generic
+from storix.constants import BULK_LISTING_KEY_LIMIT, DEFAULT_CONCURRENCY
 from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
@@ -29,7 +31,7 @@ from storix.types import StorixPath
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
     from contextlib import AbstractContextManager
 
     from storix._sync.backends import StorageBackend
@@ -452,6 +454,83 @@ class Storix:
             return False
         return True
 
+    def empty_children(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        names: Iterable[str] | None = None,
+    ) -> dict[str, bool]:
+        """Emptiness of a directory's immediate child directories, in one pass.
+
+        The bulk sibling of ``is_empty`` (the point query): the folder-glyph
+        need for a whole listing. When the backend advertises ``bulk_listing``
+        and the subtree stays within the key bound, one recursive listing of
+        ``path`` answers every child at once (grouping the descendant keys by
+        immediate child, all path logic here in the core) - N round trips
+        collapse to one. Otherwise it falls back to a concurrent per-child
+        ``is_empty`` (the portable floor); correctness never depends on the
+        fast path, only latency does. The capability gate is silent: a
+        backend without it is never an error, just the slower path.
+
+        Args:
+            path: Directory whose children to test; the session cwd when None.
+            names: The immediate child directory names to report on. Omit to
+                report on every immediate child directory (one extra listing
+                to discover them); a caller that already listed - as ``sx``
+                does to render the entries - passes the names it has, so no
+                listing is repeated.
+
+        Returns:
+            A mapping of child directory name to whether that child is empty.
+            Empty when there are no children to report on.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+            NotADirectoryError: If ``path`` is a file.
+        """
+        directory = self._resolve(path)
+        if names is None:
+            children = [
+                entry.name
+                for entry in self._backend.list_dir(directory)
+                if entry.is_dir
+            ]
+        else:
+            children = list(names)
+        if not children:
+            return {}
+        if self._backend.capabilities.supports(Capability.BULK_LISTING):
+            nonempty = self._nonempty_children(directory)
+            if nonempty is not None:
+                return {name: name not in nonempty for name in children}
+        results = concurrent(
+            partial(self.is_empty, directory / name) for name in children
+        )
+        return dict(zip(children, results, strict=True))
+
+    def _nonempty_children(self, directory: StorixPath) -> set[str] | None:
+        """Immediate children that hold descendants, from one recursive listing.
+
+        Groups the backend's raw descendant keys by their immediate-child
+        component: a descendant two or more levels below ``directory`` proves
+        that child non-empty. Returns None to signal a fall back to the
+        concurrent floor when the listing exceeds ``BULK_LISTING_KEY_LIMIT``,
+        so a prefix holding millions of keys is never pulled whole.
+        """
+        nonempty: set[str] = set()
+        budget = BULK_LISTING_KEY_LIMIT
+        for descendant in self._backend.list_tree(directory):
+            if budget <= 0:
+                return None
+            budget -= 1
+            relative = descendant.relative_to(directory)
+            # a descendant below an immediate child (its parent is a named
+            # subdirectory, not '.') proves that child non-empty; a direct
+            # child of ``directory`` does not
+            if relative.parent.name:
+                nonempty.add(relative.parts[0])
+        return nonempty
+
     def ls(
         self,
         path: StrPathLike | None = None,
@@ -470,44 +549,126 @@ class Storix:
             for entry in self.scandir(path, all=all)
         ]
 
+    def _list_children(self, target: StorixPath, *, all: bool) -> list[DirEntry]:
+        """Materialize one directory's entries, hidden-filtered like ``scandir``.
+
+        The ``walk`` frontier thunk. Materialization is deliberate: the
+        sync flavor runs thunks on a pool thread, and a lazily returned
+        iterator would defer its I/O back onto the caller.
+
+        Args:
+            target: Resolved directory to list.
+            all: Include hidden (dot-prefixed) entries.
+        """
+        return [
+            DirEntry(
+                name=entry.name,
+                path=target / entry.name,
+                kind=PathKind.DIRECTORY if entry.is_dir else PathKind.FILE,
+                size=entry.size,
+            )
+            for entry in self._backend.list_dir(target)
+            if all or not pathops.is_hidden(entry.name)
+        ]
+
+    def _list_level(
+        self, frontier: Sequence[StorixPath], *, all: bool
+    ) -> Iterator[DirEntry]:
+        """List one walk frontier concurrently, in stable submission order.
+
+        The frontier execution of ADR 0028: the level's directories are
+        listed through ``concurrent`` in chunks of at most
+        ``DEFAULT_CONCURRENCY`` thunks, entries streaming out in frontier
+        order with each listing's backend order intact. Completion timing
+        never reorders results, and the first error propagates unwrapped.
+
+        Args:
+            frontier: Resolved directories forming one traversal level.
+            all: Include hidden (dot-prefixed) entries.
+        """
+        for chunk in batched(frontier, DEFAULT_CONCURRENCY):
+            listings = concurrent(
+                partial(self._list_children, directory, all=all) for directory in chunk
+            )
+            for listing in listings:
+                yield from listing
+
     def walk(
         self,
         path: StrPathLike | None = None,
         *,
         all: bool = False,
         top_down: bool = True,
+        max_depth: int | None = None,
     ) -> Iterator[DirEntry]:
         """Lazily yield every descendant entry, recursively (after ``os.walk``).
 
         The recursive sibling of ``scandir`` (one directory): streams a
         :class:`~storix.models.DirEntry` per descendant of ``path``, never
-        the starting directory itself. ``top_down=True`` yields a directory
-        before its children (pre-order, for search and tree rendering);
-        ``top_down=False`` yields the children first (post-order, so a
-        consumer can accumulate a subtree before seeing its root, as ``du``
-        does). Recursion is sequential and lazy - nothing below a directory
-        is read until it is reached. Hidden (dot-prefixed) entries are
-        excluded unless ``all`` is set, and hidden directories are not
-        descended into. See ``find`` for filtering and ``glob`` for
-        pattern matching over this walk.
+        the starting directory itself. Traversal is level-buffered and
+        concurrent (ADR 0028): each level's directories are listed together
+        through the bounded ``concurrent`` helper in chunks of at most
+        ``DEFAULT_CONCURRENCY``, so a wide remote tree costs roughly the
+        slowest listing per chunk instead of the sum of every directory
+        latency. The ordering contract is relational, not depth-first:
+        ``top_down=True`` yields every directory before any of its
+        descendants, emitting each level whole in stable parent/listing
+        order; ``top_down=False`` yields every descendant before its
+        ancestor, streaming file leaves as levels are read and emitting
+        the retained directory entries deepest level first (so a consumer
+        can accumulate a subtree before seeing its root, as ``du`` does).
+        Hidden (dot-prefixed) entries are excluded, and hidden directories
+        are neither listed nor descended into, unless ``all`` is set. See
+        ``find`` for filtering and ``glob`` for pattern matching over
+        this walk.
 
         Args:
             path: Directory to walk; the session cwd when None.
             all: Include (and descend into) hidden entries.
-            top_down: Yield a directory before its children when True,
+            top_down: Yield a directory before its descendants when True,
                 after them when False.
+            max_depth: Deepest level to include, counted from ``path``
+                (1 = immediate children only, 0 = nothing); None means
+                unbounded. Enforced before a directory is listed, so
+                excluded levels cost no backend calls.
 
         Raises:
+            ValueError: If ``max_depth`` is negative.
             PathNotFoundError: If ``path`` does not exist.
         """
-        for entry in self.scandir(path, all=all):
-            if not entry.is_dir:
-                yield entry
-                continue
-            if top_down:
-                yield entry
-            yield from self.walk(entry.path, all=all, top_down=top_down)
-            if not top_down:
+        if max_depth is not None and max_depth < 0:
+            message = f'max_depth must be non-negative, got {max_depth}'
+            raise ValueError(message)
+        target = self._resolve(path)
+        raw = self._backend.stat(target)
+        if raw.kind is PathKind.FILE:
+            # mirror scandir: walking a file yields that one entry
+            yield DirEntry(name=target.name, path=target, kind=raw.kind, size=raw.size)
+            return
+
+        retained: list[list[DirEntry]] = []
+        frontier: list[StorixPath] = [target] if max_depth != 0 else []
+        depth = 0
+        while frontier:
+            depth += 1
+            descend = max_depth is None or depth < max_depth
+            next_frontier: list[StorixPath] = []
+            level_dirs: list[DirEntry] = []
+            for entry in self._list_level(frontier, all=all):
+                if not entry.is_dir:
+                    yield entry
+                    continue
+                if descend:
+                    next_frontier.append(entry.path)
+                if top_down:
+                    yield entry
+                else:
+                    level_dirs.append(entry)
+            if level_dirs:
+                retained.append(level_dirs)
+            frontier = next_frontier
+        for level in reversed(retained):
+            for entry in level:
                 yield entry
 
     def find(

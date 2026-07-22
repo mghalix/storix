@@ -121,6 +121,11 @@ class LayerBase:
         async for entry in self._inner.list_dir(path):
             yield entry
 
+    async def list_tree(self, path: PurePosixPath) -> AsyncIterator[PurePosixPath]:
+        """Yield every descendant path under a directory (bulk_listing)."""
+        async for descendant in self._inner.list_tree(path):
+            yield descendant
+
     async def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts about a path."""
         return await self._inner.stat(path)

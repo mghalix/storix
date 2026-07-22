@@ -193,6 +193,32 @@ def test_tree_long_shows_sizes():
     assert '5' in out  # the file's size column
 
 
+def test_tree_delegates_traversal_to_core_walk(monkeypatch):
+    """tree renders over one core ``walk`` (ADR 0028): it maps -L onto
+    ``max_depth`` and never recurses over ``scandir`` itself."""
+    _small_project()
+    walk_calls: list[dict] = []
+    real_walk = Storix.walk
+
+    def counting_walk(self, *args, **kwargs):
+        walk_calls.append(kwargs)
+        return real_walk(self, *args, **kwargs)
+
+    def forbidden_scandir(self, *args, **kwargs):
+        message = 'tree must not traverse via scandir'
+        raise AssertionError(message)
+
+    monkeypatch.setattr(Storix, 'walk', counting_walk)
+    monkeypatch.setattr(Storix, 'scandir', forbidden_scandir)
+
+    result = run('tree', '-L', '2', '/proj')
+
+    assert result.exit_code == 0
+    assert 'main.py' in result.stdout
+    assert len(walk_calls) == 1  # one core walk carries the traversal
+    assert walk_calls[0].get('max_depth') == 2
+
+
 def test_data_url_works_but_presigned_needs_capability():
     run('echo', 'hi', '-f', '/a.txt')
     assert run('url', '--data', '/a.txt').stdout.startswith('data:')

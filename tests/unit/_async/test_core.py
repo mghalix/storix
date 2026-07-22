@@ -6,7 +6,7 @@ import pytest
 from storix._async import Storix
 from storix._async.backends.local import LocalBackend
 from storix._async.backends.memory import MemoryBackend
-from storix.constants import DEFAULT_READ_CHUNK_SIZE
+from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_READ_CHUNK_SIZE
 from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
@@ -265,6 +265,95 @@ async def test_is_empty_missing_raises(fs: Storix):
         await fs.is_empty('/nope')
 
 
+# --- empty_children (bulk emptiness) ---
+#
+# The fs fixture runs each case against memory (advertises bulk_listing, the
+# one-request fast path) and local (does not, the concurrent fallback), so a
+# single assertion pins both paths to the same answer.
+
+
+async def test_empty_children_reports_each_child(fs: Storix):
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
+async def test_empty_children_honors_explicit_names(fs: Storix):
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d', names=['full']) == {'full': False}
+
+
+async def test_empty_children_with_names_uses_one_bulk_listing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    backend = MemoryBackend()
+    fs = Storix(backend)
+    await fs.mkdir('/d/empty', parents=True)
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    calls = 0
+    list_tree = backend.list_tree
+
+    async def counting_list_tree(path: P):
+        nonlocal calls
+        calls += 1
+        async for descendant in list_tree(path):
+            yield descendant
+
+    monkeypatch.setattr(backend, 'list_tree', counting_list_tree)
+
+    assert await fs.empty_children('/d', names=['empty', 'full']) == {
+        'empty': True,
+        'full': False,
+    }
+    assert calls == 1
+
+
+async def test_empty_children_ignores_file_children(fs: Storix):
+    await fs.mkdir('/d')
+    await fs.touch('/d/a.txt')
+    # only a file child: nothing to report emptiness for
+    assert await fs.empty_children('/d') == {}
+
+
+async def test_empty_children_counts_a_nested_subdir_as_nonempty(fs: Storix):
+    # a child holding only a subdirectory is non-empty, exactly like is_empty
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/holder/sub', parents=True)
+    assert await fs.empty_children('/d') == {'holder': False}
+
+
+async def test_empty_children_still_correct_beyond_key_bound(
+    fs: Storix, monkeypatch: pytest.MonkeyPatch
+):
+    # a tiny bound forces the fast path to bail mid-listing; the concurrent
+    # fallback must still return the right answer
+    monkeypatch.setattr('storix._async.core.BULK_LISTING_KEY_LIMIT', 1)
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
+async def test_empty_children_falls_back_without_capability():
+    import dataclasses
+
+    backend = MemoryBackend()
+    backend.capabilities = dataclasses.replace(backend.capabilities, bulk_listing=False)
+    fs = Storix(backend)
+    await fs.mkdir('/d')
+    await fs.mkdir('/d/empty')
+    await fs.mkdir('/d/full')
+    await fs.touch('/d/full/a.txt')
+    assert await fs.empty_children('/d') == {'empty': True, 'full': False}
+
+
 # --- walk / find / glob ---
 
 
@@ -277,6 +366,33 @@ async def _nested_tree(fs: Storix) -> None:
     await fs.echo(b'a', '/pkg/mod.py')
     await fs.echo(b'bb', '/pkg/sub/deep.py')
     await fs.echo(b'ccc', '/pkg/readme.txt')
+
+
+class RecordingBackend(MemoryBackend):
+    """A MemoryBackend that records every ``list_dir`` target."""
+
+    def __init__(self):
+        super().__init__()
+        self.listed: list[str] = []
+
+    async def list_dir(self, path):
+        self.listed.append(str(path))
+        async for entry in super().list_dir(path):
+            yield entry
+
+
+class FailingListBackend(MemoryBackend):
+    """A MemoryBackend whose listing of one directory always fails."""
+
+    def __init__(self, broken: str):
+        super().__init__()
+        self.broken = broken
+
+    async def list_dir(self, path):
+        if str(path) == self.broken:
+            raise PathNotFoundError(path)
+        async for entry in super().list_dir(path):
+            yield entry
 
 
 async def test_walk_recurses_into_every_descendant(fs: Storix):
@@ -323,6 +439,114 @@ async def test_walk_excludes_hidden_and_does_not_descend_them_unless_all(
     assert '.env' not in visible and '.git' not in visible
     assert 'config' not in visible  # a hidden directory is not descended
     assert {'.env', '.git', 'config'} <= every
+
+
+async def test_walk_top_down_emits_whole_levels_in_listing_order(fs: Storix):
+    await _nested_tree(fs)
+
+    level_one = [e.name async for e in fs.scandir('/pkg')]
+    walked = [e.name async for e in fs.walk('/pkg')]
+
+    # the first level arrives whole, in scandir's listing order, before
+    # anything deeper; completion timing cannot reorder it (``concurrent``
+    # returns listings in submission order).
+    assert walked == [*level_one, 'deep.py']
+
+
+async def test_walk_post_order_emits_directories_deepest_first(fs: Storix):
+    await fs.mkdir('/a/b/c', parents=True)
+
+    names = [e.name async for e in fs.walk('/', top_down=False)]
+
+    assert names == ['c', 'b', 'a']
+
+
+async def test_walk_max_depth_one_includes_only_immediate_children(fs: Storix):
+    await _nested_tree(fs)
+
+    names = {e.name async for e in fs.walk('/pkg', max_depth=1)}
+
+    assert names == {'sub', 'mod.py', 'readme.txt'}
+
+
+async def test_walk_negative_max_depth_raises(fs: Storix):
+    with pytest.raises(ValueError, match='max_depth'):
+        _ = [entry async for entry in fs.walk('/', max_depth=-1)]
+
+
+async def test_walk_max_depth_zero_yields_nothing_and_lists_nothing():
+    backend = RecordingBackend()
+    fs = Storix(backend)
+    await fs.mkdir('/pkg/sub', parents=True)
+
+    backend.listed.clear()
+
+    assert [entry async for entry in fs.walk('/pkg', max_depth=0)] == []
+    assert backend.listed == []
+
+
+async def test_walk_max_depth_stops_excluded_listings_before_the_backend():
+    backend = RecordingBackend()
+    fs = Storix(backend)
+    await fs.mkdir('/pkg/sub/deep', parents=True)
+
+    backend.listed.clear()
+    _ = [entry async for entry in fs.walk('/pkg', max_depth=1)]
+
+    assert backend.listed == ['/pkg']  # /pkg/sub is never listed
+
+
+async def test_walk_does_not_list_hidden_directories_unless_all():
+    backend = RecordingBackend()
+    fs = Storix(backend)
+    await fs.mkdir('/pkg/.git', parents=True)
+    await fs.touch('/pkg/.git/config')
+
+    backend.listed.clear()
+    _ = [entry async for entry in fs.walk('/pkg')]
+    assert '/pkg/.git' not in backend.listed
+
+    backend.listed.clear()
+    _ = [entry async for entry in fs.walk('/pkg', all=True)]
+    assert '/pkg/.git' in backend.listed
+
+
+async def test_walk_lists_each_level_through_bounded_concurrent_batches(monkeypatch):
+    """Sibling listings are handed to ``concurrent`` together, chunked.
+
+    One level's directories go out as whole chunks of at most
+    DEFAULT_CONCURRENCY thunks per ``concurrent`` call - never one call
+    per directory, never an unbounded batch. The overlap and in-flight
+    ceiling inside a chunk are ``concurrent``'s own tested semantics.
+    """
+    from storix._async import core as engine
+
+    fs = Storix(MemoryBackend())
+    width = DEFAULT_CONCURRENCY + 3
+    await fs.mkdir('/pkg')
+    await fs.mkdir(*(f'/pkg/d{i:03d}' for i in range(width)))
+
+    batches: list[int] = []
+    real = engine.concurrent
+
+    async def recording(thunks, **kwargs):
+        materialized = list(thunks)
+        batches.append(len(materialized))
+        return await real(materialized, **kwargs)
+
+    monkeypatch.setattr(engine, 'concurrent', recording)
+
+    _ = [entry async for entry in fs.walk('/pkg')]
+
+    assert batches == [1, DEFAULT_CONCURRENCY, 3]
+
+
+async def test_walk_propagates_backend_errors_unwrapped():
+    fs = Storix(FailingListBackend('/pkg/sub'))
+    await fs.mkdir('/pkg/sub', parents=True)
+
+    with pytest.raises(PathNotFoundError):
+        _ = [entry async for entry in fs.walk('/')]
 
 
 async def test_find_filters_by_name_glob(fs: Storix):

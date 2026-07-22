@@ -19,6 +19,7 @@ capabilities are derived from what the chosen service actually supports.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final
 
 from storix._async._stream import batch_chunks, resolve_chunk_size
@@ -58,7 +59,6 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Mapping
-    from pathlib import PurePosixPath
 
     from opendal.types import Metadata
 
@@ -132,6 +132,7 @@ class OpendalBackend(BackendBase):
             content_type=cap.write_with_content_type,
             custom_metadata=cap.write_with_user_metadata,
             presigned_urls=cap.presign_read,
+            bulk_listing=cap.list_with_recursive,
         )
 
     @staticmethod
@@ -295,25 +296,66 @@ class OpendalBackend(BackendBase):
             raise _translate(exc, path) from exc
 
     async def list_dir(self, path: PurePosixPath) -> AsyncIterator[Entry]:
-        """Yield the direct children of a directory, sizes included."""
-        raw = await self.stat(path)
-        if raw.kind is PathKind.FILE:
-            raise NotADirectoryError(path)
+        """Yield the direct children of a directory, sizes included.
+
+        List-first: one real child proves a non-empty directory, so the
+        hot path is a single request. Only an empty (or failed) listing
+        falls back to ``stat`` to tell a missing path and a file from a
+        genuinely empty directory.
+        """
         key = self._dir_key(path)
         try:
             # materialized snapshot: iteration must tolerate deletions
-            entries = [entry async for entry in await self._op.list(key)]
+            listed = [entry async for entry in await self._op.list(key)]
         except _OPENDAL_ERRORS as exc:
+            await self._require_directory(path)  # missing/file win over exc
             raise _translate(exc, path) from exc
+        entries = [
+            entry
+            for entry in listed
+            # opendal lists the directory itself; the port does not
+            if entry.path.rstrip('/') != key.rstrip('/')
+        ]
+        if not entries:
+            await self._require_directory(path)
         for entry in entries:
-            if entry.path.rstrip('/') == key.rstrip('/'):
-                continue  # opendal lists the directory itself; the port does not
             is_dir = entry.metadata.is_dir
             yield Entry(
                 name=entry.name.rstrip('/'),
                 is_dir=is_dir,
                 size=None if is_dir else entry.metadata.content_length,
             )
+
+    async def _require_directory(self, path: PurePosixPath) -> None:
+        """Stat ``path`` and enforce that it is a directory.
+
+        Raises:
+            PathNotFoundError: If nothing lives at ``path``.
+            NotADirectoryError: If ``path`` is a file.
+        """
+        raw = await self.stat(path)
+        if raw.kind is PathKind.FILE:
+            raise NotADirectoryError(path)
+
+    async def list_tree(self, path: PurePosixPath) -> AsyncIterator[PurePosixPath]:
+        """Yield every descendant path via one recursive (delimiter-less) list.
+
+        Streams lazily so the core can stop at its key bound without
+        pulling the whole subtree into memory. opendal's directory-form
+        keys carry a trailing slash; the port yields slash-free absolute
+        paths and never the directory itself.
+        """
+        await self._require_directory(path)
+        prefix = self._dir_key(path)
+        try:
+            entries = await self._op.list(prefix, recursive=True)
+            async for entry in entries:
+                key = entry.path.rstrip('/')
+                if not key or key == prefix.rstrip('/'):
+                    continue  # opendal may list the directory itself
+                yield PurePosixPath('/') / key
+        except _OPENDAL_ERRORS as exc:
+            raise _translate(exc, path) from exc
 
     async def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
         """Create a directory (``parents=True`` behaves like mkdir -p).

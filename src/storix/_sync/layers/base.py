@@ -121,6 +121,10 @@ class LayerBase:
         """Yield the direct children of a directory."""
         yield from self._inner.list_dir(path)
 
+    def list_tree(self, path: PurePosixPath) -> Iterator[PurePosixPath]:
+        """Yield every descendant path under a directory (bulk_listing)."""
+        yield from self._inner.list_tree(path)
+
     def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts about a path."""
         return self._inner.stat(path)
