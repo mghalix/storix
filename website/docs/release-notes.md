@@ -1,5 +1,19 @@
 # Release Notes
 
+## [0.4.8] - 2026-07-22
+
+### What's Changed
+#### Features
+* feat(core): bulk emptiness from one recursive listing by @mghalix in https://github.com/mghalix/storix/pull/28
+* feat(core): level-buffered concurrent walk by @mghalix in https://github.com/mghalix/storix/pull/29
+* perf(backends): list-first list_dir, stat only to disambiguate by @mghalix in https://github.com/mghalix/storix/pull/30
+* perf(cli): concurrent push/pull transfers and batched mkdirs by @mghalix in https://github.com/mghalix/storix/pull/31
+* feat(cli): improve transfer setup and storage-root diagnostics by @mghalix in https://github.com/mghalix/storix/pull/32
+* feat: storage-root provisioning protocol and sx provision by @mghalix in https://github.com/mghalix/storix/pull/34
+#### Fixes
+* fix(core): restore unix depth-first walk emission over concurrent traversal by @mghalix in https://github.com/mghalix/storix/pull/33
+* fix(cli): complete push/pull second argument from the correct side by @mghalix in https://github.com/mghalix/storix/pull/35
+
 ## [0.4.7] - 2026-07-21
 
 Storix 0.4.7 brings major CLI usability and performance upgrades to `sx`, featuring
