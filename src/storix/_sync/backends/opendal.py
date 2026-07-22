@@ -288,25 +288,46 @@ class OpendalBackend(BackendBase):
             raise _translate(exc, path) from exc
 
     def list_dir(self, path: PurePosixPath) -> Iterator[Entry]:
-        """Yield the direct children of a directory, sizes included."""
-        raw = self.stat(path)
-        if raw.kind is PathKind.FILE:
-            raise NotADirectoryError(path)
+        """Yield the direct children of a directory, sizes included.
+
+        List-first: one real child proves a non-empty directory, so the
+        hot path is a single request. Only an empty (or failed) listing
+        falls back to ``stat`` to tell a missing path and a file from a
+        genuinely empty directory.
+        """
         key = self._dir_key(path)
         try:
             # materialized snapshot: iteration must tolerate deletions
-            entries = list(self._op.list(key))
+            listed = list(self._op.list(key))
         except _OPENDAL_ERRORS as exc:
+            self._require_directory(path)  # missing/file win over exc
             raise _translate(exc, path) from exc
+        entries = [
+            entry
+            for entry in listed
+            # opendal lists the directory itself; the port does not
+            if entry.path.rstrip('/') != key.rstrip('/')
+        ]
+        if not entries:
+            self._require_directory(path)
         for entry in entries:
-            if entry.path.rstrip('/') == key.rstrip('/'):
-                continue  # opendal lists the directory itself; the port does not
             is_dir = entry.metadata.is_dir
             yield Entry(
                 name=entry.name.rstrip('/'),
                 is_dir=is_dir,
                 size=None if is_dir else entry.metadata.content_length,
             )
+
+    def _require_directory(self, path: PurePosixPath) -> None:
+        """Stat ``path`` and enforce that it is a directory.
+
+        Raises:
+            PathNotFoundError: If nothing lives at ``path``.
+            NotADirectoryError: If ``path`` is a file.
+        """
+        raw = self.stat(path)
+        if raw.kind is PathKind.FILE:
+            raise NotADirectoryError(path)
 
     def list_tree(self, path: PurePosixPath) -> Iterator[PurePosixPath]:
         """Yield every descendant path via one recursive (delimiter-less) list.
@@ -316,9 +337,7 @@ class OpendalBackend(BackendBase):
         keys carry a trailing slash; the port yields slash-free absolute
         paths and never the directory itself.
         """
-        raw = self.stat(path)
-        if raw.kind is PathKind.FILE:
-            raise NotADirectoryError(path)
+        self._require_directory(path)
         prefix = self._dir_key(path)
         try:
             entries = self._op.list(prefix, recursive=True)

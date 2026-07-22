@@ -295,6 +295,11 @@ def test_list_dir_missing_raises(backend: StorageBackend):
             pass
 
 
+def test_list_dir_empty_directory_yields_nothing(backend: StorageBackend):
+    backend.make_dir(P('/d'), parents=False)
+    assert list(backend.list_dir(P('/d'))) == []
+
+
 def test_list_dir_tolerates_delete_during_iteration(backend: StorageBackend):
     backend.make_dir(P('/d'), parents=False)
     for name in ('a', 'b', 'c'):
