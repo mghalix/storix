@@ -62,7 +62,7 @@ from .state import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Generator, Iterator
     from pathlib import PurePosixPath
 
     from storix import Storix
@@ -198,6 +198,45 @@ def cd(path: Annotated[str | None, typer.Argument()] = None) -> None:
         _die('cd', exc)
 
 
+class _LevelBuffer:
+    """Group a top-down walk by parent, pulled one complete level at a time.
+
+    ``tree`` streams: it renders each line as soon as the walk has produced
+    enough of the tree to draw it, instead of materializing the whole
+    traversal first. Requires ``walk(order='level')``: only that order
+    emits each level whole in stable order, making entry depth monotone
+    non-decreasing, so the first entry deeper than a requested level (or
+    stream exhaustion) proves that level complete. The deeper entry is
+    buffered too; it belongs to its own level.
+    """
+
+    def __init__(self, walked: Iterator[DirEntry], root: StorixPath) -> None:
+        self._walked = walked
+        self._root_depth = len(root.parts)
+        self._grouped: defaultdict[StorixPath, list[DirEntry]] = defaultdict(list)
+        self._complete = 0
+        self._exhausted = False
+
+    def ensure_level(self, depth: int) -> None:
+        """Pull walk entries into the buffer until level ``depth`` is whole.
+
+        Raises:
+            StorageError: If the underlying walk fails mid-stream.
+        """
+        while not self._exhausted and self._complete < depth:
+            entry = next(self._walked, None)
+            if entry is None:
+                self._exhausted = True
+                return
+            self._grouped[entry.path.parent].append(entry)
+            depth_of = len(entry.path.parts) - self._root_depth
+            self._complete = max(self._complete, depth_of - 1)
+
+    def children_of(self, parent: StorixPath) -> list[DirEntry]:
+        """Already-buffered entries directly under ``parent``."""
+        return self._grouped.get(parent, [])
+
+
 def _sorted_entries(fs: Storix, entries: list[DirEntry], sort: str) -> list[DirEntry]:
     """Order a directory's entries for ``tree`` by the chosen key.
 
@@ -255,14 +294,13 @@ def tree(
     files: int = 0
 
     # one core walk carries the traversal (concurrent, depth-bounded);
-    # everything below is presentation over entries it already fetched.
+    # everything below is presentation over entries pulled on demand, so
+    # lines print while deeper levels are still being listed. order='level'
+    # keeps sibling groups contiguous, which _LevelBuffer's monotone-depth
+    # rule (and tree's sibling sorting) depends on.
     root = fs.resolve(path)
-    grouped: defaultdict[StorixPath, list[DirEntry]] = defaultdict(list)
-    try:
-        for entry in fs.walk(root, all=all_, max_depth=level):
-            grouped[entry.path.parent].append(entry)
-    except StorageError as exc:
-        _die('tree', exc)
+    walked = fs.walk(root, all=all_, max_depth=level, order='level')
+    buffer = _LevelBuffer(walked, root)
 
     def columns(entry: DirEntry) -> Text:
         """The eza-style 'kind size' prefix for -l, else nothing.
@@ -284,18 +322,22 @@ def tree(
 
     def render(parent: StorixPath, prefix: str, depth: int) -> None:
         nonlocal dirs, files
-        children = _sorted_entries(fs, grouped.get(parent, []), sort)
+        buffer.ensure_level(depth)
+        children = _sorted_entries(fs, buffer.children_of(parent), sort)
         for i, child in enumerate(children):
             last = i == len(children) - 1
             branch = '└── ' if last else '├── '
             if child.is_dir:
                 dirs += 1
                 expanded = level is None or depth < level
+                if expanded:
+                    # the empty/full glyph needs the child's own listing
+                    buffer.ensure_level(depth + 1)
                 # only claim empty/full when the walk actually looked inside
                 state = (
                     'closed'
                     if not expanded
-                    else dir_state_of(populated=bool(grouped.get(child.path)))
+                    else dir_state_of(populated=bool(buffer.children_of(child.path)))
                 )
                 label = entry_label(child, slash=False, dir_state=state)
                 console.print(columns(child) + Text(f'{prefix}{branch}') + label)
@@ -310,7 +352,7 @@ def tree(
     console.print(f'[bold blue]{root}[/bold blue]')
     try:
         render(root, '', 1)
-    except StorageError as exc:  # a stat batch for --sort can still fail
+    except StorageError as exc:  # the walk pull or a --sort stat batch can fail
         _die('tree', exc)
     d = _count_label(dirs, 'directory', 'directories')
     f = _count_label(files, 'file', 'files')
@@ -339,13 +381,14 @@ def find(
     if type_ is not None and kind is None:
         _die('find', ValueError(f"type must be 'f' or 'd', got {type_!r}"))
     try:
-        entries = list(fs.find(path, name=name, kind=kind, all=all_))
+        # print as the walk yields, like unix find; partial output before
+        # a mid-stream error is fine
+        for entry in fs.find(path, name=name, kind=kind, all=all_):
+            icon, style = entry_decor(entry)
+            text = f'{icon} {entry.path}' if icon else str(entry.path)
+            console.print(Text(text, style=style))
     except StorageError as exc:
         _die('find', exc)
-    for entry in entries:
-        icon, style = entry_decor(entry)
-        text = f'{icon} {entry.path}' if icon else str(entry.path)
-        console.print(Text(text, style=style))
 
 
 # --- creating / writing ---

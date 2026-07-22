@@ -65,6 +65,11 @@ type StrPathLike = os.PathLike[str] | str
 type StorageProvider = Literal['local', 'memory', 'azure', 's3', 'gcs']
 type EchoMode = Literal['w', 'a']
 
+type WalkOrder = Literal['dfs', 'level']
+"""Emission order of ``Storix.walk``. ``'dfs'`` (the default) yields exact
+depth-first output, the sequential-walk contract; ``'level'`` yields each
+traversal level whole, siblings contiguous in stable parent/listing order."""
+
 type PathKindStr = Literal['file', 'directory']
 """The string form of ``PathKind``, for ergonomic keyword args (``kind='file'``)
 that a type checker still guides. Kept in lockstep with the enum by

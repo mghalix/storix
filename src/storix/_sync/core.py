@@ -35,7 +35,13 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
     from storix._sync.backends import StorageBackend
-    from storix.types import DataBuffer, EchoMode, PathKindStr, StrPathLike
+    from storix.types import (
+        DataBuffer,
+        EchoMode,
+        PathKindStr,
+        StrPathLike,
+        WalkOrder,
+    )
 
 
 P = ParamSpec('P')
@@ -593,59 +599,29 @@ class Storix:
             for listing in listings:
                 yield from listing
 
-    def walk(
+    def _walk_by_level(
         self,
-        path: StrPathLike | None = None,
+        target: StorixPath,
         *,
-        all: bool = False,
-        top_down: bool = True,
-        max_depth: int | None = None,
+        all: bool,
+        top_down: bool,
+        max_depth: int | None,
     ) -> Iterator[DirEntry]:
-        """Lazily yield every descendant entry, recursively (after ``os.walk``).
+        """Emit the walk level by level (``order='level'``).
 
-        The recursive sibling of ``scandir`` (one directory): streams a
-        :class:`~storix.models.DirEntry` per descendant of ``path``, never
-        the starting directory itself. Traversal is level-buffered and
-        concurrent (ADR 0028): each level's directories are listed together
-        through the bounded ``concurrent`` helper in chunks of at most
-        ``DEFAULT_CONCURRENCY``, so a wide remote tree costs roughly the
-        slowest listing per chunk instead of the sum of every directory
-        latency. The ordering contract is relational, not depth-first:
-        ``top_down=True`` yields every directory before any of its
-        descendants, emitting each level whole in stable parent/listing
-        order; ``top_down=False`` yields every descendant before its
-        ancestor, streaming file leaves as levels are read and emitting
-        the retained directory entries deepest level first (so a consumer
-        can accumulate a subtree before seeing its root, as ``du`` does).
-        Hidden (dot-prefixed) entries are excluded, and hidden directories
-        are neither listed nor descended into, unless ``all`` is set. See
-        ``find`` for filtering and ``glob`` for pattern matching over
-        this walk.
+        ``top_down=True`` streams each level whole, in stable
+        parent/listing order, before the next level is listed.
+        ``top_down=False`` streams file leaves as levels are read and
+        emits the retained directory entries deepest level first. Only
+        the frontier and its listings are buffered.
 
         Args:
-            path: Directory to walk; the session cwd when None.
-            all: Include (and descend into) hidden entries.
+            target: Resolved directory to walk.
+            all: Include hidden (dot-prefixed) entries.
             top_down: Yield a directory before its descendants when True,
                 after them when False.
-            max_depth: Deepest level to include, counted from ``path``
-                (1 = immediate children only, 0 = nothing); None means
-                unbounded. Enforced before a directory is listed, so
-                excluded levels cost no backend calls.
-
-        Raises:
-            ValueError: If ``max_depth`` is negative.
-            PathNotFoundError: If ``path`` does not exist.
+            max_depth: Deepest level to include; None means unbounded.
         """
-        if max_depth is not None and max_depth < 0:
-            message = f'max_depth must be non-negative, got {max_depth}'
-            raise ValueError(message)
-        target = self._resolve(path)
-        raw = self._backend.stat(target)
-        if raw.kind is PathKind.FILE:
-            # mirror scandir: walking a file yields that one entry
-            yield DirEntry(name=target.name, path=target, kind=raw.kind, size=raw.size)
-            return
-
         retained: list[list[DirEntry]] = []
         frontier: list[StorixPath] = [target] if max_depth != 0 else []
         depth = 0
@@ -670,6 +646,143 @@ class Storix:
         for level in reversed(retained):
             for entry in level:
                 yield entry
+
+    def _walk_depth_first(
+        self,
+        target: StorixPath,
+        *,
+        all: bool,
+        top_down: bool,
+        max_depth: int | None,
+    ) -> Iterator[DirEntry]:
+        """Emit the walk in exact depth-first order (``order='dfs'``).
+
+        Fetching stays level-concurrent (``_list_level``); entries buffer
+        by parent as levels arrive and an explicit DFS cursor (a stack of
+        per-parent positions) drains every entry whose depth-first
+        position is settled once a level completes. A stall (a directory
+        reached before its listing has arrived) never blocks fetching:
+        the next level is listed, then the cursor resumes, so output
+        streams in leftmost-spine-first bursts while total wall time
+        stays that of the concurrent traversal.
+
+        Args:
+            target: Resolved directory to walk.
+            all: Include hidden (dot-prefixed) entries.
+            top_down: Yield a directory before its subtree when True
+                (pre-order), after it when False (post-order).
+            max_depth: Deepest level to include; None means unbounded.
+        """
+        root_len = len(target.parts)
+        grouped: dict[StorixPath, list[DirEntry]] = {}
+        # cursor frames: (children of one directory, next child index,
+        # the directory's own entry, emitted on pop in post-order)
+        stack: list[tuple[list[DirEntry], int, DirEntry | None]] = []
+        pending: DirEntry | None = None
+        frontier: list[StorixPath] = [target] if max_depth != 0 else []
+        fetched = 0
+        while frontier:
+            fetched += 1
+            descend = max_depth is None or fetched < max_depth
+            next_frontier: list[StorixPath] = []
+            for entry in self._list_level(frontier, all=all):
+                grouped.setdefault(entry.path.parent, []).append(entry)
+                if entry.is_dir and descend:
+                    next_frontier.append(entry.path)
+            frontier = next_frontier
+            if fetched == 1:
+                stack.append((grouped.pop(target, []), 0, None))
+            if pending is not None:  # the stalled listing just arrived
+                stack.append((grouped.pop(pending.path, []), 0, pending))
+                pending = None
+            while stack:
+                children, i, owner = stack.pop()
+                if i == len(children):  # frame drained: the subtree is done
+                    if not top_down and owner is not None:
+                        yield owner
+                    continue
+                stack.append((children, i + 1, owner))
+                entry = children[i]
+                depth = len(entry.path.parts) - root_len
+                into = entry.is_dir and (max_depth is None or depth < max_depth)
+                if top_down or not into:
+                    yield entry
+                if not into:
+                    continue
+                if depth < fetched:
+                    stack.append((grouped.pop(entry.path, []), 0, entry))
+                else:
+                    pending = entry  # its listing arrives with the next level
+                    break
+
+    def walk(
+        self,
+        path: StrPathLike | None = None,
+        *,
+        all: bool = False,
+        top_down: bool = True,
+        max_depth: int | None = None,
+        order: WalkOrder = 'dfs',
+    ) -> Iterator[DirEntry]:
+        """Lazily yield every descendant entry, recursively (after ``os.walk``).
+
+        The recursive sibling of ``scandir`` (one directory): streams a
+        :class:`~storix.models.DirEntry` per descendant of ``path``, never
+        the starting directory itself. Traversal is level-buffered and
+        concurrent (ADR 0028): each level's directories are listed together
+        through the bounded ``concurrent`` helper in chunks of at most
+        ``DEFAULT_CONCURRENCY``, so a wide remote tree costs roughly the
+        slowest listing per chunk instead of the sum of every directory
+        latency.
+
+        Emission order is ``order``, independent of that fetching. The
+        default ``'dfs'`` is exact depth-first output, the sequence the
+        sequential pre-0.4.8 walk produced: ``top_down=True`` yields a
+        directory immediately followed by its whole subtree (pre-order),
+        siblings in backend listing order, files and directories
+        interleaved as listed; ``top_down=False`` yields each directory
+        after its whole subtree (post-order), files as encountered.
+        ``'level'`` yields whole levels instead, siblings contiguous in
+        stable parent/listing order: ``top_down=True`` streams each level
+        before the next is listed; ``top_down=False`` streams file leaves
+        as levels are read and emits retained directory entries deepest
+        level first. Both orders issue identical backend calls; ``'dfs'``
+        buffers entries until their depth-first position is reached
+        (worst case the whole tree, entries are small), ``'level'``
+        buffers only the frontier and its listings.
+
+        Hidden (dot-prefixed) entries are excluded, and hidden directories
+        are neither listed nor descended into, unless ``all`` is set. See
+        ``find`` for filtering and ``glob`` for pattern matching over
+        this walk.
+
+        Args:
+            path: Directory to walk; the session cwd when None.
+            all: Include (and descend into) hidden entries.
+            top_down: Yield a directory before its descendants when True,
+                after them when False.
+            max_depth: Deepest level to include, counted from ``path``
+                (1 = immediate children only, 0 = nothing); None means
+                unbounded. Enforced before a directory is listed, so
+                excluded levels cost no backend calls.
+            order: Emission order: ``'dfs'`` (default) for exact
+                depth-first output, ``'level'`` for whole-level output.
+
+        Raises:
+            ValueError: If ``max_depth`` is negative.
+            PathNotFoundError: If ``path`` does not exist.
+        """
+        if max_depth is not None and max_depth < 0:
+            message = f'max_depth must be non-negative, got {max_depth}'
+            raise ValueError(message)
+        target = self._resolve(path)
+        raw = self._backend.stat(target)
+        if raw.kind is PathKind.FILE:
+            # mirror scandir: walking a file yields that one entry
+            yield DirEntry(name=target.name, path=target, kind=raw.kind, size=raw.size)
+            return
+        walker = self._walk_by_level if order == 'level' else self._walk_depth_first
+        yield from walker(target, all=all, top_down=top_down, max_depth=max_depth)
 
     def find(
         self,
