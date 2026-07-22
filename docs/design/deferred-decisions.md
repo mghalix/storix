@@ -389,26 +389,14 @@ concurrent-walk work above.
 
 ## Storage-root provisioning (`sx provision`)
 
-**What:** creating the backend's storage root - the S3/R2/GCS bucket, Azure
-Blob container, ADLS Gen2 filesystem - from storix, instead of pointing the
-user at provider tooling. ADR 0029 shipped the diagnostic half (a missing
-root raises `StorageRootNotFoundError` naming it); creation was deliberately
-left out.
-
-**Agreed shape when adopted:** a separate, optional control-plane protocol
-beside the port (e.g. `exists()` / `create()` implemented by capable
-backends), surfaced as an explicit, idempotent `sx provision [--if-missing]`.
-Absence of the protocol is the unsupported path for custom backends. It must
-never run implicitly at session start (a typo'd bucket name must fail, not
-materialize), and `mkdir` never pretends to create a root - it is not a
-filesystem operation. `StorageBackend` itself does not grow administration
-methods: credentials that allow object I/O often cannot create roots, and
-creation options (region, tier, HNS) are provider-specific. Living beside
-the backend keeps it reusable by library users and future front-ends (MCP,
-pathlike) without each re-implementing it.
-
-**Trigger:** a second concrete request for in-tool provisioning, or the
-agent/MCP story needing programmatic root setup.
+**Status:** adopted - see ADR 0030. Shipped as the optional
+`StorageProvisioner` protocol, `Storix.provision()`, and `sx provision`. The
+design narrowed from the sketch here once opendal was confirmed data-plane
+only: S3/R2/GCS/azblob roots cannot be created from storix (no control-plane
+SDKs are pulled in), so ADLS is the one native cloud provisioner, local/memory
+are trivial, and the opendal backends report it unsupported and point at
+provider tooling. Idempotent by default, so no `--if-missing`; the "unsupported"
+path is the absent protocol, surfaced as `UnsupportedOperationError`.
 
 ## Batch runner (`sx run commands.sx`)
 

@@ -38,6 +38,11 @@ These ship in the current release and are covered by the conformance suite.
 - Presigned URLs via `url()` on capable backends
 - Custom metadata on capable backends
 - Data URLs on any backend via `DataUrlLayer`
+- Storage-root provisioning via the optional `StorageProvisioner` protocol and
+  `provision()`: creates a missing ADLS filesystem idempotently; local/memory
+  report already-present; the opendal backends (S3/R2/GCS/Azure Blob) are
+  data-plane only and report it unsupported, pointing at provider tooling
+  (ADR 0030)
 
 ### Backends
 - **Local disk** - anchored at a base directory
@@ -74,6 +79,8 @@ These ship in the current release and are covered by the conformance suite.
 - Upload/download with progress bars via `ObservabilityLayer`
 - Nerd Font icons and coreutils-style output
 - Declarative layer stack via `storix.toml` / `pyproject.toml`
+- `sx provision` to create a missing storage root (ADLS only; unsupported on the
+  opendal backends)
 
 ---
 
@@ -125,12 +132,6 @@ Ideas that need a concrete use case or design pass before committing.
 ### Observability
 - Operation-level events (start/end/error) beyond transfer bytes
 - Telemetry hooks (OpenTelemetry integration)
-
-### Provisioning
-- Explicit storage-root provisioning (`sx provision`, an optional
-  control-plane protocol beside `StorageBackend`) - a missing root
-  currently raises a typed `StorageRootNotFoundError` pointing at the
-  provider's own tooling; see deferred-decisions for the agreed shape
 
 ### Agent and automation
 - Capability-stripped sessions (sandbox without path-unmask escape)
