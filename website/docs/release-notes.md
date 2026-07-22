@@ -2,17 +2,90 @@
 
 ## [0.4.8] - 2026-07-22
 
-### What's Changed
-#### Features
-* feat(core): bulk emptiness from one recursive listing by @mghalix in https://github.com/mghalix/storix/pull/28
-* feat(core): level-buffered concurrent walk by @mghalix in https://github.com/mghalix/storix/pull/29
-* perf(backends): list-first list_dir, stat only to disambiguate by @mghalix in https://github.com/mghalix/storix/pull/30
-* perf(cli): concurrent push/pull transfers and batched mkdirs by @mghalix in https://github.com/mghalix/storix/pull/31
-* feat(cli): improve transfer setup and storage-root diagnostics by @mghalix in https://github.com/mghalix/storix/pull/32
-* feat: storage-root provisioning protocol and sx provision by @mghalix in https://github.com/mghalix/storix/pull/34
-#### Fixes
-* fix(core): restore unix depth-first walk emission over concurrent traversal by @mghalix in https://github.com/mghalix/storix/pull/33
-* fix(cli): complete push/pull second argument from the correct side by @mghalix in https://github.com/mghalix/storix/pull/35
+## Highlights
+
+A performance release: cloud listing and traversal drop from N serial round
+trips to one bulk request or bounded concurrent batches, with unix ordering and
+streaming output preserved. Measured on a real Azure (ADLS) container, cold
+cache: `sx ls` went from ~2-3s on v0.4.7 to 0.35s (0.42s with icons). It also
+sharpens `sx` transfer setup - `push` scaffolds its remote destination, a
+missing bucket or container now fails with one actionable line instead of a raw
+provider dump - and adds explicit storage-root provisioning where a backend can
+create its own root.
+
+### Features
+
+- **Bulk emptiness** (#28): backends that can list a subtree in one request
+  advertise the new `bulk_listing` capability; `Storix.empty_children` derives a
+  whole listing's folder emptiness from a single recursive listing (bounded by a
+  10,000-key limit with a silent portable fallback). `sx ls` folder icons ride
+  it. New port method `list_tree`.
+- **Concurrent recursive traversal** (#29, ADR 0028): `walk` (and with it
+  `find`, `glob`, `du`, `sx tree`) now fetches directory listings level-wise
+  through bounded concurrent batches, so wide remote trees are bounded by
+  per-level latency instead of the sum of every directory latency. `walk` gains
+  an additive `max_depth` keyword; excluded levels cost zero backend calls
+  (`sx tree -L` rides it).
+- **Fewer listing round trips** (#30): the opendal-engine backends
+  (S3/GCS/Azure Blob) list first and stat only to disambiguate an empty result,
+  so a non-empty `list_dir` is 1 request instead of 3. The native Azure (ADLS)
+  backend drops to exactly 1 request for every `list_dir`, from 2.
+- **Concurrent push/pull** (#31): `sx push`/`sx pull` transfer directory files
+  through bounded concurrent batches instead of a serial loop, create each
+  unique parent directory once instead of once per file, and the progress bar
+  tallies interleaved events correctly (a per-path cumulative sum) so it
+  advances monotonically.
+- **`sx push` scaffolds its destination** (#32): single-file `sx push` now
+  creates missing destination parents inside the storage root before
+  transferring, matching directory push, so `sx push ./video.mp4
+  /demos/video.mp4` works with no prior `mkdir`. (`push` never creates the
+  bucket or container itself.)
+- **Concise missing-storage-root errors** (#32): a missing S3/R2 bucket, Azure
+  Blob container, or ADLS Gen2 filesystem now fails with one actionable line
+  (`configured s3 bucket 'media' does not exist`) via the new typed
+  `StorageRootNotFoundError`, instead of a raw provider/OpenDAL diagnostic dump.
+- **`sx --debug`** (#32): a global flag that prints the full provider traceback
+  (original exception, request IDs, HTTP context, nested causes) behind the
+  concise error.
+- **Storage-root provisioning** (#34, ADR 0030): a new optional `provisioning`
+  capability with `sx provision` and `fs.provision()` creates a missing storage
+  root idempotently. Honest scope - real only where the backend engine can do
+  it: ADLS creates a missing filesystem; local and memory report
+  already-present; the opendal backends (S3/R2/GCS/Azure Blob) are data-plane
+  only and report it unsupported, pointing at your provider's own tooling
+  (`aws s3 mb`, `gcloud storage buckets create`, `az storage container
+  create`). `sx mkdir` never creates a root.
+
+### Fixes
+
+- **Unix ordering and streaming restored** (#33): `walk` emits exact depth-first
+  order (byte-identical to v0.4.7) over the new concurrent fetching, so
+  `find`/`glob`/`du` mirror the old order, and `sx tree`/`sx find` stream output
+  progressively instead of waiting for the full traversal. `order='level'`
+  remains an opt-in for sibling-contiguous consumption.
+- **Missing container/filesystem no longer misreported** (#32): a missing Azure
+  Blob container or ADLS Gen2 filesystem surfaced as `PathNotFoundError: path
+  '/' does not exist`; it now reports the missing storage root correctly.
+- **Directory `push` surfaces real errors** (#32): a failed remote `mkdir`
+  during directory push (permission denied, an intermediate file, a missing
+  bucket) now fails loudly instead of being silently swallowed.
+- **Shell completion side**: in the interactive `sx` shell, tab-completing the
+  second argument of `push` and `pull` completed from the wrong side (local vs
+  remote); it now completes the correct namespace.
+
+### Compatibility
+
+Fully backward-compatible with v0.4.7. `walk` ordering is unchanged; `max_depth`
+and `order` are additive keyword-only arguments; the `bulk_listing` and
+`provisioning` capabilities plus the `list_tree` and `provision` port methods
+default off (with raising `BackendBase` defaults), so custom backends
+subclassing `BackendBase` keep working and all additions are invisible to
+existing callers. No API removals. One failure-path nuance: a missing Azure Blob
+container or ADLS Gen2 filesystem now raises `StorageRootNotFoundError` (a
+`ConfigurationError`) where it previously raised `PathNotFoundError` - a
+corrected misdiagnosis, not a change to any success path. PATCH under ADR 0021;
+pin `storix>=0.4,<0.5`.
+
 
 ## [0.4.7] - 2026-07-21
 
