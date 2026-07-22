@@ -219,6 +219,38 @@ def test_tree_delegates_traversal_to_core_walk(monkeypatch):
     assert walk_calls[0].get('max_depth') == 2
 
 
+def test_tree_streams_lines_while_walking(monkeypatch):
+    """tree prints progressively while the walk runs: at least one line
+    lands before the deepest directory is even listed, instead of the
+    whole traversal completing first (unix tree streams the same way)."""
+    # Given a 3-level tree on a backend that logs every list_dir call
+    events: list[tuple[str, str]] = []
+
+    class RecordingBackend(MemoryBackend):
+        def list_dir(self, path):
+            events.append(('list', str(path)))
+            return super().list_dir(path)
+
+    cli.use_fs(Storix(RecordingBackend()))
+    run('mkdir', '-p', '/a/b/c')
+    run('touch', '/a/b/c/f.txt')
+
+    class RecordingConsole:
+        def print(self, *args, **kwargs):
+            events.append(('print', str(args[0]) if args else ''))
+
+    monkeypatch.setattr(cli, 'console', RecordingConsole())
+    events.clear()
+
+    # When tree renders the whole hierarchy
+    assert run('tree', '/').exit_code == 0
+
+    # Then some output precedes the deepest directory's listing
+    first_print = next(i for i, (kind, _) in enumerate(events) if kind == 'print')
+    deepest_list = events.index(('list', '/a/b/c'))
+    assert first_print < deepest_list
+
+
 def test_data_url_works_but_presigned_needs_capability():
     run('echo', 'hi', '-f', '/a.txt')
     assert run('url', '--data', '/a.txt').stdout.startswith('data:')
