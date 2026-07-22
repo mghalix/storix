@@ -160,6 +160,37 @@ class ConfigurationError(StorageError):
     """
 
 
+class StorageRootNotFoundError(ConfigurationError):
+    """The backend's configured storage root does not exist.
+
+    The root is the namespace the backend is anchored to - an S3/GCS
+    bucket, an Azure Blob container, an ADLS Gen2 filesystem. Its name is
+    configuration validated lazily by the provider on first I/O, which is
+    why this is a :class:`ConfigurationError` and deliberately *not* a
+    :class:`PathError`: there is no offending port path (the namespace
+    itself is absent), and a handler that reacts to a missing *file* by
+    creating it must not fire for a missing bucket. Creating the root is
+    a control-plane operation for the provider's own tooling, not a
+    storix filesystem operation.
+    """
+
+    root: str
+    """The configured root's name, e.g. ``'media'``."""
+
+    root_kind: str
+    """Short descriptive phrase naming the root type in provider
+    vocabulary (``'s3 bucket'``, ``'azblob container'``, ``'azure
+    filesystem'``). For humans and logs; dispatch on the type, not
+    on this."""
+
+    def __init__(
+        self, root: str, *, kind: str = 'storage root', msg: str | None = None
+    ) -> None:
+        self.root = root
+        self.root_kind = kind
+        super().__init__(msg or f"configured {kind} '{root}' does not exist")
+
+
 class NonRemovableLayerError(StorageError):
     """``without_layer`` was asked to strip a layer that forbids removal.
 

@@ -6,12 +6,14 @@ import pytest
 
 from storix.errors import (
     AlreadyExistsError,
+    ConfigurationError,
     DirectoryNotEmptyError,
     IsADirectoryError,
     NotADirectoryError,
     PathNotFoundError,
     PermissionDeniedError,
     StorageError,
+    StorageRootNotFoundError,
     UnsupportedOperationError,
 )
 from storix.types import StorixPath
@@ -172,3 +174,37 @@ def test_unsupported_operation_default_message_mentions_operation():
 
 def test_unsupported_operation_custom_message_overrides_default():
     assert str(UnsupportedOperationError('x', 'boom')) == 'boom'
+
+
+def test_storage_root_not_found_caught_as_configuration_error():
+    """A missing bucket is lazily validated configuration (ADR 0029)."""
+    root = 'media'
+    with pytest.raises(ConfigurationError):
+        raise StorageRootNotFoundError(root, kind='s3 bucket')
+
+
+def test_storage_root_not_found_is_not_a_file_not_found():
+    """A handler that creates a missing *file* must not fire for a
+    missing bucket, so no FileNotFoundError dual inheritance.
+    """
+    e = StorageRootNotFoundError('media', kind='s3 bucket')
+    assert not isinstance(e, FileNotFoundError)
+    assert not isinstance(e, OSError)
+
+
+def test_storage_root_not_found_carries_root_facts():
+    e = StorageRootNotFoundError('media', kind='s3 bucket')
+    assert e.root == 'media'
+    assert e.root_kind == 's3 bucket'
+
+
+def test_storage_root_not_found_default_message_names_kind_and_root():
+    e = StorageRootNotFoundError('media', kind='s3 bucket')
+    assert str(e) == "configured s3 bucket 'media' does not exist"
+    assert str(StorageRootNotFoundError('media')) == (
+        "configured storage root 'media' does not exist"
+    )
+
+
+def test_storage_root_not_found_custom_message_overrides_default():
+    assert str(StorageRootNotFoundError('media', msg='boom')) == 'boom'
