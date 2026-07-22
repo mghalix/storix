@@ -66,35 +66,58 @@ N` avoids the remote calls it excludes instead of walking and filtering later.
 
 ### Ordering
 
-`top_down=True` emits a level's entries in stable parent/listing order, then
-moves to the next level. Every directory therefore appears before all of its
-descendants. Exact depth-first order is no longer part of the contract.
+Emission order is decoupled from frontier fetching through an additive
+keyword (`type WalkOrder = Literal['dfs', 'level']`):
 
-`top_down=False` discovers the same frontiers, emits file leaves as they are
-read, and retains directory entries by depth. After traversal it emits
-directories from deepest level to shallowest, preserving stable order within a
-level. Every descendant is therefore emitted before its ancestor, which keeps
-`sx du`'s single-pass size propagation correct. This mode stores one
-`DirEntry` per directory until traversal completes; file entries remain
-streaming.
+```python
+walk(..., order: WalkOrder = 'dfs')
+```
 
-This is an observable ordering change from the current depth-first generator.
-Storix 0.x treats it as breaking and releases it under the 0.5 minor line per
-ADR 0021. The documented ordering contract becomes relational (ancestor before
-or after descendant), not a particular depth-first sibling sequence.
+The default `order='dfs'` is the exact depth-first contract of the
+sequential walk (storix 0.4.7 and earlier). `top_down=True` yields a
+directory immediately followed by its whole subtree, siblings in backend
+listing order, files and directories interleaved as listed.
+`top_down=False` yields files as encountered and each directory only
+after its entire subtree, which keeps `sx du`'s single-pass size
+propagation correct. Entries buffer per parent as fetched levels arrive,
+and an explicit depth-first cursor drains every entry whose position is
+settled each time a level completes. A stalled cursor never blocks
+fetching, so total wall time stays that of the concurrent traversal while
+output streams in leftmost-spine-first bursts. The cost is honest
+buffering: entries are held until their depth-first position is reached,
+worst case the whole tree (entries are small: name, path, kind, size).
+
+`order='level'` emits what the traversal fetches, level by level, and
+buffers only the frontier and its listings. `top_down=True` emits a
+level's entries whole in stable parent/listing order before the next
+level is listed, so sibling groups arrive contiguous. `top_down=False`
+emits file leaves as levels are read, retains directory entries by depth,
+and after traversal emits directories from deepest level to shallowest,
+preserving stable order within a level.
+
+Relative to released storix (v0.4.7), the default contract is restored,
+not changed: the level-only emission existed only unreleased on main and
+never shipped. `order='dfs'` guarantees exact depth-first output;
+`order='level'` guarantees the relational contract (ancestor before or
+after descendant, whole levels at a time).
 
 ### Core consumers and CLI
 
-`find` and `glob` continue to filter the top-down walk. `sx du` continues to
-consume the post-order walk. All inherit frontier concurrency without their own
-thread or task management.
+`find` and `glob` continue to filter the top-down walk and `sx du` the
+post-order walk, all on the default `order='dfs'`, so their output keeps
+the unix depth-first order while inheriting frontier concurrency without
+their own thread or task management. `sx find` prints each entry as the
+walk yields it.
 
 `sx tree` deletes its `children_of`/recursive storage loop and calls
-`walk(max_depth=level)`. It may materialize the requested `DirEntry` stream to
-group siblings, apply `--sort name|time|size`, and draw branches; that is
-presentation over facts the core already fetched, not another traversal.
-Missing sizes or timestamps needed for a requested sort remain batched through
-the existing `stat_all` helper.
+`walk(max_depth=level, order='level')`, the one consumer of level
+emission: contiguous sibling groups are what sorting and branch glyphs
+need. It renders pull-driven rather than materializing the stream,
+buffering the walk one complete level at a time and printing each line as
+soon as its subtree membership is known. `--sort name|time|size` and
+branch drawing stay presentation over facts the core already fetched, not
+another traversal. Missing sizes or timestamps needed for a requested
+sort remain batched through the existing `stat_all` helper.
 
 Closing a walk or encountering an error leaves no orphan work. A frontier chunk
 finishes under `concurrent`'s existing semantics, then the first error in stable
@@ -107,6 +130,8 @@ generated flavors and prove:
 
 - sibling directory listings overlap and never exceed `DEFAULT_CONCURRENCY`;
 - top-down ancestors precede descendants and post-order reverses that relation;
+- the default order reproduces the sequential depth-first sequence exactly,
+  in both `top_down` modes;
 - `max_depth` prevents excluded backend calls;
 - hidden directories are neither yielded nor scheduled unless `all=True`;
 - completion timing does not reorder results;
@@ -137,10 +162,13 @@ every directory latency. Sync and async keep one source-level algorithm and use
 their audited `concurrent` twins. `tree`, `find`, `glob`, and `du` share one
 traversal and one error model.
 
-Costs: top-down walk buffers one frontier and its immediate listings;
-post-order walk additionally retains directory entries until the reverse-depth
-emission. Output order changes from depth-first to stable level order, requiring
-the 0.5 minor release. Deep single-child chains do not become faster, because
-they contain no independent directory listings to overlap.
+Costs: `order='level'` buffers one frontier and its immediate listings
+(post-order additionally retains directory entries until the
+reverse-depth emission); the default `order='dfs'` buffers entries until
+their depth-first position is reached, worst case the whole tree. Default
+output order is unchanged from released storix (v0.4.7), so the work
+ships as a backward-compatible change per ADR 0021, not under a new minor
+line. Deep single-child chains do not become faster, because they contain
+no independent directory listings to overlap.
 
 Implementation is staged. ADR acceptance precedes code changes.
