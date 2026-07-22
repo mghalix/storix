@@ -241,14 +241,20 @@ def tree(
     fs = _fs()
     if sort not in {'name', 'time', 'size'}:
         _die('tree', ValueError(f'sort must be name, time or size, got {sort!r}'))
+    if level is not None and level < 1:
+        _die('tree', ValueError(f'level must be at least 1, got {level}'))
     dirs: int = 1  # unix tree counts the root directory
     files: int = 0
 
-    def children_of(target: str) -> list[DirEntry]:
-        try:
-            return _sorted_entries(fs, list(fs.scandir(target, all=all_)), sort)
-        except StorageError as exc:
-            _die('tree', exc)
+    # one core walk carries the traversal (concurrent, depth-bounded);
+    # everything below is presentation over entries it already fetched.
+    root = fs.resolve(path)
+    grouped: defaultdict[StorixPath, list[DirEntry]] = defaultdict(list)
+    try:
+        for entry in fs.walk(root, all=all_, max_depth=level):
+            grouped[entry.path.parent].append(entry)
+    except StorageError as exc:
+        _die('tree', exc)
 
     def columns(entry: DirEntry) -> Text:
         """The eza-style 'kind size' prefix for -l, else nothing.
@@ -268,31 +274,36 @@ def tree(
             prefix.append(f'{human_size(size):>7}  ', style='green')
         return prefix
 
-    def walk(children: list[DirEntry], target: str, prefix: str, depth: int) -> None:
+    def render(parent: StorixPath, prefix: str, depth: int) -> None:
         nonlocal dirs, files
+        children = _sorted_entries(fs, grouped.get(parent, []), sort)
         for i, child in enumerate(children):
             last = i == len(children) - 1
             branch = '└── ' if last else '├── '
             if child.is_dir:
                 dirs += 1
-                inner = f'{target}/{child.name}'
-                expand = level is None or depth < level
-                sub = children_of(inner) if expand else []
-                # only claim empty/full when we actually looked inside
-                state = 'closed' if not expand else dir_state_of(populated=bool(sub))
+                expanded = level is None or depth < level
+                # only claim empty/full when the walk actually looked inside
+                state = (
+                    'closed'
+                    if not expanded
+                    else dir_state_of(populated=bool(grouped.get(child.path)))
+                )
                 label = entry_label(child, slash=False, dir_state=state)
                 console.print(columns(child) + Text(f'{prefix}{branch}') + label)
-                if expand:
-                    walk(sub, inner, prefix + ('    ' if last else '│   '), depth + 1)
+                if expanded:
+                    render(child.path, prefix + ('    ' if last else '│   '), depth + 1)
             else:
                 files += 1
                 console.print(
                     columns(child) + Text(f'{prefix}{branch}') + entry_label(child)
                 )
 
-    root = str(fs.resolve(path))
     console.print(f'[bold blue]{root}[/bold blue]')
-    walk(children_of(root), root, '', 1)
+    try:
+        render(root, '', 1)
+    except StorageError as exc:  # a stat batch for --sort can still fail
+        _die('tree', exc)
     d = _count_label(dirs, 'directory', 'directories')
     f = _count_label(files, 'file', 'files')
     console.print(f'\n{dirs} {d}, {files} {f}')
