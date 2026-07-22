@@ -1015,3 +1015,40 @@ async def test_predicates(fs: Storix):
     assert await fs.isdir('/d')
     assert not await fs.isdir('/a.txt')
     assert not await fs.isdir('/nope')
+
+
+# --- provisioning ---
+
+
+async def test_provision_on_capable_backend_reports_present():
+    # Given a session over a backend whose root is always present
+    fs = Storix(MemoryBackend())
+    # When provision runs, the capable backend answers directly
+    assert await fs.provision() is False
+
+
+async def test_provision_unsupported_backend_names_provider_tooling():
+    # Given a session over an opendal backend (data-plane only)
+    from storix._async.backends.opendal import OpendalBackend
+
+    fs = Storix(OpendalBackend('memory'))
+
+    # When provision runs, the core gate rejects it
+    with pytest.raises(UnsupportedOperationError) as exc_info:
+        await fs.provision()
+
+    # Then the error names the operation and points at provider tooling
+    assert exc_info.value.operation == 'provision'
+    assert 'control-plane' in str(exc_info.value)
+
+
+async def test_provision_targets_the_base_backend_under_layers():
+    # Given a capable backend wrapped in a sandbox layer
+    from storix._async import SandboxLayer
+
+    inner = MemoryBackend()
+    await inner.make_dir(P('/jail'), parents=False)
+    fs = Storix(SandboxLayer(inner, root='/jail'))
+
+    # When provision runs, it reaches the base backend beneath the layer
+    assert await fs.provision() is False

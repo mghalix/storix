@@ -287,6 +287,24 @@ def test_data_url_works_but_presigned_needs_capability():
     assert 'presigned_urls' in unsupported.stderr
 
 
+def test_provision_on_memory_reports_already_present():
+    # memory's root is always present: provision is an idempotent no-op
+    result = run('provision')
+    assert result.exit_code == 0
+    assert 'already present' in result.stdout
+
+
+def test_provision_unsupported_on_opendal_points_at_provider_tooling():
+    from storix.backends import S3Backend
+
+    # an opendal backend is data-plane only; construction is offline
+    # (credentials are validated on first I/O, which provision never reaches)
+    cli.use_fs(Storix(S3Backend('bucket', region='us-east-1')))
+    result = run('provision')
+    assert result.exit_code == 1
+    assert 'control-plane' in result.stderr  # points at provider tooling
+
+
 def test_apply_layers_composition_and_lookup():
     from storix import CacheLayer, SandboxLayer
     from storix.cli.state import apply_layers, cache_layer, layer_summary
