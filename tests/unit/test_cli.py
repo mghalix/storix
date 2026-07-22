@@ -251,6 +251,34 @@ def test_tree_streams_lines_while_walking(monkeypatch):
     assert first_print < deepest_list
 
 
+def test_find_streams_lines_while_walking(monkeypatch):
+    """find prints progressively while the walk runs: at least one line
+    lands before the deepest directory is even listed (unix find streams)."""
+    events: list[tuple[str, str]] = []
+
+    class RecordingBackend(MemoryBackend):
+        def list_dir(self, path):
+            events.append(('list', str(path)))
+            return super().list_dir(path)
+
+    cli.use_fs(Storix(RecordingBackend()))
+    run('mkdir', '-p', '/a/b/c')
+    run('touch', '/a/b/c/f.txt')
+
+    class RecordingConsole:
+        def print(self, *args, **kwargs):
+            events.append(('print', str(args[0]) if args else ''))
+
+    monkeypatch.setattr(cli, 'console', RecordingConsole())
+    events.clear()
+
+    assert run('find', '/').exit_code == 0
+
+    first_print = next(i for i, (kind, _) in enumerate(events) if kind == 'print')
+    deepest_list = events.index(('list', '/a/b/c'))
+    assert first_print < deepest_list
+
+
 def test_data_url_works_but_presigned_needs_capability():
     run('echo', 'hi', '-f', '/a.txt')
     assert run('url', '--data', '/a.txt').stdout.startswith('data:')

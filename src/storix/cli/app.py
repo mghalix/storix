@@ -193,10 +193,11 @@ class _LevelBuffer:
 
     ``tree`` streams: it renders each line as soon as the walk has produced
     enough of the tree to draw it, instead of materializing the whole
-    traversal first. The top-down walk emits each level whole in stable
-    order, so entry depth is monotone non-decreasing: the first entry
-    deeper than a requested level (or stream exhaustion) proves that level
-    complete. The deeper entry is buffered too; it belongs to its own level.
+    traversal first. Requires ``walk(order='level')``: only that order
+    emits each level whole in stable order, making entry depth monotone
+    non-decreasing, so the first entry deeper than a requested level (or
+    stream exhaustion) proves that level complete. The deeper entry is
+    buffered too; it belongs to its own level.
     """
 
     def __init__(self, walked: Iterator[DirEntry], root: StorixPath) -> None:
@@ -284,9 +285,12 @@ def tree(
 
     # one core walk carries the traversal (concurrent, depth-bounded);
     # everything below is presentation over entries pulled on demand, so
-    # lines print while deeper levels are still being listed.
+    # lines print while deeper levels are still being listed. order='level'
+    # keeps sibling groups contiguous, which _LevelBuffer's monotone-depth
+    # rule (and tree's sibling sorting) depends on.
     root = fs.resolve(path)
-    buffer = _LevelBuffer(fs.walk(root, all=all_, max_depth=level), root)
+    walked = fs.walk(root, all=all_, max_depth=level, order='level')
+    buffer = _LevelBuffer(walked, root)
 
     def columns(entry: DirEntry) -> Text:
         """The eza-style 'kind size' prefix for -l, else nothing.
@@ -367,13 +371,14 @@ def find(
     if type_ is not None and kind is None:
         _die('find', ValueError(f"type must be 'f' or 'd', got {type_!r}"))
     try:
-        entries = list(fs.find(path, name=name, kind=kind, all=all_))
+        # print as the walk yields, like unix find; partial output before
+        # a mid-stream error is fine
+        for entry in fs.find(path, name=name, kind=kind, all=all_):
+            icon, style = entry_decor(entry)
+            text = f'{icon} {entry.path}' if icon else str(entry.path)
+            console.print(Text(text, style=style))
     except StorageError as exc:
         _die('find', exc)
-    for entry in entries:
-        icon, style = entry_decor(entry)
-        text = f'{icon} {entry.path}' if icon else str(entry.path)
-        console.print(Text(text, style=style))
 
 
 # --- creating / writing ---

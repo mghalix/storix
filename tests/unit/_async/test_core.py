@@ -441,11 +441,11 @@ async def test_walk_excludes_hidden_and_does_not_descend_them_unless_all(
     assert {'.env', '.git', 'config'} <= every
 
 
-async def test_walk_top_down_emits_whole_levels_in_listing_order(fs: Storix):
+async def test_walk_level_order_emits_whole_levels_in_listing_order(fs: Storix):
     await _nested_tree(fs)
 
     level_one = [e.name async for e in fs.scandir('/pkg')]
-    walked = [e.name async for e in fs.walk('/pkg')]
+    walked = [e.name async for e in fs.walk('/pkg', order='level')]
 
     # the first level arrives whole, in scandir's listing order, before
     # anything deeper; completion timing cannot reorder it (``concurrent``
@@ -453,12 +453,53 @@ async def test_walk_top_down_emits_whole_levels_in_listing_order(fs: Storix):
     assert walked == [*level_one, 'deep.py']
 
 
-async def test_walk_post_order_emits_directories_deepest_first(fs: Storix):
+async def test_walk_level_order_post_order_emits_directories_deepest_first(
+    fs: Storix,
+):
     await fs.mkdir('/a/b/c', parents=True)
 
-    names = [e.name async for e in fs.walk('/', top_down=False)]
+    names = [e.name async for e in fs.walk('/', top_down=False, order='level')]
 
     assert names == ['c', 'b', 'a']
+
+
+async def _dfs_tree() -> Storix:
+    """A tree with sibling directories, for the exact-order tests.
+
+    /pkg/lib/inner/two.py, /pkg/lib/one.py, /pkg/bin/tool, /pkg/root.txt,
+    created in that order on a MemoryBackend, whose listing order is
+    insertion order; a deterministic reference the hardcoded expected
+    sequences depend on (local disk listing order is OS-dependent).
+    """
+    fs = Storix(MemoryBackend())
+    await fs.mkdir('/pkg/lib/inner', parents=True)
+    await fs.mkdir('/pkg/bin')
+    await fs.echo(b'1', '/pkg/lib/one.py')
+    await fs.echo(b'2', '/pkg/lib/inner/two.py')
+    await fs.echo(b'3', '/pkg/bin/tool')
+    await fs.echo(b'4', '/pkg/root.txt')
+    return fs
+
+
+async def test_walk_default_order_is_exact_pre_order():
+    """The default emission is the sequential pre-0.4.8 contract: each
+    directory immediately followed by its whole subtree, siblings in
+    backend listing order, files and directories interleaved as listed."""
+    fs = await _dfs_tree()
+
+    names = [e.name async for e in fs.walk('/pkg')]
+
+    assert names == ['lib', 'inner', 'two.py', 'one.py', 'bin', 'tool', 'root.txt']
+
+
+async def test_walk_default_order_is_exact_post_order():
+    """top_down=False keeps files in encounter order and emits every
+    directory only after its entire subtree, like the sequential walk."""
+    fs = await _dfs_tree()
+
+    names = [e.name async for e in fs.walk('/pkg', top_down=False)]
+
+    assert names == ['two.py', 'inner', 'one.py', 'lib', 'tool', 'bin', 'root.txt']
 
 
 async def test_walk_max_depth_one_includes_only_immediate_children(fs: Storix):
