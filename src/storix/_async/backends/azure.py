@@ -32,6 +32,7 @@ from storix.errors import (
     PathNotFoundError,
     PermissionDeniedError,
     StorageError,
+    StorageRootNotFoundError,
     UnsupportedOperationError,
 )
 from storix.models import Capabilities, Entry, RawStat
@@ -75,7 +76,6 @@ _HNS_HINT = (
 _ERROR_CODE_MAP: dict[str, type[StorageError]] = {
     'PathNotFound': PathNotFoundError,
     'BlobNotFound': PathNotFoundError,
-    'FilesystemNotFound': PathNotFoundError,
     'DirectoryNotEmpty': DirectoryNotEmptyError,
     'PathAlreadyExists': AlreadyExistsError,
     'BlobAlreadyExists': AlreadyExistsError,
@@ -111,7 +111,7 @@ class AzureBackend(BackendBase):
     The container is namespace configuration: port path ``/x`` maps to
     the container-relative path ``x``. The container is neither created
     nor validated at construction; operations against a missing one fail
-    with ``PathNotFoundError``.
+    with ``StorageRootNotFoundError`` naming it (ADR 0029).
     """
 
     capabilities: Capabilities = Capabilities(
@@ -171,6 +171,12 @@ class AzureBackend(BackendBase):
         host = f'{self._account_name}.dfs.core.windows.net'
         return f'abfss://{self.container}@{host}/{self._key(path)}'
 
+    def _error(self, exc: AzureError, path: PurePosixPath) -> StorageError:
+        """Translate an SDK failure, detecting a missing filesystem root."""
+        if str(getattr(exc, 'error_code', '') or '') == 'FilesystemNotFound':
+            return StorageRootNotFoundError(self.container, kind='azure filesystem')
+        return _translate(exc, path)
+
     async def read_stream(
         self, path: PurePosixPath, *, chunk_size: int | None = None
     ) -> AsyncIterator[bytes]:
@@ -190,7 +196,7 @@ class AzureBackend(BackendBase):
             async for chunk in split_chunks(download.chunks(), size):
                 yield chunk
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def write_stream(
         self,
@@ -235,7 +241,7 @@ class AzureBackend(BackendBase):
             if metadata is not None and not creating:
                 await client.set_metadata(dict(metadata))
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def delete(self, path: PurePosixPath) -> None:
         """Delete a leaf: a file or an *empty* directory.
@@ -254,7 +260,7 @@ class AzureBackend(BackendBase):
             else:
                 await self._filesystem.get_file_client(key).delete_file()
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def list_dir(self, path: PurePosixPath) -> AsyncIterator[Entry]:
         """Yield the direct children of a directory, sizes included.
@@ -278,7 +284,7 @@ class AzureBackend(BackendBase):
                     size=None if is_dir else item.content_length or 0,
                 )
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts about a path (directory sizes are 0)."""
@@ -297,7 +303,7 @@ class AzureBackend(BackendBase):
                 key
             ).get_file_properties()
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
         raw_metadata = dict(file_props.metadata or {})
         is_dir = bool(raw_metadata.pop('hdi_isfolder', None))
         return RawStat(
@@ -333,7 +339,7 @@ class AzureBackend(BackendBase):
         try:
             await self._filesystem.create_directory(self._key(path))
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def exists(self, path: PurePosixPath) -> bool:
         """Whether anything lives at ``path`` (native fast path)."""
@@ -343,7 +349,7 @@ class AzureBackend(BackendBase):
         try:
             return await self._filesystem.get_file_client(key).exists()
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def move(self, src: PurePosixPath, dst: PurePosixPath) -> None:
         """Move a file or directory tree via native (atomic) dfs rename."""
@@ -357,7 +363,7 @@ class AzureBackend(BackendBase):
                 file_client = self._filesystem.get_file_client(self._key(src))
                 await file_client.rename_file(new_name)
         except AzureError as exc:
-            raise _translate(exc, src) from exc
+            raise self._error(exc, src) from exc
 
     async def delete_tree(self, path: PurePosixPath) -> None:
         """Delete ``path`` and everything below it via native recursion."""
@@ -371,7 +377,7 @@ class AzureBackend(BackendBase):
         try:
             await self._filesystem.get_directory_client(key).delete_directory()
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def set_metadata(
         self, path: PurePosixPath, metadata: Mapping[str, str]
@@ -384,7 +390,7 @@ class AzureBackend(BackendBase):
             client = self._filesystem.get_file_client(self._key(path))
             await client.set_metadata(dict(metadata))
         except AzureError as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def make_url(
         self, path: PurePosixPath, *, expires_in: int | None = None

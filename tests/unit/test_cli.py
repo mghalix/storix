@@ -704,3 +704,87 @@ def test_transfer_progress_totals_interleaved_events(monkeypatch):
     # Then the bar sums per-path bytes: monotonic, ending at the true total
     assert updates[-1] == 8
     assert updates == sorted(updates)
+
+
+def test_push_file_creates_missing_remote_parents(tmp_path):
+    """Single-file push scaffolds nested destination parents (ADR 0029)."""
+    local_file = tmp_path / 'video.mp4'
+    local_file.write_text('stream')
+
+    res = run('push', str(local_file), '/storix/demos/video.mp4')
+
+    assert res.exit_code == 0
+    assert run('cat', '/storix/demos/video.mp4').stdout == 'stream'
+
+
+def test_push_file_with_existing_parent_overwrites_destination(tmp_path):
+    local_file = tmp_path / 'v.txt'
+    local_file.write_text('old')
+    run('mkdir', '-p', '/media')
+    assert run('push', str(local_file), '/media/v.txt').exit_code == 0
+
+    local_file.write_text('new')
+    res = run('push', str(local_file), '/media/v.txt')
+
+    assert res.exit_code == 0
+    assert run('cat', '/media/v.txt').stdout == 'new'
+
+
+def test_push_file_to_root_and_omitted_destination(tmp_path):
+    local_file = tmp_path / 'r.txt'
+    local_file.write_text('x')
+
+    assert run('push', str(local_file), '/r.txt').exit_code == 0
+    assert run('cat', '/r.txt').stdout == 'x'
+
+    run('mkdir', '/inbox')
+    run('cd', '/inbox')
+    assert run('push', str(local_file)).exit_code == 0  # dst = cwd/r.txt
+    assert run('cat', '/inbox/r.txt').stdout == 'x'
+
+
+def test_push_file_through_a_file_component_dies(tmp_path):
+    """unix mkdir -p faithful: a file as the immediate parent is 'already
+    exists'; a file deeper in the chain is 'not a directory'."""
+    local_file = tmp_path / 'v.txt'
+    local_file.write_text('x')
+    run('touch', '/blocker')
+
+    parent_is_file = run('push', str(local_file), '/blocker/v.txt')
+    assert parent_is_file.exit_code == 1
+    assert 'already exists' in parent_is_file.stderr
+
+    ancestor_is_file = run('push', str(local_file), '/blocker/deep/v.txt')
+    assert ancestor_is_file.exit_code == 1
+    assert 'not a directory' in ancestor_is_file.stderr
+
+
+def test_push_directory_mkdir_failure_is_not_swallowed(tmp_path, monkeypatch):
+    """A real mkdir failure (permission, missing bucket) must die, not be
+    suppressed into a confusing downstream write error (ADR 0029)."""
+    from storix.errors import PermissionDeniedError
+
+    local_dir = tmp_path / 'tree'
+    local_dir.mkdir()
+    (local_dir / 'a.txt').write_text('a')
+
+    def denied(path, *, parents):
+        raise PermissionDeniedError(path)
+
+    monkeypatch.setattr(cli.current_fs().backend, 'make_dir', denied)
+
+    res = run('push', str(local_dir), '/remote')
+
+    assert res.exit_code == 1
+    assert 'permission denied' in res.stderr
+
+
+def test_debug_flag_prints_the_exception_chain():
+    plain = run('cat', '/nope.txt')
+    assert 'Traceback' not in plain.stderr  # concise by default
+
+    res = run('--debug', 'cat', '/nope.txt')
+
+    assert res.exit_code == 1
+    assert 'Traceback' in res.stderr
+    assert 'does not exist' in res.stderr

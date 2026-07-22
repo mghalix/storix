@@ -29,6 +29,7 @@ StorageError                         # base for everything storix raises
 ├── UnsupportedOperationError        # backend lacks the requested capability
 ├── NonRemovableLayerError           # without_layer() asked to strip a boundary
 └── ConfigurationError               # backend configuration is invalid
+    └── StorageRootNotFoundError     # the configured bucket/container is absent
 ```
 
 ## Notes
@@ -43,5 +44,12 @@ StorageError                         # base for everything storix raises
   `removable = False`, notably `SandboxLayer`.
 - `ConfigurationError` covers factory configuration and settings that a lazy
   provider can validate only on first I/O, such as malformed Azure credentials.
+- `StorageRootNotFoundError` means the namespace the backend is anchored to -
+  an S3/GCS bucket, Azure Blob container, or ADLS Gen2 filesystem - does not
+  exist. It carries `.root` (the configured name) and `.root_kind` (a
+  descriptive phrase like `'s3 bucket'`). Deliberately not a
+  `FileNotFoundError`: no path inside the namespace is at fault, the
+  namespace itself is absent, and creating it belongs to your provider's
+  own tooling.
 - `from_os_error(exc, path)` translates a raw `OSError` into this taxonomy; it is
   the boundary helper filesystem-backed backends use.

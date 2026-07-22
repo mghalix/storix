@@ -34,6 +34,7 @@ from storix.errors import (
     PathNotFoundError,
     PermissionDeniedError,
     StorageError,
+    StorageRootNotFoundError,
     UnsupportedOperationError,
 )
 from storix.models import Capabilities, Entry, RawStat
@@ -94,6 +95,19 @@ def _translate(exc: Exception, path: PurePosixPath) -> StorageError:
     return StorageError(f"'{path}': {exc}")
 
 
+_MISSING_ROOT_CODES: Final[dict[str, tuple[str, str]]] = {
+    's3': ('NoSuchBucket', 'bucket'),
+    'azblob': ('ContainerNotFound', 'container'),
+}
+"""Per-service missing-root signal: the provider error code a missing
+bucket/container embeds in the message, and the root vocabulary for the
+error text (ADR 0029). String matching is unavoidable - opendal's Python
+exceptions carry no structured fields - so it is confined to this table
+and matches the quoted ``code: "..."`` token, never bare prose. gcs is
+absent until its real missing-bucket message is captured live; unmatched
+errors keep the generic translation."""
+
+
 class OpendalBackend(BackendBase):
     """Adapter over an `Apache OpenDAL <https://opendal.apache.org>`_ operator.
 
@@ -151,6 +165,21 @@ class OpendalBackend(BackendBase):
         prefix = self._options.get('root', '/').rstrip('/')
         return f'opendal+{self._service}://{authority}{prefix}{path}'
 
+    def _error(self, exc: Exception, path: PurePosixPath) -> StorageError:
+        """Translate an opendal failure, detecting a missing storage root."""
+        return self._missing_root(exc) or _translate(exc, path)
+
+    def _missing_root(self, exc: Exception) -> StorageRootNotFoundError | None:
+        """The failure as a missing-root error, when its provider code says so."""
+        entry = _MISSING_ROOT_CODES.get(self._service)
+        if entry is None:
+            return None
+        code, kind = entry
+        if f'code: "{code}"' not in str(exc):
+            return None
+        root = self._options.get('bucket') or self._options.get('container', '')
+        return StorageRootNotFoundError(root, kind=f'{self._service} {kind}')
+
     async def _stat_md(self, path: PurePosixPath) -> Metadata:
         """Fetch opendal metadata, trying the file key then the directory key.
 
@@ -164,9 +193,9 @@ class OpendalBackend(BackendBase):
             try:
                 return await self._op.stat(f'{key}/')
             except _OPENDAL_ERRORS as inner:
-                raise _translate(inner, path) from inner
+                raise self._error(inner, path) from inner
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     def _to_raw(self, md: Metadata) -> RawStat:
         """Shape opendal metadata into the port's RawStat."""
@@ -211,7 +240,7 @@ class OpendalBackend(BackendBase):
             finally:
                 await file.close()
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def write_stream(
         self,
@@ -248,7 +277,7 @@ class OpendalBackend(BackendBase):
                     payload += chunk
                 await self._op.write(key, payload, **options)
             except _OPENDAL_ERRORS as exc:
-                raise _translate(exc, path) from exc
+                raise self._error(exc, path) from exc
             return
 
         options = self._write_options(content_type, metadata)
@@ -260,7 +289,7 @@ class OpendalBackend(BackendBase):
             finally:
                 await file.close()
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     @staticmethod
     def _write_options(
@@ -293,7 +322,7 @@ class OpendalBackend(BackendBase):
             else:
                 await self._op.delete(key)
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def list_dir(self, path: PurePosixPath) -> AsyncIterator[Entry]:
         """Yield the direct children of a directory, sizes included.
@@ -309,7 +338,7 @@ class OpendalBackend(BackendBase):
             listed = [entry async for entry in await self._op.list(key)]
         except _OPENDAL_ERRORS as exc:
             await self._require_directory(path)  # missing/file win over exc
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
         entries = [
             entry
             for entry in listed
@@ -355,7 +384,7 @@ class OpendalBackend(BackendBase):
                     continue  # opendal may list the directory itself
                 yield PurePosixPath('/') / key
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
         """Create a directory (``parents=True`` behaves like mkdir -p).
@@ -399,7 +428,7 @@ class OpendalBackend(BackendBase):
         try:
             await self._op.create_dir(self._dir_key(path))
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def set_metadata(
         self, path: PurePosixPath, metadata: Mapping[str, str]
@@ -421,7 +450,7 @@ class OpendalBackend(BackendBase):
                 key, payload, user_metadata=dict(metadata) if metadata else None
             )
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
 
     async def make_url(
         self, path: PurePosixPath, *, expires_in: int | None = None
@@ -440,5 +469,5 @@ class OpendalBackend(BackendBase):
         try:
             request = await self._op.presign_read(self._key(path), expires_in)
         except _OPENDAL_ERRORS as exc:
-            raise _translate(exc, path) from exc
+            raise self._error(exc, path) from exc
         return request.url
