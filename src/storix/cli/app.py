@@ -8,9 +8,11 @@ The typer command surface only. Session state and stack access live in
 from __future__ import annotations
 
 import sys
+import threading
 
 from collections import defaultdict
 from contextlib import contextmanager, suppress
+from functools import partial
 from typing import TYPE_CHECKING, Annotated, NoReturn
 
 import typer
@@ -28,6 +30,7 @@ from rich.table import Table
 from rich.text import Text
 
 from storix import ObservabilityLayer, TransferEvent
+from storix._sync._compat import concurrent
 from storix.enums import PathKind
 from storix.errors import StorageError
 
@@ -58,6 +61,7 @@ from .state import (
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from pathlib import PurePosixPath
 
     from storix import Storix
     from storix.models import DirEntry, RawStat
@@ -565,6 +569,14 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
     caller already owns. The wrapped session starts at home, so callers
     must pass absolute paths.
 
+    The sink tracks cumulative bytes per path, so events from concurrently
+    transferring files may interleave in any order and the bar still shows
+    the true sum. Directory transfers run their per-file thunks through the
+    core ``concurrent`` helper, so the sink is called from worker threads:
+    rich's ``Progress.update`` takes its own internal ``RLock``, and our
+    lock keeps the tally read-modify-write and the bar update one atomic,
+    monotonic step.
+
     Args:
         fs: The session to wrap.
         label: Bar description, typically the file's basename.
@@ -584,17 +596,16 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
     ) as progress:
         task = progress.add_task(label, total=total)
 
-        overall_bytes = 0
-        last_file_bytes = 0
+        lock = threading.Lock()
+        seen: dict[PurePosixPath, int] = {}
+        completed = 0
 
         def on_event(event: TransferEvent) -> None:
-            nonlocal overall_bytes, last_file_bytes
-            if event.transferred < last_file_bytes:
-                last_file_bytes = 0
-            delta = event.transferred - last_file_bytes
-            last_file_bytes = event.transferred
-            overall_bytes += delta
-            progress.update(task, completed=overall_bytes)
+            nonlocal completed
+            with lock:
+                completed += event.transferred - seen.get(event.path, 0)
+                seen[event.path] = event.transferred
+                progress.update(task, completed=completed)
 
         yield fs.with_layer(
             ObservabilityLayer,
@@ -626,15 +637,24 @@ def pull(
         remote_files = [e for e in fs.walk(src, all=True) if not e.is_dir]
         stats = stat_all(fs, [e.path for e in remote_files])
         total_bytes = sum(s.size for s in stats)
+        targets = [(e.path, dst / e.path.relative_to(src)) for e in remote_files]
+        # each unique local parent once, not one mkdir per file
+        for parent in {out_path.parent for _, out_path in targets}:
+            parent.mkdir(parents=True, exist_ok=True)
         try:
             with _transfer_progress(fs, src.name, total_bytes) as obs:
-                for entry in remote_files:
-                    rel = entry.path.relative_to(src)
-                    out_path = dst / rel
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+                def fetch(remote_file: StorixPath, out_path: Path) -> None:
                     with out_path.open('wb') as out:
-                        for chunk in obs.stream(entry.path):
+                        for chunk in obs.stream(remote_file):
                             out.write(chunk)
+
+                # per-file streams batched through the core concurrent
+                # helper, not N serial round trips (see state.py)
+                concurrent(
+                    partial(fetch, remote_file, out_path)
+                    for remote_file, out_path in targets
+                )
         except StorageError as exc:
             _die('pull', exc)
         console.print(f'{remote} -> {dst} ({len(remote_files)} files)')
@@ -676,17 +696,18 @@ def push(
 
     if src.is_dir():
         dst = fs.resolve(remote) if remote else fs.pwd() / src.name
-        with suppress(StorageError):
-            fs.mkdir(dst, parents=True)
         files = [f for f in src.rglob('*') if f.is_file()]
         total_bytes = sum(f.stat().st_size for f in files)
+        targets = [(f, dst / f.relative_to(src)) for f in files]
+        # each unique remote directory once, in one core-batched mkdir,
+        # not one round-trip-heavy mkdir per file
+        dirs = {dst} | {remote_file.parent for _, remote_file in targets}
+        with suppress(StorageError):
+            fs.mkdir(*sorted(dirs), parents=True)
         try:
             with _transfer_progress(fs, src.name, total_bytes) as obs:
-                for file_path in files:
-                    rel_path = file_path.relative_to(src)
-                    remote_file = dst / rel_path
-                    with suppress(StorageError):
-                        fs.mkdir(remote_file.parent, parents=True)
+
+                def send(file_path: Path, remote_file: StorixPath) -> None:
                     with file_path.open('rb') as data:
                         content_type = None
                         if fs.backend.capabilities.content_type:
@@ -695,6 +716,13 @@ def push(
                             )
                             data.seek(0)
                         obs.echo(data, remote_file, content_type=content_type)
+
+                # per-file streams batched through the core concurrent
+                # helper, not N serial round trips (see state.py)
+                concurrent(
+                    partial(send, file_path, remote_file)
+                    for file_path, remote_file in targets
+                )
         except StorageError as exc:
             _die('push', exc)
         console.print(f'{local} -> {dst} ({len(files)} files)')
