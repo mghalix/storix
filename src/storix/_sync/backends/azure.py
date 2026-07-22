@@ -256,13 +256,18 @@ class AzureBackend(BackendBase):
             raise _translate(exc, path) from exc
 
     def list_dir(self, path: PurePosixPath) -> Iterator[Entry]:
-        """Yield the direct children of a directory, sizes included."""
-        raw = self.stat(path)
-        if raw.kind is PathKind.FILE:
-            raise NotADirectoryError(path)
+        """Yield the direct children of a directory, sizes included.
+
+        One request, no stat precheck: dfs list disambiguates every case
+        itself. A missing path raises ``PathNotFound``, an empty
+        directory lists nothing, and a *file* target lists exactly one
+        entry named like the target, which becomes NotADirectoryError.
+        """
         key = self._key(path)
         try:
             for item in self._filesystem.get_paths(path=key or None, recursive=False):
+                if item.name == key:
+                    raise NotADirectoryError(path)
                 is_dir = bool(item.is_directory)
                 yield Entry(
                     name=PurePosixPath(item.name).name,
