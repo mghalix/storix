@@ -553,3 +553,94 @@ def test_push_and_pull_directory_recursive(tmp_path):
     assert res_pull.exit_code == 0
     assert (dest_dir / 'a.txt').read_text() == 'content A'
     assert (dest_dir / 'sub' / 'b.txt').read_text() == 'content B'
+
+
+def test_push_directory_creates_each_unique_remote_parent_once(tmp_path, monkeypatch):
+    # Given a tree whose five files share only three distinct directories
+    local_dir = tmp_path / 'tree'
+    (local_dir / 'sub' / 'deep').mkdir(parents=True)
+    (local_dir / 'a.txt').write_text('a')
+    (local_dir / 'b.txt').write_text('b')
+    (local_dir / 'sub' / 'c.txt').write_text('c')
+    (local_dir / 'sub' / 'd.txt').write_text('d')
+    (local_dir / 'sub' / 'deep' / 'e.txt').write_text('e')
+
+    backend = cli.current_fs().backend
+    made: list[str] = []
+    real_make_dir = backend.make_dir
+
+    def counting_make_dir(path, *, parents):
+        made.append(str(path))
+        return real_make_dir(path, parents=parents)
+
+    monkeypatch.setattr(backend, 'make_dir', counting_make_dir)
+
+    # When the directory is pushed
+    assert run('push', str(local_dir), '/remote_dir').exit_code == 0
+
+    # Then each unique remote directory is created once, none per file
+    assert sorted(made) == ['/remote_dir', '/remote_dir/sub', '/remote_dir/sub/deep']
+
+
+def test_push_and_pull_directory_many_files(tmp_path):
+    # Given a nested tree with more files than one thread would carry
+    local_dir = tmp_path / 'many'
+    contents: dict[str, str] = {}
+    for i in range(12):
+        rel = f'sub{i % 3}/file{i}.txt'
+        target = local_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        contents[rel] = f'payload-{i}-{"x" * i}'
+        target.write_text(contents[rel])
+
+    # When pushed, every file lands with its exact bytes
+    assert run('push', str(local_dir), '/many').exit_code == 0
+    for rel, body in contents.items():
+        assert run('cat', f'/many/{rel}').stdout == body
+
+    # And a pull brings every file back byte-identical
+    dest = tmp_path / 'back'
+    assert run('pull', '/many', str(dest)).exit_code == 0
+    for rel, body in contents.items():
+        assert (dest / rel).read_text() == body
+
+
+def test_transfer_progress_totals_interleaved_events(monkeypatch):
+    updates: list[int] = []
+
+    class FakeProgress:
+        def __init__(self, *columns, **options): ...
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return None
+
+        def add_task(self, description, total=None):
+            return 0
+
+        def update(self, task_id, *, completed):
+            updates.append(completed)
+
+    monkeypatch.setattr(cli, 'Progress', FakeProgress)
+
+    # Given two files streaming through one progress session
+    fs = Storix(MemoryBackend())
+    fs.echo('aaaaa', '/a.bin')
+    fs.echo('bbb', '/b.bin')
+
+    # When their per-chunk events interleave (round-robin, 1-byte chunks)
+    with cli._transfer_progress(fs, 'batch', 8) as obs:
+        streams = [
+            obs.stream('/a.bin', chunk_size=1),
+            obs.stream('/b.bin', chunk_size=1),
+        ]
+        while streams:
+            for stream in list(streams):
+                if next(stream, None) is None:
+                    streams.remove(stream)
+
+    # Then the bar sums per-path bytes: monotonic, ending at the true total
+    assert updates[-1] == 8
+    assert updates == sorted(updates)
