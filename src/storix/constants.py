@@ -15,6 +15,11 @@ DEFAULT_AZURE_READ_PREFETCH_SIZE: Final[int] = 32 * 1024 * 1024
 """32 MiB Azure initial download request, matching the SDK default."""
 DEFAULT_CONCURRENCY: Final[int] = 32
 """Bounded fan-out for concurrent backend operations (per gather call)."""
+BULK_LISTING_KEY_LIMIT: Final[int] = 10_000
+"""Descendant-key ceiling for the bulk-emptiness fast path (ADR 0027). A
+recursive listing of a parent prefix that yields more keys than this is
+abandoned and the core falls back to the concurrent per-child floor, so a
+container with millions of keys under one prefix is never pulled whole."""
 DEFAULT_URL_EXPIRY_SECONDS: Final[int] = 3600
 """Lifetime of presigned URLs minted by url()."""
 DEFAULT_CACHE_NAMESPACE: Final[str] = 'storix'

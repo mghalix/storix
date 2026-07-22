@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     sync_fs = Storix(MemoryBackend())
     assert_type(sync_fs.cat('/value'), bytes)
+    assert_type(sync_fs.empty_children('/'), dict[str, bool])
     assert_type(sync_fs.scandir('/'), Iterator[DirEntry])
 
     async_fs = AsyncStorix(AsyncMemoryBackend())
@@ -22,4 +23,5 @@ if TYPE_CHECKING:
     async def check_async_api() -> None:
         """Assert the public async return types."""
         assert_type(await async_fs.cat('/value'), bytes)
+        assert_type(await async_fs.empty_children('/'), dict[str, bool])
         assert_type(async_fs.scandir('/'), AsyncIterator[DirEntry])

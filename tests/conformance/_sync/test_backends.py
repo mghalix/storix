@@ -306,6 +306,40 @@ def test_list_dir_tolerates_delete_during_iteration(backend: StorageBackend):
     assert list(backend.list_dir(P('/d'))) == []
 
 
+# --- list_tree (bulk_listing) ---
+
+
+def test_list_tree_yields_every_descendant_file(backend: StorageBackend):
+    if not backend.capabilities.bulk_listing:
+        pytest.skip('backend does not advertise bulk_listing')
+    backend.make_dir(P('/d'), parents=False)
+    backend.make_dir(P('/d/sub'), parents=False)
+    put(backend, '/d/a.txt')
+    put(backend, '/d/sub/b.txt')
+
+    descendants = {str(p) for p in backend.list_tree(P('/d'))}
+    # every file at any depth appears; directory markers may or may not,
+    # and the directory itself never does
+    assert {'/d/a.txt', '/d/sub/b.txt'} <= descendants
+    assert '/d' not in descendants
+
+
+def test_list_tree_on_empty_dir_yields_nothing(backend: StorageBackend):
+    if not backend.capabilities.bulk_listing:
+        pytest.skip('backend does not advertise bulk_listing')
+    backend.make_dir(P('/empty'), parents=False)
+    assert list(backend.list_tree(P('/empty'))) == []
+
+
+def test_list_tree_on_file_raises(backend: StorageBackend):
+    if not backend.capabilities.bulk_listing:
+        pytest.skip('backend does not advertise bulk_listing')
+    put(backend, '/a.txt')
+    with pytest.raises(NotADirectoryError):
+        for _ in backend.list_tree(P('/a.txt')):
+            pass
+
+
 # --- stat ---
 
 

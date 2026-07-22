@@ -38,18 +38,23 @@ List a directory (the cwd by default). Dotfiles are hidden unless `all=True`.
 `abs=True` returns absolute paths instead of names. The eager, names-only
 member of the listing family below.
 
-### `scandir` / `iterdir` / `is_empty`
+### `scandir` / `iterdir` / `is_empty` / `empty_children`
 
 ```python
 scandir(path=None, *, all=False) -> Iterator[DirEntry]   # lazy, rich (name, path, kind, size)
 iterdir(path=None, *, all=False) -> Iterator[StorixPath]  # lazy names (pathlib-shaped)
 is_empty(path=None) -> bool                               # one round trip; counts hidden entries
+empty_children(path=None, *, names=None) -> dict[str, bool]
 ```
 
 `scandir` streams one directory as `DirEntry` objects carrying the kind and any
 size the listing produced for free, so a consumer never stats every entry.
 `iterdir` is its names-only sibling. `is_empty` answers whether a directory
-holds anything (a dotfile-only directory is not empty).
+holds anything (a dotfile-only directory is not empty). `empty_children`
+answers the same question for every immediate child directory. On a backend
+with bulk listing it groups one recursive listing; otherwise it probes the
+children concurrently. Pass `names` when you already have the child directory
+names from `scandir`, as the CLI does, to avoid repeating that listing.
 
 ### `walk` / `find` / `glob`
 

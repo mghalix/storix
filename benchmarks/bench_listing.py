@@ -1,13 +1,15 @@
 """Benchmark: the emptiness lookups behind `sx ls` with the folder icon.
 
-`sx ls` with the empty/full folder glyph checks `is_empty` once per
-subdirectory. This times that as a serial loop (the pre-0.4.5 behavior)
-versus the concurrent batch the CLI now uses (`state.empty_all`), so the
-concurrency win is visible against a fixed per-call latency.
+`sx ls` with the empty/full folder glyph needs every subdirectory's
+emptiness. This times the serial loop (one `is_empty`, so one LIST, per
+subdirectory - the pre-0.4.5 behavior) against the batch path the CLI now
+uses (`state.empty_all` -> `Storix.empty_children`). An advertising backend
+derives every child's emptiness from one recursive listing (ADR 0027 (b)); a
+backend without that cheap operation uses the portable concurrent fallback.
 
 Reproducible mode uses a `LatencyBackend` (a `MemoryBackend` with a sleep
-per call); set STORIX_BENCH_PROVIDER=azure (+ STORIX_* creds) for the real
-thing. Run: `uv run python benchmarks/bench_listing.py`.
+per listing call); set STORIX_BENCH_PROVIDER=azure (+ STORIX_* creds) for
+the real thing. Run: `uv run python benchmarks/bench_listing.py`.
 """
 
 from __future__ import annotations
@@ -31,6 +33,10 @@ class LatencyBackend(MemoryBackend):
         time.sleep(LATENCY_S)
         yield from super().list_dir(path)
 
+    def list_tree(self, path):  # one sleep: the whole bulk listing is one call
+        time.sleep(LATENCY_S)
+        yield from super().list_tree(path)
+
 
 def _seed(fs: Storix) -> None:
     """Create N subdirectories, every other one holding a file."""
@@ -52,21 +58,29 @@ def main() -> None:
     provider = os.environ.get('STORIX_BENCH_PROVIDER')
     if provider:
         fs = get_storage(provider)
-        dirs = [p for p in fs.ls('/', abs=True) if fs.isdir(p)]
-        print(f'real backend {provider!r}: {len(dirs)} subdirs')
+        names = [entry.name for entry in fs.scandir('/') if entry.is_dir]
+        print(f'real backend {provider!r}: {len(names)} subdirs')
     else:
         fs = Storix(LatencyBackend())
         _seed(fs)
-        dirs = fs.ls('/', abs=True)
+        names = [p.name for p in fs.ls('/', abs=True)]
         print(
-            f'reproducible: LatencyBackend, {len(dirs)} subdirs, '
+            f'reproducible: LatencyBackend, {len(names)} subdirs, '
             f'{LATENCY_S * 1000:.0f}ms/call'
         )
 
+    base = fs.resolve('/')
+    dirs = [base / n for n in names]
     serial = _time('serial (loop is_empty)', lambda: [fs.is_empty(d) for d in dirs])
-    batch = _time('concurrent (empty_all)', lambda: empty_all(fs, dirs))
+    if fs.backend.capabilities.bulk_listing:
+        label = 'bulk (empty_all, 1 list)'
+        comparison = f'one request vs {len(names)}'
+    else:
+        label = 'concurrent fallback'
+        comparison = f'{len(names)} concurrent probes'
+    batch = _time(label, lambda: empty_all(fs, base, names))
     if batch:
-        print(f'  -> {serial / batch:.1f}x faster concurrent ({len(dirs)} dirs)')
+        print(f'  -> {serial / batch:.1f}x faster: {comparison}')
 
 
 if __name__ == '__main__':

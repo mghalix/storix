@@ -124,6 +124,24 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def list_tree(self, path: PurePosixPath) -> Iterator[PurePosixPath]:
+        """Yield the absolute path of every descendant of a directory.
+
+        Capability-gated by ``bulk_listing``: a single cheap backend
+        operation (one delimiter-less recursive list on object stores) that
+        streams every descendant key under ``path`` as an absolute port
+        path, in no guaranteed order. Directories may or may not appear as
+        entries of their own; the core relies only on descendants two or
+        more levels deep to decide an immediate child's emptiness, so a
+        directory-marker entry is neither required nor a problem.
+
+        The core calls this exclusively on backends that advertise
+        ``bulk_listing``; others need not implement it. Does no grouping -
+        that path logic lives in the core. Raises ``NotADirectoryError``
+        when ``path`` is a file.
+        """
+        ...
+
     def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts about a path (kind, size, timestamps)."""
         ...

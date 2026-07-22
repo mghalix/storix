@@ -13,6 +13,8 @@ arguments and raises `UnsupportedOperationError` naming the capability.
 A `Capability` StrEnum mirrors the field names (alignment-tested) so
 raises are never stringly-typed. Capabilities describe *user-observable
 features only* - never performance traits (those are method overrides).
+ADR 0027 adds one deliberate exception: `bulk_listing` is an internal speed
+gate with a silent fallback, never a feature request that can raise.
 Layers may upgrade the capabilities of what they wrap. URL expiry is
 advisory (`int | None`): None means provider default; providers without
 expiring links ignore it.
