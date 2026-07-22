@@ -97,11 +97,14 @@ class Capabilities:
     """User-observable optional features a backend supports.
 
     Consulted by the core to fail loudly (``UnsupportedOperationError``)
-    instead of silently dropping arguments a backend cannot honor. Never
-    encodes performance traits (native move, batch delete) — those are
-    expressed by overriding ``BackendBase`` methods and are invisible to
-    users. Every field defaults to False so adding a capability is
-    non-breaking for existing backends.
+    instead of silently dropping arguments a backend cannot honor. Mostly
+    does not encode performance traits (native move, batch delete) - those
+    are expressed by overriding ``BackendBase`` methods and are invisible
+    to users. The deliberate exception is ``bulk_listing`` (ADR 0027): a
+    performance trait the core gates on internally, silently taking a fast
+    path and falling back when it is absent, never raising. Every field
+    defaults to False so adding a capability is non-breaking for existing
+    backends.
     """
 
     content_type: bool = False
@@ -112,6 +115,13 @@ class Capabilities:
 
     presigned_urls: bool = False
     """Can mint time-limited shareable URLs (e.g. SAS) for paths."""
+
+    bulk_listing: bool = False
+    """Can list every descendant of a directory in one cheap operation
+    (a single delimiter-less list on object stores). An internal speed
+    gate, not a user-facing feature: the core derives a whole listing's
+    child emptiness from one request when set, and falls back silently
+    when it is not (ADR 0027)."""
 
     def supports(self, capability: Capability) -> bool:
         """Whether the given capability is advertised."""

@@ -173,6 +173,19 @@ class SandboxLayer:
         except PathError as exc:
             raise self._rescope(exc) from None
 
+    async def list_tree(self, path: PurePosixPath) -> AsyncIterator[PurePosixPath]:
+        """Yield descendant paths, re-scoped back into the virtual namespace.
+
+        Unlike ``list_dir`` (bare names, no scoping), this yields full
+        paths in the real namespace, so each is translated back through
+        ``to_virtual`` before it leaves the jail.
+        """
+        try:
+            async for descendant in self._inner.list_tree(self.to_real(path)):
+                yield self.to_virtual(descendant)
+        except PathError as exc:
+            raise self._rescope(exc) from None
+
     async def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts about a path."""
         try:

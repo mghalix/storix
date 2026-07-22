@@ -77,11 +77,14 @@ that is a cheap syscall; on an object store it is a network round trip. So:
 - A **recursive** call (`walk`/`find`/`glob`/`tree`) lists every directory it
   visits - one round trip each on cloud. Filter early (`find(name=...)` stops
   yielding, but still walks) and prefer a bounded depth when you can.
-- The `sx` CLI's empty/full folder icon (`dir_contents`) needs a listing *per
-  subdirectory*; it batches them concurrently, but on a wide cloud directory
-  that is still real work. Turn it off with `dir_contents = false` (or
-  `--no-icons`) when you want the fastest possible `ls`, and keep a `cache`
-  layer active in interactive sessions so repeats are free.
+- The `sx` CLI's empty/full folder icon (`dir_contents`) uses
+  `empty_children`. Object-store backends that advertise bulk listing derive
+  every immediate child directory's state from one recursive listing. Other
+  backends probe the children concurrently, and very large subtrees fall back
+  to that portable path once the bulk key bound is exceeded. Turn the icon off
+  with `dir_contents = false` (or `--no-icons`) when even that extra work is
+  unwanted, and keep a `cache` layer active in interactive sessions so
+  repeated metadata lookups are free.
 
 See [Cache with Redis or disk](caching.md) for the read-through cache, and
 [The sx CLI](../guide/cli.md) for the shell.

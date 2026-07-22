@@ -1,6 +1,6 @@
 # Write a custom backend
 
-A backend implements the 17-method `StorageBackend` port (read, write, list,
+A backend implements the 18-method `StorageBackend` port (read, write, list,
 stat, and friends) and nothing else. The core `Storix` engine owns all the
 unix behavior, so a backend does no path logic and raises only `storix.errors`.
 That is why a new provider is just a new class, and everything above it (the CLI,
@@ -23,8 +23,17 @@ the base raises a clear `NotImplementedError` instead of recursing.
 class with the complete matching method surface can be passed to `Storix` or
 returned by a registered builder through structural typing. `BackendBase` is
 still the recommended starting point because it supplies the generic operations
-and the whole-object/streaming fallbacks instead of making you implement all 17
+and the whole-object/streaming fallbacks instead of making you implement all 18
 methods.
+
+`BackendBase.list_tree()` is an unsupported default, so subclasses do not
+override it unless they can recursively list a directory cheaply. A backend
+that provides that fast path implements `list_tree()`, advertises
+`capabilities.bulk_listing`, and passes the capability-gated conformance tests.
+The core otherwise uses its portable concurrent fallback. A structurally typed
+backend that does not inherit `BackendBase` still needs the complete 18-method
+surface, even when its `list_tree()` implementation only raises
+`UnsupportedOperationError` and `bulk_listing` stays false.
 
 Then register a builder so `get_storage` can construct it by name:
 

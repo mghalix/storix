@@ -124,14 +124,8 @@ def ls(
     show_empty = icons_enabled() and load_prefs().dir_contents
     empty: dict[str, bool | None] = {}
     if show_empty:
-        dir_entries = [e for e in entries if e.is_dir]
-        empty = dict(
-            zip(
-                (e.name for e in dir_entries),
-                empty_all(fs, [base / e.name for e in dir_entries]),
-                strict=True,
-            )
-        )
+        dir_names = [e.name for e in entries if e.is_dir]
+        empty = dict(zip(dir_names, empty_all(fs, base, dir_names), strict=True))
 
     entry_stats: dict[str, RawStat] = {}
 
