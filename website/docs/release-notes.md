@@ -2,8 +2,6 @@
 
 ## [0.4.8] - 2026-07-22
 
-## Highlights
-
 A performance release: cloud listing and traversal drop from N serial round
 trips to one bulk request or bounded concurrent batches, with unix ordering and
 streaming output preserved. Measured on a real Azure (ADLS) container, cold
@@ -13,13 +11,27 @@ missing bucket or container now fails with one actionable line instead of a raw
 provider dump - and adds explicit storage-root provisioning where a backend can
 create its own root.
 
-### Features
+### Added
 
 - **Bulk emptiness** (#28): backends that can list a subtree in one request
   advertise the new `bulk_listing` capability; `Storix.empty_children` derives a
   whole listing's folder emptiness from a single recursive listing (bounded by a
   10,000-key limit with a silent portable fallback). `sx ls` folder icons ride
   it. New port method `list_tree`.
+- **`sx --debug`** (#32): a global flag that prints the full provider traceback
+  (original exception, request IDs, HTTP context, nested causes) behind the
+  concise error.
+- **Storage-root provisioning** (#34, ADR 0030): a new optional `provisioning`
+  capability with `sx provision` and `fs.provision()` creates a missing storage
+  root idempotently. Honest scope - real only where the backend engine can do
+  it: ADLS creates a missing filesystem; local and memory report
+  already-present; the opendal backends (S3/R2/GCS/Azure Blob) are data-plane
+  only and report it unsupported, pointing at your provider's own tooling
+  (`aws s3 mb`, `gcloud storage buckets create`, `az storage container
+  create`). `sx mkdir` never creates a root.
+
+### Changed
+
 - **Concurrent recursive traversal** (#29, ADR 0028): `walk` (and with it
   `find`, `glob`, `du`, `sx tree`) now fetches directory listings level-wise
   through bounded concurrent batches, so wide remote trees are bounded by
@@ -44,19 +56,8 @@ create its own root.
   Blob container, or ADLS Gen2 filesystem now fails with one actionable line
   (`configured s3 bucket 'media' does not exist`) via the new typed
   `StorageRootNotFoundError`, instead of a raw provider/OpenDAL diagnostic dump.
-- **`sx --debug`** (#32): a global flag that prints the full provider traceback
-  (original exception, request IDs, HTTP context, nested causes) behind the
-  concise error.
-- **Storage-root provisioning** (#34, ADR 0030): a new optional `provisioning`
-  capability with `sx provision` and `fs.provision()` creates a missing storage
-  root idempotently. Honest scope - real only where the backend engine can do
-  it: ADLS creates a missing filesystem; local and memory report
-  already-present; the opendal backends (S3/R2/GCS/Azure Blob) are data-plane
-  only and report it unsupported, pointing at your provider's own tooling
-  (`aws s3 mb`, `gcloud storage buckets create`, `az storage container
-  create`). `sx mkdir` never creates a root.
 
-### Fixes
+### Fixed
 
 - **Unix ordering and streaming restored** (#33): `walk` emits exact depth-first
   order (byte-identical to v0.4.7) over the new concurrent fetching, so
@@ -73,18 +74,19 @@ create its own root.
   second argument of `push` and `pull` completed from the wrong side (local vs
   remote); it now completes the correct namespace.
 
-### Compatibility
+### Notes
 
-Fully backward-compatible with v0.4.7. `walk` ordering is unchanged; `max_depth`
-and `order` are additive keyword-only arguments; the `bulk_listing` and
-`provisioning` capabilities plus the `list_tree` and `provision` port methods
-default off (with raising `BackendBase` defaults), so custom backends
-subclassing `BackendBase` keep working and all additions are invisible to
-existing callers. No API removals. One failure-path nuance: a missing Azure Blob
-container or ADLS Gen2 filesystem now raises `StorageRootNotFoundError` (a
-`ConfigurationError`) where it previously raised `PathNotFoundError` - a
-corrected misdiagnosis, not a change to any success path. PATCH under ADR 0021;
-pin `storix>=0.4,<0.5`.
+- **Compatibility**: Fully backward-compatible with v0.4.7. `walk` ordering is unchanged; `max_depth`
+  and `order` are additive keyword-only arguments; the `bulk_listing` and
+  provisioning capabilities plus the `list_tree` and `provision` port methods
+  default off (with raising `BackendBase` defaults), so custom backends
+  subclassing `BackendBase` keep working and all additions are invisible to
+  existing callers. No API removals. One failure-path nuance: a missing Azure Blob
+  container or ADLS Gen2 filesystem now raises `StorageRootNotFoundError` (a
+  `ConfigurationError`) where it previously raised `PathNotFoundError` - a
+  corrected misdiagnosis, not a change to any success path. PATCH under ADR 0021;
+  pin `storix>=0.4,<0.5`.
+
 
 
 ## [0.4.7] - 2026-07-21
