@@ -23,6 +23,20 @@ Raise it per session with ``AzureBackend(read_prefetch_size=...)`` when
 single-file reads matter more than concurrent ones."""
 DEFAULT_CONCURRENCY: Final[int] = 32
 """Bounded fan-out for concurrent backend operations (per gather call)."""
+DEFAULT_TRANSFER_RANGES: Final[int] = 8
+"""How many byte ranges of one file ``download`` may fetch at once.
+
+A single stream to an object store is bounded by round trips rather than
+bandwidth, so one large file transfers at one connection's speed. Eight
+ranges measured 3.0x on a 200 MiB file over one home link, and the curve
+flattens past it as the link saturates (ADR 0032). Each range is a
+separate request, so this is also the multiplier on a large read's
+transaction count."""
+MIN_RANGE_SIZE: Final[int] = 64 * 1024 * 1024
+"""Smallest file ``download`` will split into parallel ranges.
+
+Below this a second request costs more than the round trip it saves, and
+the extra transactions would be spent for nothing."""
 BULK_LISTING_KEY_LIMIT: Final[int] = 10_000
 """Descendant-key ceiling for the bulk-emptiness fast path (ADR 0027). A
 recursive listing of a parent prefix that yields more keys than this is

@@ -6,7 +6,12 @@ import dataclasses
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, override
 
-from storix._async._stream import chunked, collect, resolve_chunk_size
+from storix._async._stream import (
+    chunked,
+    collect,
+    resolve_chunk_size,
+    validate_span,
+)
 from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
@@ -60,7 +65,10 @@ class MemoryBackend(BackendBase):
     """
 
     capabilities: Capabilities = Capabilities(
-        custom_metadata=True, bulk_listing=True, provisioning=True
+        custom_metadata=True,
+        bulk_listing=True,
+        provisioning=True,
+        ranged_reads=True,
     )
 
     _nodes: dict[PurePosixPath, _Node]
@@ -93,6 +101,31 @@ class MemoryBackend(BackendBase):
             raise IsADirectoryError(path)
 
         for chunk in chunked(data, size):
+            yield chunk
+
+    @override
+    async def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Slice the stored bytes: a range costs no more than a read.
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        validate_span(offset, length)
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
+        node = self._get(path)
+        data = node.data
+        if data is None:
+            raise IsADirectoryError(path)
+
+        for chunk in chunked(data[offset : offset + length], size):
             yield chunk
 
     @override

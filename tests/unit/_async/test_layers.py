@@ -649,6 +649,31 @@ async def test_observability_layer_awaits_an_async_sink():
     assert [e.transferred for e in events] == [3]
 
 
+async def test_observability_layer_identifies_each_range_of_one_file(
+    tmp_path, monkeypatch
+):
+    """Given a parallel download, when events arrive, then each range is its own
+    stream, so a sink accumulating per stream reports the true total."""
+    from storix._async import Storix, core
+    from storix._async.layers import ObservabilityLayer, TransferEvent
+
+    monkeypatch.setattr(core, 'MIN_RANGE_SIZE', 1024)
+    payload = bytes(range(256)) * 32
+    fs = Storix(MemoryBackend())
+    await fs.echo(payload, '/big.bin')
+    seen: dict[tuple[P, int], int] = {}
+
+    def sink(event: TransferEvent) -> None:
+        seen[event.path, event.offset] = event.transferred
+
+    obs = fs.with_layer(ObservabilityLayer, sink=sink)
+    with (tmp_path / 'out.bin').open('wb') as handle:
+        await obs.download('/big.bin', handle, ranges=4, chunk_size=512)
+
+    assert len(seen) == 4  # four ranges, four distinct streams
+    assert sum(seen.values()) == len(payload)
+
+
 # --- stack introspection ---
 
 

@@ -16,7 +16,12 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from storix._sync._stream import batch_chunks, resolve_chunk_size, split_chunks
+from storix._sync._stream import (
+    batch_chunks,
+    resolve_chunk_size,
+    split_chunks,
+    validate_span,
+)
 from storix.constants import (
     DEFAULT_AZURE_READ_CHUNK_SIZE,
     DEFAULT_AZURE_READ_PREFETCH_SIZE,
@@ -115,7 +120,11 @@ class AzureBackend(BackendBase):
     """
 
     capabilities: Capabilities = Capabilities(
-        content_type=True, custom_metadata=True, presigned_urls=True, provisioning=True
+        content_type=True,
+        custom_metadata=True,
+        presigned_urls=True,
+        provisioning=True,
+        ranged_reads=True,
     )
     default_read_chunk_size: int = DEFAULT_AZURE_READ_CHUNK_SIZE
     default_write_chunk_size: int = DEFAULT_AZURE_WRITE_CHUNK_SIZE
@@ -193,6 +202,36 @@ class AzureBackend(BackendBase):
         client = self._filesystem.get_file_client(self._key(path))
         try:
             download = client.download_file()
+            yield from split_chunks(download.chunks(), size)
+        except AzureError as exc:
+            raise self._error(exc, path) from exc
+
+    def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> Iterator[bytes]:
+        """Download one range, one request, in bounded consumer chunks.
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        validate_span(offset, length)
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
+        raw = self.stat(path)
+        if raw.kind is PathKind.DIRECTORY:
+            # dfs 'downloads' a directory marker as zero bytes; refuse instead
+            raise IsADirectoryError(path)
+        span = min(length, max(0, raw.size - offset))
+        if not span:
+            return
+        client = self._filesystem.get_file_client(self._key(path))
+        try:
+            download = client.download_file(offset=offset, length=span)
             yield from split_chunks(download.chunks(), size)
         except AzureError as exc:
             raise self._error(exc, path) from exc

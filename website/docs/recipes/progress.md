@@ -1,7 +1,7 @@
 # Progress bars
 
 `ObservabilityLayer` emits a `TransferEvent` per chunk with cumulative
-`transferred` bytes. storix never guesses a total: you produced the source, so
+`transferred` bytes for that stream. storix never guesses a total: you produced the source, so
 the total is yours (a local file's `stat().st_size`, an HTTP upload's
 `Content-Length`), and a percentage is your division to make. That one contract
 drives any UI: a bar when you have a total, a counter when you do not.
@@ -30,6 +30,30 @@ logical transfer, whatever other layers sit below it.
     construction, not storix: `echo` and `stream` move data chunk by chunk
     either way, and a real application would stream from a file or socket
     without ever holding the total in memory.
+
+## One file, several streams
+
+`transferred` is cumulative *per stream*, and a parallel `download()` reads one
+file through several ranges at once, each counting from zero. The event carries
+`offset` - where its stream starts in the file - so a sink that accumulates a
+whole transfer keys on the pair:
+
+```python
+seen: dict[tuple[PurePosixPath, int], int] = {}
+completed = 0
+
+
+def on_event(event: TransferEvent) -> None:
+    global completed
+    stream = (event.path, event.offset)
+    completed += event.transferred - seen.get(stream, 0)
+    seen[stream] = event.transferred
+```
+
+Keying on `path` alone silently undercounts: with eight ranges in flight the
+bar reports one range's bytes rather than the file's. `offset` is 0 for a
+whole-file `stream()` or `echo()`, so a sink written this way is correct for
+every transfer, sequential or parallel.
 
 ## No total? Count bytes
 

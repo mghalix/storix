@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import copy
 import fnmatch
+import os
 import re
 
 from functools import partial
+from io import UnsupportedOperation
 from itertools import batched
 from typing import TYPE_CHECKING, Any, ParamSpec, Protocol, Self, cast
 
@@ -15,7 +17,12 @@ from storix import pathops
 from storix._async._compat import concurrent
 from storix._async._stream import ensure_chunks, validate_chunk_size
 from storix._async.backends import generic
-from storix.constants import BULK_LISTING_KEY_LIMIT, DEFAULT_CONCURRENCY
+from storix.constants import (
+    BULK_LISTING_KEY_LIMIT,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_TRANSFER_RANGES,
+    MIN_RANGE_SIZE,
+)
 from storix.enums import Capability, PathKind
 from storix.errors import (
     IsADirectoryError,
@@ -31,6 +38,7 @@ from storix.types import StorixPath
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
     from contextlib import AbstractAsyncContextManager
+    from typing import BinaryIO
 
     from storix._async.backends import StorageBackend
     from storix.types import (
@@ -60,6 +68,32 @@ class LayerFactory(Protocol[P]):
 # a fully-bound layer (the layers= list, and what with_layer produces):
 # backend in, backend out. Public so consumers need not redefine it.
 type BoundLayer = Callable[[StorageBackend], StorageBackend]
+
+
+def _writable_fd(dest: BinaryIO) -> int | None:
+    """The sink's file descriptor, or None when it cannot be written by offset.
+
+    A sink qualifies only if it is seekable and exposes a real descriptor:
+    an in-memory buffer or a pipe is neither, and gets the sequential path.
+    """
+    try:
+        if not dest.seekable():
+            return None
+        return dest.fileno()
+    except (AttributeError, OSError, UnsupportedOperation):
+        return None
+
+
+def _pwrite_all(fd: int, data: bytes, offset: int) -> int:
+    """Write every byte of ``data`` at ``offset``, looping on short writes.
+
+    Returns:
+        The number of bytes written, always ``len(data)``.
+    """
+    written = 0
+    while written < len(data):
+        written += os.pwrite(fd, data[written:], offset + written)
+    return written
 
 
 _ROOT = StorixPath('/')
@@ -940,6 +974,113 @@ class Storix:
         for target in [self._resolve(p) for p in (path, *paths)]:
             async for chunk in self._backend.read_stream(target, chunk_size=chunk_size):
                 yield chunk
+
+    async def download(
+        self,
+        path: StrPathLike,
+        dest: BinaryIO,
+        /,
+        *,
+        ranges: int | None = None,
+        chunk_size: int | None = None,
+    ) -> int:
+        """Read a file into an open binary sink, in parallel when it pays.
+
+        The parallel counterpart of ``stream``. ``stream`` yields chunks in
+        order and suits any consumer (an HTTP response, a hash, a pipe);
+        ``download`` targets a destination that can be written out of order,
+        so it can fetch several byte ranges of the same file at once. On a
+        high-latency link that is the difference between one connection's
+        throughput and the link's (ADR 0032).
+
+        ``dest`` is a synchronous binary file object open for writing, in
+        both flavors: the write is a local syscall the core performs
+        directly (``os.pwrite`` at each range's offset), not an operation on
+        the storage port. A sink without a usable file descriptor, or a
+        backend that cannot fetch a range cheaply, streams sequentially
+        instead - the result is identical either way.
+
+        Args:
+            path: The file to read.
+            dest: Writable binary sink. Written from position 0 onward.
+            ranges: Ceiling on how many ranges to fetch at once. ``None``
+                means ``DEFAULT_TRANSFER_RANGES``. It is a ceiling rather
+                than a demand: a file below ``MIN_RANGE_SIZE``, a backend
+                without ``ranged_reads``, and a sink that cannot be written
+                at an offset each stay on the one-stream path regardless.
+                Pass 1 to force that path.
+            chunk_size: Maximum chunk pulled from the backend at a time.
+                ``None`` selects the backend's preferred default.
+
+        Returns:
+            The number of bytes written to ``dest``.
+
+        Raises:
+            ValueError: If ``ranges`` is zero or negative, or if
+                ``chunk_size`` is zero or negative.
+            PathNotFoundError: If ``path`` does not exist.
+            IsADirectoryError: If ``path`` is a directory.
+        """
+        validate_chunk_size(chunk_size)
+        if ranges is not None and ranges < 1:
+            msg = 'ranges must be at least 1'
+            raise ValueError(msg)
+        target = self._resolve(path)
+        raw = await self._backend.stat(target)
+        if raw.kind is PathKind.DIRECTORY:
+            raise IsADirectoryError(target)
+
+        fd = _writable_fd(dest)
+        count = 1 if fd is None else self._range_count(raw.size, ranges=ranges)
+        if fd is None or count == 1:
+            written = 0
+            async for chunk in self._backend.read_stream(target, chunk_size=chunk_size):
+                dest.write(chunk)
+                written += len(chunk)
+            return written
+
+        dest.flush()
+        span = -(-raw.size // count)
+        spans = [
+            (offset, min(span, raw.size - offset))
+            for offset in range(0, raw.size, span)
+        ]
+        await concurrent(
+            (
+                partial(self._fetch_span, target, fd, offset, length, chunk_size)
+                for offset, length in spans
+            ),
+            limit=count,
+        )
+        return raw.size
+
+    def _range_count(self, size: int, *, ranges: int | None) -> int:
+        """How many ranges to open for a file of ``size`` bytes.
+
+        ``ranges`` is a ceiling, not a demand: splitting is skipped for a
+        backend that would have to emulate the ranges (it would re-read the
+        file once per range) and for a file too small to earn the extra
+        requests, whatever the caller asked for.
+        """
+        if not self._backend.capabilities.ranged_reads or size < MIN_RANGE_SIZE:
+            return 1
+        wanted = DEFAULT_TRANSFER_RANGES if ranges is None else ranges
+        return max(1, min(wanted, size // MIN_RANGE_SIZE))
+
+    async def _fetch_span(
+        self,
+        target: StorixPath,
+        fd: int,
+        offset: int,
+        length: int,
+        chunk_size: int | None,
+    ) -> None:
+        """Stream one range and write it at its own offset."""
+        position = offset
+        async for chunk in self._backend.read_range(
+            target, offset=offset, length=length, chunk_size=chunk_size
+        ):
+            position += _pwrite_all(fd, chunk, position)
 
     async def stat(self, path: StrPathLike | None = None) -> FileProperties:
         """Return the user-facing properties of a path."""

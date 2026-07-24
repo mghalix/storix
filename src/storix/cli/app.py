@@ -33,6 +33,7 @@ from rich.text import Text
 
 from storix import ObservabilityLayer, TransferEvent
 from storix._sync._compat import concurrent
+from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
 from storix.errors import StorageError
 
@@ -633,10 +634,13 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
     caller already owns. The wrapped session starts at home, so callers
     must pass absolute paths.
 
-    The sink tracks cumulative bytes per path, so events from concurrently
-    transferring files may interleave in any order and the bar still shows
-    the true sum. Directory transfers run their per-file thunks through the
-    core ``concurrent`` helper, so the sink is called from worker threads:
+    The sink tracks cumulative bytes per stream - keyed by path *and*
+    starting offset, since a parallel ``download`` reads one file through
+    several ranges that each count from zero - so events from concurrently
+    transferring streams may interleave in any order and the bar still
+    shows the true sum. Directory transfers run their per-file thunks
+    through the core ``concurrent`` helper, so the sink is called from
+    worker threads:
     rich's ``Progress.update`` takes its own internal ``RLock``, and our
     lock keeps the tally read-modify-write and the bar update one atomic,
     monotonic step.
@@ -661,20 +665,33 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
         task = progress.add_task(label, total=total)
 
         lock = threading.Lock()
-        seen: dict[PurePosixPath, int] = {}
+        seen: dict[tuple[PurePosixPath, int], int] = {}
         completed = 0
 
         def on_event(event: TransferEvent) -> None:
             nonlocal completed
+            stream = (event.path, event.offset)
             with lock:
-                completed += event.transferred - seen.get(event.path, 0)
-                seen[event.path] = event.transferred
+                completed += event.transferred - seen.get(stream, 0)
+                seen[stream] = event.transferred
                 progress.update(task, completed=completed)
 
         yield fs.with_layer(
             ObservabilityLayer,
             sink=on_event,
         )
+
+
+def _range_budget(files: int) -> int:
+    """How many ranges one file of a transfer may open at once.
+
+    Range parallelism spends the fan-out budget the transfer is not using
+    rather than adding to it, so a wide transfer keeps today's shape and a
+    narrow one (few files, or one large file) fills the same number of
+    connections instead of idling (ADR 0032). The core still declines to
+    split a file below ``MIN_RANGE_SIZE``.
+    """
+    return max(1, min(DEFAULT_TRANSFER_RANGES, DEFAULT_CONCURRENCY // max(files, 1)))
 
 
 @app.command()
@@ -707,11 +724,11 @@ def pull(
             parent.mkdir(parents=True, exist_ok=True)
         try:
             with _transfer_progress(fs, src.name, total_bytes) as obs:
+                ranges = _range_budget(len(targets))
 
                 def fetch(remote_file: StorixPath, out_path: Path) -> None:
                     with out_path.open('wb') as out:
-                        for chunk in obs.stream(remote_file):
-                            out.write(chunk)
+                        obs.download(remote_file, out, ranges=ranges)
 
                 # per-file streams batched through the core concurrent
                 # helper, not N serial round trips (see state.py)
@@ -731,8 +748,7 @@ def pull(
             _transfer_progress(fs, src.name, st.size) as obs,
             dst.open('wb') as out,
         ):
-            for chunk in obs.stream(src):
-                out.write(chunk)
+            obs.download(src, out, ranges=_range_budget(1))
     except StorageError as exc:
         _die('pull', exc)
     console.print(f'{remote} -> {dst}')

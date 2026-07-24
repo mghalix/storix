@@ -22,7 +22,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final
 
-from storix._async._stream import batch_chunks, resolve_chunk_size
+from storix._async._stream import batch_chunks, resolve_chunk_size, validate_span
 from storix.constants import DEFAULT_URL_EXPIRY_SECONDS
 from storix.enums import Capability, PathKind
 from storix.errors import (
@@ -147,6 +147,10 @@ class OpendalBackend(BackendBase):
             custom_metadata=cap.write_with_user_metadata,
             presigned_urls=cap.presign_read,
             bulk_listing=cap.list_with_recursive,
+            # opendal serves a range with a ranged request (a Range header
+            # on HTTP services, a seek on local files) wherever it can read
+            # at all; the Python binding exposes no separate range flag
+            ranged_reads=cap.read,
         )
 
     @staticmethod
@@ -236,6 +240,42 @@ class OpendalBackend(BackendBase):
             file = await self._op.open(self._key(path), 'rb')
             try:
                 while chunk := await file.read(size):
+                    yield chunk
+            finally:
+                await file.close()
+        except _OPENDAL_ERRORS as exc:
+            raise self._error(exc, path) from exc
+
+    async def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Seek to the range and stream it, one ranged request.
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        validate_span(offset, length)
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
+        raw = await self.stat(path)
+        if raw.kind is PathKind.DIRECTORY:
+            raise IsADirectoryError(path)
+        remaining = min(length, max(0, raw.size - offset))
+        if not remaining:
+            return
+        # explicit close, not `async with`: opendal's AsyncFile.__aexit__
+        # stub is mistyped as returning None instead of an awaitable
+        try:
+            file = await self._op.open(self._key(path), 'rb')
+            try:
+                await file.seek(offset)
+                while remaining and (chunk := await file.read(min(size, remaining))):
+                    remaining -= len(chunk)
                     yield chunk
             finally:
                 await file.close()
