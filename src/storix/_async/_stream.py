@@ -132,6 +132,58 @@ async def batch_chunks(stream: AsyncIterator[bytes], size: int) -> AsyncIterator
         yield pending.getvalue()
 
 
+def validate_span(offset: int, length: int) -> None:
+    """Validate a byte range requested from a backend.
+
+    Args:
+        offset: First byte of the range, counted from the start of the file.
+        length: Number of bytes requested.
+
+    Raises:
+        ValueError: If either bound is negative.
+    """
+    if offset < 0:
+        msg = 'offset must not be negative'
+        raise ValueError(msg)
+    if length < 0:
+        msg = 'length must not be negative'
+        raise ValueError(msg)
+
+
+async def span_of(
+    stream: AsyncIterator[bytes], *, offset: int, length: int
+) -> AsyncIterator[bytes]:
+    """Yield only the bytes of ``stream`` inside ``[offset, offset + length)``.
+
+    The portable way to serve a range from a backend that can only stream
+    from the start: bytes before the range are pulled and discarded, and the
+    stream is abandoned as soon as the range is complete. A range past the
+    end of the stream simply ends early.
+
+    Args:
+        stream: Source chunks, from the start of the file.
+        offset: First byte to yield.
+        length: Maximum number of bytes to yield.
+    """
+    if length == 0:
+        return
+    seen = 0
+    remaining = length
+    async for chunk in stream:
+        end = seen + len(chunk)
+        if end <= offset:
+            seen = end
+            continue
+        start = max(0, offset - seen)
+        piece = chunk[start : start + remaining]
+        seen = end
+        remaining -= len(piece)
+        if piece:
+            yield piece
+        if remaining <= 0:
+            return
+
+
 def chunked(data: Buffer, size: int) -> Iterator[bytes]:
     """Slice a buffer into ``bytes`` chunks with a single copy per chunk.
 

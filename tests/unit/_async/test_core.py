@@ -1,4 +1,6 @@
 # ruff: noqa: A004
+import io
+
 from pathlib import Path, PurePosixPath as P
 
 import pytest
@@ -1052,3 +1054,77 @@ async def test_provision_targets_the_base_backend_under_layers():
 
     # When provision runs, it reaches the base backend beneath the layer
     assert await fs.provision() is False
+
+
+async def test_download_writes_the_whole_file(tmp_path):
+    """Given a file, when downloaded to a sink, then the bytes match."""
+    fs = Storix(MemoryBackend())
+    payload = bytes(range(256)) * 4096
+    await fs.echo(payload, '/big.bin')
+    dest = tmp_path / 'out.bin'
+
+    with dest.open('wb') as handle:
+        written = await fs.download('/big.bin', handle)
+
+    assert written == len(payload)
+    assert dest.read_bytes() == payload
+
+
+async def test_download_in_parallel_ranges_matches_sequential(tmp_path, monkeypatch):
+    """Given several ranges, when downloaded, then the file is assembled in order."""
+    from storix._async import core
+
+    monkeypatch.setattr(core, 'MIN_RANGE_SIZE', 1024)
+    fs = Storix(MemoryBackend())
+    payload = bytes(range(256)) * 4096
+    await fs.echo(payload, '/big.bin')
+    dest = tmp_path / 'out.bin'
+
+    with dest.open('wb') as handle:
+        written = await fs.download('/big.bin', handle, ranges=4, chunk_size=1024)
+
+    assert written == len(payload)
+    assert dest.read_bytes() == payload
+
+
+async def test_download_to_a_buffer_falls_back_to_sequential():
+    """Given a sink with no descriptor, when downloaded, then it still works."""
+    fs = Storix(MemoryBackend())
+    await fs.echo(b'payload', '/small.bin')
+    sink = io.BytesIO()
+
+    written = await fs.download('/small.bin', sink, ranges=4)
+
+    assert written == 7
+    assert sink.getvalue() == b'payload'
+
+
+async def test_download_rejects_a_directory(tmp_path):
+    """Given a directory, when downloaded, then it raises."""
+    fs = Storix(MemoryBackend())
+    await fs.mkdir('/dir')
+
+    with (tmp_path / 'out.bin').open('wb') as handle, pytest.raises(IsADirectoryError):
+        await fs.download('/dir', handle)
+
+
+@pytest.mark.parametrize('ranges', [0, -1])
+async def test_download_rejects_a_non_positive_range_count(tmp_path, ranges):
+    """Given ranges below one, when downloaded, then it raises ValueError."""
+    fs = Storix(MemoryBackend())
+    await fs.echo(b'x', '/f.bin')
+
+    with (tmp_path / 'out.bin').open('wb') as handle, pytest.raises(ValueError):
+        await fs.download('/f.bin', handle, ranges=ranges)
+
+
+async def test_download_below_the_range_threshold_stays_sequential(tmp_path):
+    """Given a small file, when ranges are asked for, then one stream is used."""
+    fs = Storix(MemoryBackend())
+    await fs.echo(b'small', '/small.bin')
+
+    with (tmp_path / 'out.bin').open('wb') as handle:
+        written = await fs.download('/small.bin', handle, ranges=8)
+
+    assert written == 5
+    assert (tmp_path / 'out.bin').read_bytes() == b'small'

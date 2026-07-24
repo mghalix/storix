@@ -89,8 +89,9 @@ These ship in the current release and are covered by the conformance suite.
 Designed or prototyped, not yet shipped.
 
 ### Streaming and transfer reliability
-- Range reads: `read_stream(start=, length=)` port extension for `head`/
-  `tail`/video seeking
+- Range reads: a `read_range(offset=, length=)` port extension for `head`/
+  `tail`/video seeking, and the parallel single-file `download()` it enables
+  (ADR 0032)
 - `echo(atomic=True)` - write-temp-then-move for safe overwrites
 - Define consistent resilience semantics across provider-native retries and an
   optional Storix retry layer, including idempotency, cancellation, backoff,
