@@ -7,14 +7,15 @@ The typer command surface only. Session state and stack access live in
 
 from __future__ import annotations
 
+import ctypes
 import os
 import sys
 import threading
 
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from functools import partial
-from typing import TYPE_CHECKING, Annotated, NoReturn
+from typing import TYPE_CHECKING, Annotated, Final, NoReturn
 
 import typer
 
@@ -72,6 +73,10 @@ if TYPE_CHECKING:
 
 
 __all__ = ['app', 'current_fs', 'main', 'use_fs']
+
+
+_M_MMAP_THRESHOLD: Final[int] = -3
+"""glibc ``mallopt`` parameter selecting the dynamic mmap threshold."""
 
 
 app = typer.Typer(
@@ -907,10 +912,27 @@ def _main(  # pyright: ignore[reportUnusedFunction]
         start_shell(_fs())
 
 
+def _keep_transfer_buffers_returnable() -> None:
+    """Stop glibc from hoarding freed transfer buffers (glibc only).
+
+    glibc raises its mmap threshold to the size of the largest mmap'd block
+    it has seen freed, and from then on carves same-sized allocations out of
+    per-thread arenas, which are returned to the OS only when the free space
+    happens to sit at the arena top. A finished bulk push measured 931 MB
+    resident with about 30 MB of live Python objects behind it. Pinning the
+    threshold keeps multi-MiB chunk buffers on mmap, where ``free`` hands
+    them straight back, for one mmap/munmap pair per buffer. Best effort:
+    anything other than glibc simply has nothing to pin.
+    """
+    with suppress(OSError, AttributeError):
+        ctypes.CDLL('libc.so.6').mallopt(_M_MMAP_THRESHOLD, 128 * 1024)
+
+
 def main() -> None:
     """Console-script entry point (`sx`); exits hard, without joining threads."""
     from .config import expand_alias, load_prefs
 
+    _keep_transfer_buffers_returnable()
     prefs = load_prefs()
     if prefs.alias and len(sys.argv) > 1:
         sys.argv = [sys.argv[0], *expand_alias(sys.argv[1:], prefs.alias)]

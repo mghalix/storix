@@ -11,8 +11,16 @@ DEFAULT_AZURE_READ_CHUNK_SIZE: Final[int] = 4 * 1024 * 1024
 """4 MiB Azure read size, matching the SDK's native download chunks."""
 DEFAULT_AZURE_WRITE_CHUNK_SIZE: Final[int] = 4 * 1024 * 1024
 """4 MiB Azure write batch size, avoiding small-request overhead."""
-DEFAULT_AZURE_READ_PREFETCH_SIZE: Final[int] = 32 * 1024 * 1024
-"""32 MiB Azure initial download request, matching the SDK default."""
+DEFAULT_AZURE_READ_PREFETCH_SIZE: Final[int] = 8 * 1024 * 1024
+"""8 MiB Azure initial download request (the SDK's own default is 32 MiB).
+
+This is the one buffer a download holds whole before any chunk is yielded,
+so it is what a bulk pull multiplies by its fan-out. Measured over a 480 MiB
+concurrent pull, 32 MiB peaked at 708 MB RSS and 8 MiB at 273 MB for the
+same wall time; the cost is one extra range request per 8 MiB on a lone
+stream (about 14 percent on a single large file over a high-latency link).
+Raise it per session with ``AzureBackend(read_prefetch_size=...)`` when
+single-file reads matter more than concurrent ones."""
 DEFAULT_CONCURRENCY: Final[int] = 32
 """Bounded fan-out for concurrent backend operations (per gather call)."""
 BULK_LISTING_KEY_LIMIT: Final[int] = 10_000
