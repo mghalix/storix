@@ -1,7 +1,10 @@
 """Byte-stream normalization, splitting, and batching helpers."""
 
+import inspect
+
 from collections.abc import AsyncIterable, AsyncIterator, Buffer, Iterable, Iterator
 from io import BytesIO
+from typing import cast
 
 from storix.constants import DEFAULT_SOURCE_READ_SIZE
 from storix.types import AsyncDataBuffer, DataBuffer
@@ -189,10 +192,24 @@ async def ensure_chunks(
 
     The scalar check must run first: str and bytes are themselves
     iterable (per character / per int), and must never be treated as
-    streams of items.
+    streams of items. A synchronous readable is pulled with ``read()``
+    for the same reason: a binary file object is also iterable, but by
+    newline-delimited lines, which for bytes is neither bounded (a file
+    with no newline yields itself whole) nor efficient (a 19 GiB video
+    yields ~250-byte chunks). The codegen turns the async-iterable branch
+    below into a plain iterable one, so without this check the sync
+    flavor would hand every file object to it.
     """
     if isinstance(data, (str, Buffer)):
         yield _as_bytes(data)
+        return
+
+    read = getattr(data, 'read', None)
+    if callable(read) and not inspect.iscoroutinefunction(read):
+        # a readable that is not a coroutine function is the IO[...] arm
+        # of the buffer union, whichever flavor is running
+        for chunk in iter_chunks(cast('DataBuffer[str] | DataBuffer[bytes]', data)):
+            yield chunk
         return
 
     if isinstance(data, AsyncIterable):
