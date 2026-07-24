@@ -7,6 +7,7 @@ The typer command surface only. Session state and stack access live in
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 
@@ -907,10 +908,20 @@ def _main(  # pyright: ignore[reportUnusedFunction]
 
 
 def main() -> None:
-    """Console-script entry point (`sx`)."""
+    """Console-script entry point (`sx`); exits hard, without joining threads."""
     from .config import expand_alias, load_prefs
 
     prefs = load_prefs()
     if prefs.alias and len(sys.argv) > 1:
         sys.argv = [sys.argv[0], *expand_alias(sys.argv[1:], prefs.alias)]
-    app()
+    code = 0
+    try:
+        app()
+    except SystemExit as exc:
+        code = exc.code if isinstance(exc.code, int) else int(exc.code is not None)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    # a cancelled push/pull leaves worker threads mid-upload that the
+    # interpreter would otherwise join at shutdown (`bye` waiting on GiBs
+    # of abandoned transfer); nothing here needs a graceful teardown
+    os._exit(code)
