@@ -139,6 +139,47 @@ Both stream, so a file larger than memory moves fine. Uploads detect a
 content type (from the extension, else by sniffing the head) and set it on
 backends that support it.
 
+### Stopping a transfer
+
+Ctrl+C asks a running `push` or `pull` to stop, and it actually stops: every
+stream unwinds at its next chunk boundary, the files that had not started
+never start, and no worker keeps running behind your prompt. A half-written
+local file is removed rather than left looking complete, so `pull` never
+leaves a truncated file where a whole one belongs. The command reports it and
+exits `130`, the shell's usual code for an interrupt:
+
+```console
+/ > pull /media/season-1
+stopping...
+pull: stopped
+```
+
+A second Ctrl+C skips the graceful path and interrupts immediately.
+
+One asymmetry to know: a stopped `pull` removes the destination it was
+writing, a stopped `push` does not. What it leaves depends on the backend,
+because each one commits a write differently (measured, mid-upload stop):
+
+| backend | destination after a stopped push |
+| --- | --- |
+| Azure ADLS Gen2 | the path exists, **length 0** - appended bytes are staged and never flushed |
+| S3, GCS, Azure Blob | whatever the engine committed; an object store publishes on completion, so an interrupted upload may also leave an incomplete multipart upload behind |
+| Local | the bytes written so far |
+
+In every case the previous contents of that path are already gone: a `push`
+truncates its destination when it opens it, so stopping does not preserve
+what was there. storix does not then delete the path, for two reasons. The
+first is that deleting cannot restore what the truncate destroyed, so it
+would trade a wrong file for a missing one while the user is asking storix
+to *stop* doing things. The second is that on an object store there may be
+nothing to delete and the real leftover is an incomplete multipart upload,
+which the storage port has no way to address.
+
+Re-running the same `push` overwrites the destination. If you need a stop
+(or a crash, or a dropped connection) to leave the destination untouched,
+that is atomic writes - `echo(atomic=True)`, write-temp-then-move - which is
+on the roadmap and not implemented today.
+
 Both ends scaffold their destination: `push` creates missing destination
 parents inside the storage root (directories, or key prefixes on an object
 store), and `pull` creates missing local ones, so this works with no prior
