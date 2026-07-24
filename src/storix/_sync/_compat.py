@@ -11,8 +11,11 @@ computing every result eagerly during argument evaluation.
 Error semantics match the async twin: results are collected in submission
 order, so the first exception *in order* propagates unwrapped (no
 ``ExceptionGroup``) and the storix taxonomy survives ``except
-PathNotFoundError``; the ``with`` block waits for the remaining threads on
-exit.
+PathNotFoundError``. Teardown does not join: queued thunks are cancelled
+and in-flight thunks are abandoned, so a Ctrl+C mid-transfer returns to
+the prompt at once instead of waiting out the remaining work. That is the
+async behavior too, where ``gather`` documents "Remaining tasks run to
+completion in the background".
 
 Keep in lockstep with the async twin; both are excluded from codegen.
 """
@@ -35,6 +38,11 @@ def concurrent[T](
     thunk_list = list(thunks)  # may be a generator; materialize once
     if not thunk_list:
         return []
-    with ThreadPoolExecutor(max_workers=limit) as executor:
+    executor = ThreadPoolExecutor(max_workers=limit)
+    try:
         futures = [executor.submit(thunk) for thunk in thunk_list]
         return [future.result() for future in futures]
+    finally:
+        # never join on teardown: a Ctrl+C mid-transfer must return to the
+        # prompt now, and the not-yet-started thunks must not start
+        executor.shutdown(wait=False, cancel_futures=True)
