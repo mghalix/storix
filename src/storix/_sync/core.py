@@ -998,10 +998,12 @@ class Storix:
         Args:
             path: The file to read.
             dest: Writable binary sink. Written from position 0 onward.
-            ranges: How many ranges to fetch at once. ``None`` picks
-                ``DEFAULT_TRANSFER_RANGES`` for a file at or above
-                ``MIN_RANGE_SIZE`` on a backend advertising ``ranged_reads``,
-                and 1 otherwise. 1 forces the sequential path.
+            ranges: Ceiling on how many ranges to fetch at once. ``None``
+                means ``DEFAULT_TRANSFER_RANGES``. It is a ceiling rather
+                than a demand: a file below ``MIN_RANGE_SIZE``, a backend
+                without ``ranged_reads``, and a sink that cannot be written
+                at an offset each stay on the one-stream path regardless.
+                Pass 1 to force that path.
             chunk_size: Maximum chunk pulled from the backend at a time.
                 ``None`` selects the backend's preferred default.
 
@@ -1048,12 +1050,17 @@ class Storix:
         return raw.size
 
     def _range_count(self, size: int, *, ranges: int | None) -> int:
-        """How many ranges to open for a file of ``size`` bytes."""
-        if ranges is not None:
-            return max(1, min(ranges, -(-size // MIN_RANGE_SIZE) or 1))
+        """How many ranges to open for a file of ``size`` bytes.
+
+        ``ranges`` is a ceiling, not a demand: splitting is skipped for a
+        backend that would have to emulate the ranges (it would re-read the
+        file once per range) and for a file too small to earn the extra
+        requests, whatever the caller asked for.
+        """
         if not self._backend.capabilities.ranged_reads or size < MIN_RANGE_SIZE:
             return 1
-        return max(1, min(DEFAULT_TRANSFER_RANGES, size // MIN_RANGE_SIZE))
+        wanted = DEFAULT_TRANSFER_RANGES if ranges is None else ranges
+        return max(1, min(wanted, size // MIN_RANGE_SIZE))
 
     def _fetch_span(
         self,

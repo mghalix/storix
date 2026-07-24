@@ -35,7 +35,15 @@ class TransferEvent:
     """The file being transferred, as this layer sees it."""
 
     transferred: int
-    """Cumulative bytes so far; the consumer owns the total."""
+    """Cumulative bytes this stream has moved so far; the consumer owns
+    the total."""
+
+    offset: int = 0
+    """Where this stream started in the file, and so which stream the
+    event belongs to. Zero for a whole-file ``read_stream``/``write_stream``.
+    A parallel ``download`` reads one file through several ranges at once,
+    each counting its own bytes from zero, so a consumer that accumulates
+    per file must key on ``(path, offset)`` rather than on ``path`` alone."""
 
 
 class ObservabilityLayer(LayerBase):
@@ -69,12 +77,25 @@ class ObservabilityLayer(LayerBase):
         path: PurePosixPath,
         stream: Iterator[bytes],
         sink: Callable[[TransferEvent], Any],
+        offset: int = 0,
     ) -> Iterator[bytes]:
-        """Yield ``stream`` unchanged, emitting one event per chunk."""
+        """Yield ``stream`` unchanged, emitting one event per chunk.
+
+        Args:
+            op: Which direction the bytes move.
+            path: The file being transferred.
+            stream: Chunks to pass through untouched.
+            sink: Consumer called once per chunk.
+            offset: Where this stream starts in the file, carried on every
+                event so a consumer can tell concurrent ranges of one file
+                apart.
+        """
         transferred = 0
         for chunk in stream:
             transferred += len(chunk)
-            result = sink(TransferEvent(op=op, path=path, transferred=transferred))
+            result = sink(
+                TransferEvent(op=op, path=path, transferred=transferred, offset=offset)
+            )
             if inspect.iscoroutine(result):
                 # '_ =' keeps the unasync render lint-clean: stripping
                 # '' would otherwise leave a bare expression (B018)
@@ -106,10 +127,10 @@ class ObservabilityLayer(LayerBase):
         """Stream one byte range, emitting an event per chunk.
 
         ``transferred`` counts this range's own bytes, not the file's: a
-        parallel download runs several ranges at once, so a per-range
-        counter is the only one that stays monotonic per stream. Sinks that
-        aggregate a whole transfer (the progress bar in ``sx``) already sum
-        across paths and ranges.
+        parallel download runs several ranges of one file at once, so a
+        per-range counter is the only one that stays monotonic per stream.
+        The event carries ``offset`` so a sink accumulating a whole
+        transfer can tell those streams apart.
 
         Raises:
             ValueError: If ``offset`` or ``length`` is negative, or if
@@ -121,7 +142,7 @@ class ObservabilityLayer(LayerBase):
             path, offset=offset, length=length, chunk_size=chunk_size
         )
         if self._sink is not None:
-            stream = self._count('read', path, stream, self._sink)
+            stream = self._count('read', path, stream, self._sink, offset)
         yield from stream
 
     def write_stream(

@@ -634,10 +634,13 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
     caller already owns. The wrapped session starts at home, so callers
     must pass absolute paths.
 
-    The sink tracks cumulative bytes per path, so events from concurrently
-    transferring files may interleave in any order and the bar still shows
-    the true sum. Directory transfers run their per-file thunks through the
-    core ``concurrent`` helper, so the sink is called from worker threads:
+    The sink tracks cumulative bytes per stream - keyed by path *and*
+    starting offset, since a parallel ``download`` reads one file through
+    several ranges that each count from zero - so events from concurrently
+    transferring streams may interleave in any order and the bar still
+    shows the true sum. Directory transfers run their per-file thunks
+    through the core ``concurrent`` helper, so the sink is called from
+    worker threads:
     rich's ``Progress.update`` takes its own internal ``RLock``, and our
     lock keeps the tally read-modify-write and the bar update one atomic,
     monotonic step.
@@ -662,14 +665,15 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
         task = progress.add_task(label, total=total)
 
         lock = threading.Lock()
-        seen: dict[PurePosixPath, int] = {}
+        seen: dict[tuple[PurePosixPath, int], int] = {}
         completed = 0
 
         def on_event(event: TransferEvent) -> None:
             nonlocal completed
+            stream = (event.path, event.offset)
             with lock:
-                completed += event.transferred - seen.get(event.path, 0)
-                seen[event.path] = event.transferred
+                completed += event.transferred - seen.get(stream, 0)
+                seen[stream] = event.transferred
                 progress.update(task, completed=completed)
 
         yield fs.with_layer(

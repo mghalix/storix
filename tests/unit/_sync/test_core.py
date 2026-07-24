@@ -1069,8 +1069,11 @@ def test_download_writes_the_whole_file(tmp_path):
     assert dest.read_bytes() == payload
 
 
-def test_download_in_parallel_ranges_matches_sequential(tmp_path):
+def test_download_in_parallel_ranges_matches_sequential(tmp_path, monkeypatch):
     """Given several ranges, when downloaded, then the file is assembled in order."""
+    from storix._sync import core
+
+    monkeypatch.setattr(core, 'MIN_RANGE_SIZE', 1024)
     fs = Storix(MemoryBackend())
     payload = bytes(range(256)) * 4096
     fs.echo(payload, '/big.bin')
@@ -1112,3 +1115,15 @@ def test_download_rejects_a_non_positive_range_count(tmp_path, ranges):
 
     with (tmp_path / 'out.bin').open('wb') as handle, pytest.raises(ValueError):
         fs.download('/f.bin', handle, ranges=ranges)
+
+
+def test_download_below_the_range_threshold_stays_sequential(tmp_path):
+    """Given a small file, when ranges are asked for, then one stream is used."""
+    fs = Storix(MemoryBackend())
+    fs.echo(b'small', '/small.bin')
+
+    with (tmp_path / 'out.bin').open('wb') as handle:
+        written = fs.download('/small.bin', handle, ranges=8)
+
+    assert written == 5
+    assert (tmp_path / 'out.bin').read_bytes() == b'small'
