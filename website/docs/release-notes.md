@@ -1,5 +1,12 @@
 # Release Notes
 
+## [0.4.9] - 2026-07-24
+
+### What's Changed
+#### Fixes
+* fix(cli): abandon cancelled transfer threads instead of joining at exit by @mghalix in https://github.com/mghalix/storix/pull/38
+* perf(cli): bound bulk transfer memory and stop line-iterating uploads by @mghalix in https://github.com/mghalix/storix/pull/39
+
 ## [0.4.8] - 2026-07-22
 
 A performance release: cloud listing and traversal drop from N serial round
