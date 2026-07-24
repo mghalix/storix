@@ -4,7 +4,7 @@ import abc
 
 from typing import TYPE_CHECKING
 
-from storix._async._stream import collect, resolve_chunk_size
+from storix._async._stream import collect, resolve_chunk_size, span_of, validate_span
 from storix.constants import DEFAULT_READ_CHUNK_SIZE, DEFAULT_WRITE_CHUNK_SIZE
 from storix.enums import Capability
 from storix.errors import UnsupportedOperationError
@@ -76,6 +76,33 @@ class BackendBase(abc.ABC):
         data = await self.read(path)
         for offset in range(0, len(data), size):
             yield data[offset : offset + size]
+
+    async def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Stream a byte range, skipping through ``read_stream`` by default.
+
+        Correct for every backend, cheap for none: it transfers the bytes
+        before ``offset`` and throws them away. Backends whose provider can
+        fetch a range in one request override this and set
+        ``capabilities.ranged_reads``, which is what the core gates its
+        parallel reads on (ADR 0032).
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        validate_span(offset, length)
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
+        async for chunk in span_of(
+            self.read_stream(path, chunk_size=size), offset=offset, length=length
+        ):
+            yield chunk
 
     async def write(
         self,

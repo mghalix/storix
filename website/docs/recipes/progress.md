@@ -1,7 +1,7 @@
 # Progress bars
 
 `ObservabilityLayer` emits a `TransferEvent` per chunk with cumulative
-`transferred` bytes. storix never guesses a total: you produced the source, so
+`transferred` bytes for that stream. storix never guesses a total: you produced the source, so
 the total is yours (a local file's `stat().st_size`, an HTTP upload's
 `Content-Length`), and a percentage is your division to make. That one contract
 drives any UI: a bar when you have a total, a counter when you do not.
@@ -30,6 +30,58 @@ logical transfer, whatever other layers sit below it.
     construction, not storix: `echo` and `stream` move data chunk by chunk
     either way, and a real application would stream from a file or socket
     without ever holding the total in memory.
+
+## One file, several streams
+
+`transferred` is cumulative *per stream*, and a parallel `download()` reads one
+file through several ranges at once, each counting from zero. The event carries
+`offset` - where its stream starts in the file - so a sink that accumulates a
+whole transfer keys on the pair:
+
+```python
+seen: dict[tuple[PurePosixPath, int], int] = {}
+completed = 0
+
+
+def on_event(event: TransferEvent) -> None:
+    global completed
+    stream = (event.path, event.offset)
+    completed += event.transferred - seen.get(stream, 0)
+    seen[stream] = event.transferred
+```
+
+Keying on `path` alone silently undercounts: with eight ranges in flight the
+bar reports one range's bytes rather than the file's. `offset` is 0 for a
+whole-file `stream()` or `echo()`, so a sink written this way is correct for
+every transfer, sequential or parallel.
+
+## Stop a transfer from the sink
+
+The sink runs once per chunk, in whichever thread produced it, which makes it
+the one place a transfer can be stopped from. Raise, and the exception unwinds
+that stream; with a bulk transfer running several files at once, the others
+stop at their own next chunk:
+
+```python
+import threading
+
+stop = threading.Event()
+
+
+class Stopped(Exception):
+    """Raised to unwind a transfer the caller asked to stop."""
+
+
+def on_event(event: TransferEvent) -> None:
+    if stop.is_set():
+        raise Stopped
+    bar.update(event.transferred)
+```
+
+This is exactly how `sx` implements Ctrl+C: the signal handler sets an event
+instead of raising, and the sink turns it into an exception inside every
+worker. A partially written destination is the caller's to clean up - storix
+does not guess whether a half-file is worth keeping.
 
 ## No total? Count bytes
 

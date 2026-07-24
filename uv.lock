@@ -1772,7 +1772,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-magic" },
     { name = "wrapt" },
-    { name = "zensical" },
 ]
 
 [package.optional-dependencies]
@@ -1847,6 +1846,7 @@ dev = [
     { name = "twine" },
     { name = "types-aiofiles" },
     { name = "vulture" },
+    { name = "zensical" },
     { name = "zizmor" },
 ]
 
@@ -1873,7 +1873,6 @@ requires-dist = [
     { name = "storix", extras = ["s3"], marker = "extra == 'r2'" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.13.0" },
     { name = "wrapt", marker = "extra == 'core'", specifier = ">=2.0.1" },
-    { name = "zensical", specifier = "==0.0.50" },
 ]
 provides-extras = ["core", "local", "azadls", "azblob", "azure", "s3", "r2", "minio", "gcs", "cli", "all"]
 
@@ -1894,6 +1893,7 @@ dev = [
     { name = "twine", specifier = ">=6.2.0,<7" },
     { name = "types-aiofiles", specifier = ">=24.1.0.20250606" },
     { name = "vulture", specifier = ">=2.16" },
+    { name = "zensical", specifier = "==0.0.50" },
     { name = "zizmor", specifier = ">=1.27.0,<2" },
 ]
 

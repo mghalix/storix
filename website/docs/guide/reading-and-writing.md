@@ -135,6 +135,12 @@ The built-in defaults balance syscall/request overhead with bounded host memory:
 | Memory | 1 MiB | not applicable (the file is already in memory) | the stored file |
 | Azure ADLS Gen2 | 4 MiB | 4 MiB | up to 8 MiB initial SDK request |
 
+One stream is one connection. When the destination is a file rather than a
+response body, `download(path, sink)` fetches several ranges of the same file at
+once on backends that advertise `ranged_reads`, which is the difference between
+one connection's throughput and the link's; see
+[Tune transfers](../recipes/transfers.md).
+
 Azure's SDK buffers live in your process even though the data is in the cloud.
 Configure its provider-level limits with `read_chunk_size`,
 `write_chunk_size`, and `read_prefetch_size` (or the matching
