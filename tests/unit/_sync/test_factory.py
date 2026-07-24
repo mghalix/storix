@@ -273,3 +273,16 @@ def test_register_backend_extends_the_factory():
         assert received == {'flavor': 'x'}
     finally:
         _BUILDERS.pop('unit-test')
+
+
+def test_transfer_sizes_reach_every_provider_backend(tmp_path):
+    """Given transfer settings, when a session is built, then the backend uses them."""
+    fs = get_storage(
+        'local',
+        base=str(tmp_path),
+        read_chunk_size=4096,
+        write_chunk_size=8192,
+    )
+
+    assert fs.backend.default_read_chunk_size == 4096
+    assert fs.backend.default_write_chunk_size == 8192
