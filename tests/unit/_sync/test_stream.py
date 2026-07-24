@@ -159,6 +159,22 @@ def test_ensure_chunks_reads_binary_file_by_size_not_by_line():
     assert sizes == [len(payload)]
 
 
+def test_ensure_chunks_keeps_iterating_a_body_style_reader():
+    """A no-argument read() (httpx-style) must not be called with a size."""
+
+    class BodyReader:
+        def __init__(self, body: bytes) -> None:
+            self._body = body
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __iter__(self):
+            yield self._body
+
+    assert _drain(BodyReader(b'whole body')) == b'whole body'
+
+
 def test_ensure_chunks_async_iterable():
     def agen() -> Iterator[bytes]:
         yield b'async '
