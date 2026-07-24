@@ -14,7 +14,7 @@ STORIX_AZURE_CREDENTIAL=...
 # Optional, in bytes:
 STORIX_AZURE_READ_CHUNK_SIZE=4194304
 STORIX_AZURE_WRITE_CHUNK_SIZE=4194304
-STORIX_AZURE_READ_PREFETCH_SIZE=33554432
+STORIX_AZURE_READ_PREFETCH_SIZE=8388608
 ```
 
 ```python
@@ -36,7 +36,8 @@ Explicit overrides win over the environment:
 Overrides map one-to-one onto a backend's constructor keywords, so `base=` is a
 `LocalBackend` option, `container=` an `AzureBackend` option, and so on. Azure's
 transfer sizes must be positive; its defaults are 4 MiB for range reads and
-write batches, plus a 32 MiB initial download request.
+write batches, plus an 8 MiB initial download request. What those sizes trade
+against each other is in [Tune transfers](transfers.md).
 
 The cached `get_fs()` is a process-level resource. Close it from your
 application's shutdown hook. The [FastAPI recipe](fastapi.md) shows the same

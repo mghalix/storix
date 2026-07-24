@@ -81,7 +81,7 @@ STORIX_AZURE_CREDENTIAL=...
 # optional transfer tuning (bytes):
 STORIX_AZURE_READ_CHUNK_SIZE=4194304
 STORIX_AZURE_WRITE_CHUNK_SIZE=4194304
-STORIX_AZURE_READ_PREFETCH_SIZE=33554432
+STORIX_AZURE_READ_PREFETCH_SIZE=8388608
 # for local:
 STORIX_LOCAL_BASE=~/storix-data
 # optional: skip account-kind auto-detection (needed for container-scoped
@@ -125,10 +125,12 @@ configurations, MinIO included.
     identity that lacks permission raises `PermissionDeniedError`. The original
     Azure SDK exception remains chained for diagnosis.
 
-Azure defaults to 4 MiB range reads and write batches, with a 32 MiB initial
-download request. These SDK buffers live in the application's memory. Tune them
-at provider construction when your host or workload needs different bounds;
-use per-call `stream(chunk_size=...)` and `echo(chunk_size=...)` for consumer and
+Azure defaults to 4 MiB range reads and write batches, with an 8 MiB initial
+download request. These SDK buffers live in the application's memory, once per
+transfer in flight, so a concurrent pull multiplies them. Tune them at provider
+construction when your host or workload needs different bounds (see
+[Tune transfers](../recipes/transfers.md) for what each size trades away); use
+per-call `stream(chunk_size=...)` and `echo(chunk_size=...)` for consumer and
 write-batch control.
 
 ## Capabilities
