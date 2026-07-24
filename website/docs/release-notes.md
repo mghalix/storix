@@ -2,10 +2,62 @@
 
 ## [0.4.9] - 2026-07-24
 
-### What's Changed
-#### Fixes
-* fix(cli): abandon cancelled transfer threads instead of joining at exit by @mghalix in https://github.com/mghalix/storix/pull/38
-* perf(cli): bound bulk transfer memory and stop line-iterating uploads by @mghalix in https://github.com/mghalix/storix/pull/39
+A transfer correctness and cost release. Cancelling a bulk `push`/`pull` now
+takes effect immediately instead of hanging the shell on exit, uploads no
+longer walk a binary file newline by newline, and a bulk transfer's resident
+memory is bounded by what it actually needs rather than by what the allocator
+felt like keeping. Measured end to end on a real Azure (ADLS) container: a 480
+MiB pull peaked at 273 MB instead of 814 MB, and a 192 MiB push spent 2.49s of
+CPU instead of 5.85s, both at equal or better wall time.
+
+### Fixed
+
+- **Ctrl+C during a transfer aborts now** (#38): `concurrent` no longer joins
+  in-flight thunks while tearing down, so the first interrupt returns to the
+  prompt and the queued files never start. `sx` then exits without waiting on
+  the abandoned transfer threads, which is what left `bye` hanging for minutes
+  and printed an `Exception ignored on threading shutdown` traceback on a second
+  Ctrl+C.
+- **Binary uploads are read by size, not by line** (#39): `ensure_chunks`
+  checked for an iterable before a readable, and a binary file object is
+  iterable by newline-delimited lines. In the sync flavor - the one `sx` runs -
+  every upload was pulled in newline-sized pieces (about 250 bytes on random
+  data), with one progress event per piece, and a file containing no newline was
+  materialized whole. Readables now go through `read()` at 1 MiB. Uploads of
+  incompressible data (video, archives) are substantially faster and use a
+  fraction of the CPU.
+
+### Changed
+
+- **Azure's initial download request is 8 MiB, was 32 MiB** (#39): it is the one
+  buffer a download holds whole before yielding a chunk, so a concurrent pull
+  multiplies it by the number of streams. The SDK re-chunks it to 4 MiB
+  immediately, so the extra was resident memory and nothing else. A lone stream
+  now pays one range request per 8 MiB, about 14 percent slower on a single
+  large file over a high-latency link; restore the old behavior per session with
+  `STORIX_AZURE_READ_PREFETCH_SIZE=33554432` or
+  `AzureBackend(read_prefetch_size=...)`.
+- **`sx` returns freed transfer buffers to the operating system** (#39): the CLI
+  pins glibc's mmap threshold at startup, so multi-megabyte chunk buffers are
+  released on free instead of being retained in per-thread allocator arenas. A
+  finished bulk push previously sat at 931 MB resident with about 30 MB of live
+  Python objects behind it. No-op on any other libc, and deliberately not done
+  on library import: a library has no business setting a process-wide allocator
+  policy for your application.
+
+### Documentation
+
+- **Tune transfers** (#39): a new recipe covering the memory model (streams in
+  flight times per-stream buffers), the measured prefetch curve, which
+  `STORIX_*` variable moves what, the request-count and rate-limit cost of
+  smaller chunks, and the transfer limits that still stand.
+
+### Internal
+
+- `benchmarks/` is now `bench/`, linted and formatted with the rest of the
+  repository, and gains `bench/transfer.py`: bulk push/pull wall time,
+  throughput, peak and retained RSS at a given fan-out, reproducible against a
+  latency-injecting local backend or real against Azure.
 
 ## [0.4.8] - 2026-07-22
 
