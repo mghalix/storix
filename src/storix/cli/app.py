@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import signal
 import sys
 import threading
 
@@ -67,6 +68,7 @@ from .state import (
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
     from pathlib import PurePosixPath
+    from types import FrameType
 
     from storix import Storix
     from storix.models import DirEntry, RawStat
@@ -625,8 +627,67 @@ def exists(paths: Annotated[list[str], typer.Argument()]) -> None:
 # --- local <-> remote transfer ---
 
 
+class _TransferStoppedError(Exception):
+    """Raised inside a transfer's chunk loop once the user asks it to stop.
+
+    Not part of the storix error taxonomy: it never leaves ``sx``, and it
+    exists only to unwind the worker threads of a transfer that the user
+    interrupted.
+    """
+
+
 @contextmanager
-def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
+def _cancellable() -> Generator[threading.Event]:
+    """Make the next Ctrl+C ask a transfer to stop instead of interrupting.
+
+    A transfer runs its files on worker threads, and a thread blocked in a
+    socket read cannot be interrupted: ``KeyboardInterrupt`` only ever
+    reaches the main thread, so the prompt would come back while the
+    transfer kept running. Instead the first Ctrl+C sets an event that the
+    progress sink checks once per chunk (the one place every transfer path
+    already calls into ``sx``), so each stream unwinds at its next chunk
+    boundary and nothing outlives the command. A second Ctrl+C restores the
+    normal interrupt for an immediate, ungraceful exit.
+
+    Yields:
+        The event, set when the user has asked for the transfer to stop.
+
+    Raises:
+        KeyboardInterrupt: On the second Ctrl+C, from the default handler.
+    """
+    stop = threading.Event()
+
+    def ask_to_stop(signum: int, frame: FrameType | None) -> None:
+        del frame
+        if stop.is_set():
+            signal.signal(signal.SIGINT, previous)
+            raise KeyboardInterrupt(signum)
+        stop.set()
+        console.print('[yellow]stopping...[/yellow]')
+
+    try:
+        previous = signal.signal(signal.SIGINT, ask_to_stop)
+    except ValueError:
+        # not the main thread (an embedded sx): no handler to install, and
+        # the transfer simply keeps today's uninterruptible behavior
+        yield stop
+        return
+    try:
+        yield stop
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
+def _cancelled(cmd: str) -> NoReturn:
+    """Report an interrupted transfer and exit with the shell's SIGINT code."""
+    console.print(f'[yellow]{cmd}: stopped[/yellow]')
+    raise typer.Exit(130)
+
+
+@contextmanager
+def _transfer_progress(
+    fs: Storix, label: str, total: int, stop: threading.Event | None = None
+) -> Generator[Storix]:
     """Session emitting into a live bar; sx owns ``total`` (ADR 0019).
 
     Wraps ``fs`` in an outermost ``ObservabilityLayer`` whose sink moves a
@@ -645,13 +706,21 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
     lock keeps the tally read-modify-write and the bar update one atomic,
     monotonic step.
 
+    The sink is also the transfer's cancellation point: it runs once per
+    chunk on every path, in whichever thread produced that chunk, so
+    checking ``stop`` there is what lets a Ctrl+C unwind every stream.
+
     Args:
         fs: The session to wrap.
         label: Bar description, typically the file's basename.
         total: The transfer's total size in bytes.
+        stop: Event that asks the transfer to stop; ``None`` never stops.
 
     Yields:
         The wrapped session; use it for the one transfer.
+
+    Raises:
+        _TransferStoppedError: From a worker thread, once ``stop`` is set.
     """
     with Progress(
         TextColumn('[progress.description]{task.description}'),
@@ -670,6 +739,8 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
 
         def on_event(event: TransferEvent) -> None:
             nonlocal completed
+            if stop is not None and stop.is_set():
+                raise _TransferStoppedError
             stream = (event.path, event.offset)
             with lock:
                 completed += event.transferred - seen.get(stream, 0)
@@ -723,12 +794,21 @@ def pull(
         for parent in {out_path.parent for _, out_path in targets}:
             parent.mkdir(parents=True, exist_ok=True)
         try:
-            with _transfer_progress(fs, src.name, total_bytes) as obs:
+            with (
+                _cancellable() as stop,
+                _transfer_progress(fs, src.name, total_bytes, stop) as obs,
+            ):
                 ranges = _range_budget(len(targets))
 
                 def fetch(remote_file: StorixPath, out_path: Path) -> None:
-                    with out_path.open('wb') as out:
-                        obs.download(remote_file, out, ranges=ranges)
+                    try:
+                        with out_path.open('wb') as out:
+                            obs.download(remote_file, out, ranges=ranges)
+                    except _TransferStoppedError:
+                        # a half-written file is not a file the user asked
+                        # for; leave the destination as it was
+                        out_path.unlink(missing_ok=True)
+                        raise
 
                 # per-file streams batched through the core concurrent
                 # helper, not N serial round trips (see state.py)
@@ -736,6 +816,8 @@ def pull(
                     partial(fetch, remote_file, out_path)
                     for remote_file, out_path in targets
                 )
+        except _TransferStoppedError:
+            _cancelled('pull')
         except StorageError as exc:
             _die('pull', exc)
         console.print(f'{remote} -> {dst} ({len(remote_files)} files)')
@@ -745,10 +827,14 @@ def pull(
     dst.parent.mkdir(parents=True, exist_ok=True)
     try:
         with (
-            _transfer_progress(fs, src.name, st.size) as obs,
+            _cancellable() as stop,
+            _transfer_progress(fs, src.name, st.size, stop) as obs,
             dst.open('wb') as out,
         ):
             obs.download(src, out, ranges=_range_budget(1))
+    except _TransferStoppedError:
+        dst.unlink(missing_ok=True)
+        _cancelled('pull')
     except StorageError as exc:
         _die('pull', exc)
     console.print(f'{remote} -> {dst}')
@@ -787,7 +873,10 @@ def push(
         dirs = {dst} | {remote_file.parent for _, remote_file in targets}
         try:
             fs.mkdir(*sorted(dirs), parents=True)
-            with _transfer_progress(fs, src.name, total_bytes) as obs:
+            with (
+                _cancellable() as stop,
+                _transfer_progress(fs, src.name, total_bytes, stop) as obs,
+            ):
 
                 def send(file_path: Path, remote_file: StorixPath) -> None:
                     with file_path.open('rb') as data:
@@ -805,6 +894,11 @@ def push(
                     partial(send, file_path, remote_file)
                     for file_path, remote_file in targets
                 )
+        except _TransferStoppedError:
+            # the remote file being written when the stop arrived keeps
+            # whatever the backend had already accepted; re-running the
+            # push overwrites it
+            _cancelled('push')
         except StorageError as exc:
             _die('push', exc)
         console.print(f'{local} -> {dst} ({len(files)} files)')
@@ -817,7 +911,8 @@ def push(
         # stays strict about them
         fs.mkdir(dst.parent, parents=True)
         with (
-            _transfer_progress(fs, src.name, src.stat().st_size) as obs,
+            _cancellable() as stop,
+            _transfer_progress(fs, src.name, src.stat().st_size, stop) as obs,
             src.open('rb') as data,
         ):
             content_type = None
@@ -825,6 +920,8 @@ def push(
                 content_type = detect_mimetype(buf=data.read(4096), path=src.name)
                 data.seek(0)
             obs.echo(data, dst, content_type=content_type)
+    except _TransferStoppedError:
+        _cancelled('push')
     except StorageError as exc:
         _die('push', exc)
     console.print(f'{local} -> {dst}')
