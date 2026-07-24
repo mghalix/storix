@@ -139,6 +139,21 @@ Both stream, so a file larger than memory moves fine. Uploads detect a
 content type (from the extension, else by sniffing the head) and set it on
 backends that support it.
 
+### Tuning a transfer
+
+`sx` reads the same `STORIX_*` environment your application does, so the
+transfer knobs apply to the CLI without a separate config surface:
+
+```bash
+STORIX_MAX_TRANSFER_RANGES=1 sx pull /media/movie.mkv   # one stream per file
+STORIX_AZURE_READ_PREFETCH_SIZE=4194304 sx pull /media  # less memory per stream
+STORIX_S3_READ_CHUNK_SIZE=8388608 sx -p s3 pull /media  # fewer, larger requests
+```
+
+What each one trades away - memory per in-flight transfer against requests
+per byte, and speed against transaction count - is in
+[Tune transfers](../recipes/transfers.md).
+
 ### Stopping a transfer
 
 Ctrl+C asks a running `push` or `pull` to stop, and it actually stops: every

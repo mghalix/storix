@@ -34,6 +34,7 @@ from rich.text import Text
 
 from storix import ObservabilityLayer, TransferEvent
 from storix._sync._compat import concurrent
+from storix.config import StorixSettings
 from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
 from storix.errors import StorageError
@@ -761,8 +762,16 @@ def _range_budget(files: int) -> int:
     narrow one (few files, or one large file) fills the same number of
     connections instead of idling (ADR 0032). The core still declines to
     split a file below ``MIN_RANGE_SIZE``.
+
+    ``STORIX_MAX_TRANSFER_RANGES`` lowers the ceiling for anyone who would
+    rather spend fewer requests; 1 keeps every file on one stream. Read per
+    transfer rather than cached, so exporting it takes effect immediately.
+
+    Args:
+        files: How many files this transfer has in flight.
     """
-    return max(1, min(DEFAULT_TRANSFER_RANGES, DEFAULT_CONCURRENCY // max(files, 1)))
+    ceiling = min(DEFAULT_TRANSFER_RANGES, StorixSettings().max_transfer_ranges)
+    return max(1, min(ceiling, DEFAULT_CONCURRENCY // max(files, 1)))
 
 
 @app.command()

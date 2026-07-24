@@ -23,7 +23,11 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final
 
 from storix._async._stream import batch_chunks, resolve_chunk_size, validate_span
-from storix.constants import DEFAULT_URL_EXPIRY_SECONDS
+from storix.constants import (
+    DEFAULT_READ_CHUNK_SIZE,
+    DEFAULT_URL_EXPIRY_SECONDS,
+    DEFAULT_WRITE_CHUNK_SIZE,
+)
 from storix.enums import Capability, PathKind
 from storix.errors import (
     AlreadyExistsError,
@@ -123,17 +127,44 @@ class OpendalBackend(BackendBase):
     paths never carry trailing slashes.
     """
 
-    def __init__(self, service: str, /, **options: str) -> None:
+    def __init__(
+        self,
+        service: str,
+        /,
+        *,
+        read_chunk_size: int = DEFAULT_READ_CHUNK_SIZE,
+        write_chunk_size: int = DEFAULT_WRITE_CHUNK_SIZE,
+        read_prefetch_size: int | None = None,
+        **options: str,
+    ) -> None:
         """Create an opendal-backed storage backend.
 
         Args:
             service: opendal service scheme, e.g. ``'s3'`` or ``'memory'``.
+            read_chunk_size: Maximum chunk a read yields, and the size
+                opendal is asked to fetch per request.
+            write_chunk_size: Batch size accumulated before each write
+                request.
+            read_prefetch_size: Size of a stream's opening read. ``None``
+                means the read chunk size, so a stream holds one chunk;
+                a larger value trades memory per in-flight transfer for
+                fewer round trips on a lone stream.
             options: Service-specific opendal configuration, passed through
                 to the operator untouched.
 
         Raises:
-            ConfigurationError: If opendal rejects the service or options.
+            ConfigurationError: If opendal rejects the service or options,
+                or if any transfer size is not positive.
         """
+        self.default_read_chunk_size = resolve_chunk_size(
+            read_chunk_size, read_chunk_size
+        )
+        self.default_write_chunk_size = resolve_chunk_size(
+            write_chunk_size, write_chunk_size
+        )
+        self._read_prefetch_size = resolve_chunk_size(
+            read_prefetch_size, self.default_read_chunk_size
+        )
         self._service = service
         self._options = options
         try:
@@ -237,7 +268,9 @@ class OpendalBackend(BackendBase):
         # explicit close, not `async with`: opendal's AsyncFile.__aexit__
         # stub is mistyped as returning None instead of an awaitable
         try:
-            file = await self._op.open(self._key(path), 'rb')
+            file = await self._op.open(
+                self._key(path), 'rb', chunk=size, prefetch=self._read_prefetch_size
+            )
             try:
                 while chunk := await file.read(size):
                     yield chunk
@@ -271,7 +304,9 @@ class OpendalBackend(BackendBase):
         # explicit close, not `async with`: opendal's AsyncFile.__aexit__
         # stub is mistyped as returning None instead of an awaitable
         try:
-            file = await self._op.open(self._key(path), 'rb')
+            file = await self._op.open(
+                self._key(path), 'rb', chunk=size, prefetch=self._read_prefetch_size
+            )
             try:
                 await file.seek(offset)
                 while remaining and (chunk := await file.read(min(size, remaining))):
