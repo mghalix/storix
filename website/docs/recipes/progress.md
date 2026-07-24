@@ -55,6 +55,48 @@ bar reports one range's bytes rather than the file's. `offset` is 0 for a
 whole-file `stream()` or `echo()`, so a sink written this way is correct for
 every transfer, sequential or parallel.
 
+## Stop a transfer from the sink
+
+The sink runs once per chunk, in whichever thread produced it, which makes it
+the one place a transfer can be stopped from. Raise, and the exception unwinds
+that stream; with a bulk transfer running several files at once, the others
+stop at their own next chunk:
+
+```python
+import threading
+
+from storix.errors import TransferStoppedError
+
+stop = threading.Event()
+
+
+def on_event(event: TransferEvent) -> None:
+    if stop.is_set():
+        raise TransferStoppedError
+    bar.update(event.transferred)
+```
+
+`TransferStoppedError` is deliberately **not** a `StorageError` - nothing
+failed - and it derives from `BaseException`, the same choice the standard
+library makes for `asyncio.CancelledError`. A stop request must not be
+swallowed by an `except Exception` between your callback and your code: in a
+custom layer, a third-party backend, or a provider SDK. So catch it by name:
+
+```python
+try:
+    fs.download("/media/movie.mkv", sink)
+except TransferStoppedError:
+    partial.unlink(missing_ok=True)
+```
+
+Any exception you raise from a sink will unwind the stream - that is just how
+generators work - but only this one is guaranteed to reach you intact.
+
+This is exactly how `sx` implements Ctrl+C: the signal handler sets an event
+instead of raising, and the sink turns it into `TransferStoppedError` inside
+every worker. A partially written destination is the caller's to clean up -
+storix does not guess whether a half-file is worth keeping.
+
 ## No total? Count bytes
 
 A truly unbounded source (a generator, a pipe) has no end to know. Render a
