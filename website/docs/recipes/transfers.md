@@ -86,13 +86,58 @@ memory that Python has already released. It is a no-op on any other libc, and
 it is deliberately not done on library import - a library has no business
 setting a process-wide allocator policy for your application.
 
+## One file, several ranges
+
+One stream is one connection, and a connection to an object store is bounded by
+round trips rather than bandwidth. So a directory of eight hundred files
+saturates a link that a single large file cannot come close to.
+
+`download()` closes that gap: it fetches several byte ranges of the same file at
+once and writes each at its own offset. Measured on one home connection to
+Azure, a 200 MiB file, bytes verified identical on every run:
+
+| ranges | wall   | throughput |
+| ------ | -----: | ---------: |
+| 1      | 61.53s |   3.3 MB/s |
+| 8      | 25.51s |   7.8 MB/s |
+
+```python
+from storix import get_storage
+
+fs = get_storage("azure")
+with open("movie.mkv", "wb") as sink:
+    fs.download("/media/movie.mkv", sink)      # ranges chosen for you
+    fs.download("/media/movie.mkv", sink, ranges=1)   # force one stream
+```
+
+`sx pull` uses it automatically. The number of ranges comes out of the fan-out
+budget the transfer is **not** using:
+
+```text
+ranges = clamp(32 / files in flight, 1, 8)
+```
+
+An eight-hundred-file pull already saturates 32 streams, so it opens one range
+per file and behaves exactly as before. A six-file pull opens five ranges each.
+A single-file pull opens eight. Total requests in flight never exceeds what a
+directory transfer already issues, so this does not make throttling more likely
+than the transfers you run today.
+
+Files below 64 MiB are never split: a second request would cost more than the
+round trip it saves.
+
+### Turning it down
+
+Every range is a separate request. If your provider quota or your bill prefers
+fewer, larger requests, `ranges=1` restores sequential reads for a call, and a
+backend that does not advertise `ranged_reads` never splits at all. A sink that
+cannot be written at an offset (a `BytesIO`, a pipe, a socket) also streams
+sequentially, with identical output.
+
 ## Current limits
 
-- **The fan-out is fixed at 32.** It is a constant today, not a setting. A
-  directory with fewer files than that uses fewer streams, which is why a
-  six-file pull is much slower than an eight-hundred-file push over the same
-  link.
-- **A single file uses a single stream.** storix parallelizes across files,
-  never within one, so one large file transfers at one connection's speed
-  however fast your link is. Range-parallel reads are under consideration;
-  see the roadmap.
+- **The fan-out is fixed at 32.** It is a constant today, not a setting. It is
+  the ceiling both file-level and range-level parallelism share.
+- **Uploads are one connection per file.** The symmetric case, parallel
+  multi-part uploads, is not implemented; `push` is not currently the
+  bottleneck. See ADR 0032.

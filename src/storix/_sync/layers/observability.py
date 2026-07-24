@@ -9,7 +9,7 @@ import inspect
 from typing import TYPE_CHECKING
 
 from storix._dto import dto
-from storix._sync._stream import validate_chunk_size
+from storix._sync._stream import validate_chunk_size, validate_span
 
 from .base import LayerBase
 
@@ -91,6 +91,35 @@ class ObservabilityLayer(LayerBase):
         """
         validate_chunk_size(chunk_size)
         stream = self._inner.read_stream(path, chunk_size=chunk_size)
+        if self._sink is not None:
+            stream = self._count('read', path, stream, self._sink)
+        yield from stream
+
+    def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> Iterator[bytes]:
+        """Stream one byte range, emitting an event per chunk.
+
+        ``transferred`` counts this range's own bytes, not the file's: a
+        parallel download runs several ranges at once, so a per-range
+        counter is the only one that stays monotonic per stream. Sinks that
+        aggregate a whole transfer (the progress bar in ``sx``) already sum
+        across paths and ranges.
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        validate_span(offset, length)
+        stream = self._inner.read_range(
+            path, offset=offset, length=length, chunk_size=chunk_size
+        )
         if self._sink is not None:
             stream = self._count('read', path, stream, self._sink)
         yield from stream

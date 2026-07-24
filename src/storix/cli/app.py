@@ -33,6 +33,7 @@ from rich.text import Text
 
 from storix import ObservabilityLayer, TransferEvent
 from storix._sync._compat import concurrent
+from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
 from storix.errors import StorageError
 
@@ -677,6 +678,18 @@ def _transfer_progress(fs: Storix, label: str, total: int) -> Generator[Storix]:
         )
 
 
+def _range_budget(files: int) -> int:
+    """How many ranges one file of a transfer may open at once.
+
+    Range parallelism spends the fan-out budget the transfer is not using
+    rather than adding to it, so a wide transfer keeps today's shape and a
+    narrow one (few files, or one large file) fills the same number of
+    connections instead of idling (ADR 0032). The core still declines to
+    split a file below ``MIN_RANGE_SIZE``.
+    """
+    return max(1, min(DEFAULT_TRANSFER_RANGES, DEFAULT_CONCURRENCY // max(files, 1)))
+
+
 @app.command()
 def pull(
     remote: Annotated[
@@ -707,11 +720,11 @@ def pull(
             parent.mkdir(parents=True, exist_ok=True)
         try:
             with _transfer_progress(fs, src.name, total_bytes) as obs:
+                ranges = _range_budget(len(targets))
 
                 def fetch(remote_file: StorixPath, out_path: Path) -> None:
                     with out_path.open('wb') as out:
-                        for chunk in obs.stream(remote_file):
-                            out.write(chunk)
+                        obs.download(remote_file, out, ranges=ranges)
 
                 # per-file streams batched through the core concurrent
                 # helper, not N serial round trips (see state.py)
@@ -731,8 +744,7 @@ def pull(
             _transfer_progress(fs, src.name, st.size) as obs,
             dst.open('wb') as out,
         ):
-            for chunk in obs.stream(src):
-                out.write(chunk)
+            obs.download(src, out, ranges=_range_budget(1))
     except StorageError as exc:
         _die('pull', exc)
     console.print(f'{remote} -> {dst}')

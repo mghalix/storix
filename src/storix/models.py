@@ -116,6 +116,14 @@ class Capabilities:
     presigned_urls: bool = False
     """Can mint time-limited shareable URLs (e.g. SAS) for paths."""
 
+    ranged_reads: bool = False
+    """Can fetch a byte range in one request, rather than by skipping
+    through a stream from the start. Like ``bulk_listing``, an internal
+    speed gate rather than a user-facing feature: every backend answers
+    ``read_range`` correctly, and the core consults this only to decide
+    whether reading one file through several parallel ranges is worth it
+    (ADR 0032). Never raises."""
+
     bulk_listing: bool = False
     """Can list every descendant of a directory in one cheap operation
     (a single delimiter-less list on object stores). An internal speed

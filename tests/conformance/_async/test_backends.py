@@ -243,6 +243,59 @@ async def test_read_stream_honors_chunk_size(backend: StorageBackend):
     assert all(0 < len(chunk) <= 4 for chunk in chunks)
 
 
+async def test_read_range_yields_only_the_range(backend: StorageBackend):
+    await put(backend, '/a.txt', b'0123456789')
+    chunks = [c async for c in backend.read_range(P('/a.txt'), offset=3, length=4)]
+    assert b''.join(chunks) == b'3456'
+
+
+async def test_read_range_stops_at_the_end_of_the_file(backend: StorageBackend):
+    await put(backend, '/a.txt', b'0123456789')
+    chunks = [c async for c in backend.read_range(P('/a.txt'), offset=8, length=99)]
+    assert b''.join(chunks) == b'89'
+
+
+async def test_read_range_past_the_end_is_empty(backend: StorageBackend):
+    await put(backend, '/a.txt', b'0123456789')
+    chunks = [c async for c in backend.read_range(P('/a.txt'), offset=99, length=4)]
+    assert chunks == []
+
+
+async def test_read_range_honors_chunk_size(backend: StorageBackend):
+    await put(backend, '/a.txt', b'0123456789')
+    chunks = [
+        c
+        async for c in backend.read_range(P('/a.txt'), offset=1, length=8, chunk_size=3)
+    ]
+    assert b''.join(chunks) == b'12345678'
+    assert all(0 < len(chunk) <= 3 for chunk in chunks)
+
+
+async def test_read_range_ranges_reassemble_the_whole_file(backend: StorageBackend):
+    """Every backend's ranges must tile the file exactly, native or emulated."""
+    await put(backend, '/a.txt', b'0123456789')
+    spans = [(0, 4), (4, 4), (8, 4)]
+    parts = [
+        b''.join([c async for c in backend.read_range(P('/a.txt'), offset=o, length=n)])
+        for o, n in spans
+    ]
+    assert b''.join(parts) == b'0123456789'
+
+
+@pytest.mark.parametrize(('offset', 'length'), [(-1, 4), (0, -1)])
+async def test_read_range_rejects_a_negative_span(
+    backend: StorageBackend, offset: int, length: int
+):
+    await put(backend, '/a.txt', b'x')
+    with pytest.raises(ValueError, match='must not be negative'):
+        [
+            chunk
+            async for chunk in backend.read_range(
+                P('/a.txt'), offset=offset, length=length
+            )
+        ]
+
+
 @pytest.mark.parametrize('chunk_size', [0, -1])
 async def test_read_stream_rejects_non_positive_chunk_size(
     backend: StorageBackend, chunk_size: int

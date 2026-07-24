@@ -16,7 +16,7 @@ import stat as stat_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from storix._sync._stream import batch_chunks, resolve_chunk_size
+from storix._sync._stream import batch_chunks, resolve_chunk_size, validate_span
 from storix.enums import PathKind
 from storix.errors import PathNotFoundError, from_os_error
 from storix.models import Capabilities, Entry, RawStat
@@ -46,9 +46,10 @@ class LocalBackend(BackendBase):
     point outside it - pair with SandboxLayer when that matters.
     """
 
-    capabilities: Capabilities = Capabilities(provisioning=True)
-    """Only ``provisioning``: the base directory is a root the backend can
-    create on demand (it does so at construction). No cloud-only features."""
+    capabilities: Capabilities = Capabilities(provisioning=True, ranged_reads=True)
+    """``provisioning``: the base directory is a root the backend can create
+    on demand (it does so at construction). ``ranged_reads``: a range is a
+    seek. No cloud-only features."""
 
     def __init__(self, base: StrPathLike) -> None:
         self._base = Path(base).expanduser().resolve()
@@ -87,6 +88,35 @@ class LocalBackend(BackendBase):
             raise from_os_error(exc, path) from exc
         try:
             while chunk := handle.read(size):
+                yield chunk
+        finally:
+            handle.close()
+
+    def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> Iterator[bytes]:
+        """Seek to the range and stream it, no bytes read before it.
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        validate_span(offset, length)
+        size = resolve_chunk_size(chunk_size, self.default_read_chunk_size)
+        try:
+            handle = self._to_os(path).open('rb')
+        except OSError as exc:
+            raise from_os_error(exc, path) from exc
+        try:
+            handle.seek(offset)
+            remaining = length
+            while remaining and (chunk := handle.read(min(size, remaining))):
+                remaining -= len(chunk)
                 yield chunk
         finally:
             handle.close()

@@ -142,6 +142,33 @@ Zero or negative values raise `ValueError`. Streaming-native backends keep memor
 bounded; a whole-object custom backend's compatibility fallback does not. See
 [Reading and writing](../guide/reading-and-writing.md).
 
+### `download`
+
+```python
+download(
+    path: StrPathLike,
+    dest: BinaryIO,
+    /,
+    *,
+    ranges: int | None = None,
+    chunk_size: int | None = None,
+) -> int
+```
+
+Read one file into an open binary sink and return the bytes written. The
+parallel counterpart of `stream`: where `stream` yields chunks in order for any
+consumer, `download` writes a destination that accepts out-of-order writes, so
+it can fetch several byte ranges of the same file at once. That is what makes a
+single large file transfer faster than one connection on a high-latency link.
+
+`dest` is a synchronous binary file object open for writing, in both flavors -
+the local write is a syscall the core performs directly, not an operation on the
+storage port. `ranges=None` splits a file at or above 64 MiB into up to eight
+ranges on a backend that advertises `ranged_reads`, and `ranges=1` forces the
+sequential path. A sink without a usable file descriptor (a `BytesIO`, a pipe)
+streams sequentially; the bytes written are identical either way. See
+[Tune transfers](../recipes/transfers.md).
+
 ### `stat`
 
 ```python

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from storix._async._stream import validate_chunk_size
+from storix._async._stream import validate_chunk_size, validate_span
 
 
 if TYPE_CHECKING:
@@ -64,6 +64,27 @@ class LayerBase:
         """
         validate_chunk_size(chunk_size)
         async for chunk in self._inner.read_stream(path, chunk_size=chunk_size):
+            yield chunk
+
+    async def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Stream one byte range of a file, in bounded chunks.
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        validate_chunk_size(chunk_size)
+        validate_span(offset, length)
+        async for chunk in self._inner.read_range(
+            path, offset=offset, length=length, chunk_size=chunk_size
+        ):
             yield chunk
 
     async def write(

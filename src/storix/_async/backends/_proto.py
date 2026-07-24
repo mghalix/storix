@@ -60,6 +60,39 @@ class StorageBackend(Protocol):
         """
         ...
 
+    def read_range(
+        self,
+        path: PurePosixPath,
+        *,
+        offset: int,
+        length: int,
+        chunk_size: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        """Stream one byte range of a file, in bounded chunks.
+
+        Implementations are async generator functions, like ``read_stream``.
+        ``BackendBase`` provides a correct implementation for every backend
+        by skipping through ``read_stream``; override it wherever the
+        provider can fetch a range in one request, and advertise
+        ``capabilities.ranged_reads`` so the core knows the fast path is
+        real (ADR 0032).
+
+        A range that runs past the end of the file stops at the end; an
+        offset at or past the end yields nothing.
+
+        Args:
+            path: The file to read from.
+            offset: First byte to yield, counted from the start of the file.
+            length: Maximum number of bytes to yield.
+            chunk_size: Maximum yielded chunk size. ``None`` selects the
+                backend's preferred default.
+
+        Raises:
+            ValueError: If ``offset`` or ``length`` is negative, or if
+                ``chunk_size`` is zero or negative.
+        """
+        ...
+
     async def write(
         self,
         path: PurePosixPath,
