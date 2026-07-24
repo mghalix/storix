@@ -33,7 +33,6 @@ requires-python = ">=3.12"
 #
 dependencies = [
     "storix[core, local]",
-    "zensical==0.0.50",
 ]
 
 [project.optional-dependencies]
@@ -109,6 +108,10 @@ dev = [
     "types-aiofiles>=24.1.0.20250606",
     # --< docs >--
     "mkdocs>=1.6.1",
+    # the website/ site generator: a development tool, never a runtime
+    # dependency of the shipped package (pinned in website/requirements.txt
+    # too, which is what Cloudflare Pages installs)
+    "zensical==0.0.50",
 ]
 #<------------------------------------------------>#
 [build-system]
