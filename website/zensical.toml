@@ -33,6 +33,7 @@ nav = [
     { "Cache with Redis or disk" = "recipes/caching.md" },
     { "S3, GCS, and Azure Blob" = "recipes/object-stores.md" },
     { "Progress bars" = "recipes/progress.md" },
+    { "Tune transfers" = "recipes/transfers.md" },
     { "Listing and searching" = "recipes/listing-and-searching.md" },
     { "Test with storix" = "recipes/testing.md" },
     { "Write a custom backend" = "recipes/custom-backend.md" },

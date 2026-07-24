@@ -151,6 +151,31 @@ async def test_ensure_chunks_file_like():
     assert await _drain(io.BytesIO(b'from a file')) == b'from a file'
 
 
+async def test_ensure_chunks_reads_binary_file_by_size_not_by_line():
+    """A file object is iterable by line; bytes must not be pulled that way."""
+    payload = b'no newline here' + b'\n' + b'x' * 4096
+
+    sizes = [len(chunk) async for chunk in ensure_chunks(io.BytesIO(payload))]
+
+    assert sizes == [len(payload)]
+
+
+async def test_ensure_chunks_keeps_iterating_a_body_style_reader():
+    """A no-argument read() (httpx-style) must not be called with a size."""
+
+    class BodyReader:
+        def __init__(self, body: bytes) -> None:
+            self._body = body
+
+        def read(self) -> bytes:
+            return self._body
+
+        def __iter__(self):
+            yield self._body
+
+    assert await _drain(BodyReader(b'whole body')) == b'whole body'
+
+
 async def test_ensure_chunks_async_iterable():
     async def agen() -> AsyncIterator[bytes]:
         yield b'async '

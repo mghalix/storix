@@ -365,7 +365,7 @@ exclude = [
   "TC004",
 ] # Ignore unused imports in __init__.py
 "scripts/*.py" = ["INP001", "T201", "D", "ANN", "S"]
-"benchmarks/*.py" = ["INP001", "T201", "D", "ANN", "S"]
+"bench/*.py" = ["INP001", "T201", "S"]
 "samples/**" = [
   "D",
   "INP",

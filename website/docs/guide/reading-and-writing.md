@@ -133,7 +133,7 @@ The built-in defaults balance syscall/request overhead with bounded host memory:
 | `BackendBase` whole-object fallback | 1 MiB | whole payload | full file |
 | Local | 1 MiB | 1 MiB | none beyond active chunks |
 | Memory | 1 MiB | not applicable (the file is already in memory) | the stored file |
-| Azure ADLS Gen2 | 4 MiB | 4 MiB | up to 32 MiB initial SDK request |
+| Azure ADLS Gen2 | 4 MiB | 4 MiB | up to 8 MiB initial SDK request |
 
 Azure's SDK buffers live in your process even though the data is in the cloud.
 Configure its provider-level limits with `read_chunk_size`,

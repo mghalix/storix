@@ -9,7 +9,7 @@ backend without that cheap operation uses the portable concurrent fallback.
 
 Reproducible mode uses a `LatencyBackend` (a `MemoryBackend` with a sleep
 per listing call); set STORIX_BENCH_PROVIDER=azure (+ STORIX_* creds) for
-the real thing. Run: `uv run python benchmarks/bench_listing.py`.
+the real thing. Run: `uv run python bench/listing.py`.
 """
 
 from __future__ import annotations
@@ -17,9 +17,18 @@ from __future__ import annotations
 import os
 import time
 
+from typing import TYPE_CHECKING
+
 from storix import Storix, get_storage
 from storix.backends import MemoryBackend
 from storix.cli.state import empty_all
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from pathlib import PurePosixPath
+
+    from storix.models import DirEntry
 
 
 N_DIRS = 24
@@ -29,11 +38,13 @@ LATENCY_S = 0.05  # per backend call, stand-in for a cloud round trip
 class LatencyBackend(MemoryBackend):
     """A MemoryBackend that sleeps before each listing, to model latency."""
 
-    def list_dir(self, path):  # mirrors the port signature
+    def list_dir(self, path: PurePosixPath) -> Iterator[DirEntry]:
+        """List one directory, paying a round trip for the request."""
         time.sleep(LATENCY_S)
         yield from super().list_dir(path)
 
-    def list_tree(self, path):  # one sleep: the whole bulk listing is one call
+    def list_tree(self, path: PurePosixPath) -> Iterator[DirEntry]:
+        """List a whole subtree: one bulk call, so one round trip."""
         time.sleep(LATENCY_S)
         yield from super().list_tree(path)
 
@@ -46,7 +57,8 @@ def _seed(fs: Storix) -> None:
             fs.echo('x', f'/dir{i:02d}/f.txt')
 
 
-def _time(label: str, fn) -> float:  # fn: a thunk
+def _time(label: str, fn: Callable[[], object]) -> float:
+    """Run a thunk, print how long it took, and return the seconds."""
     start = time.perf_counter()
     fn()
     elapsed = time.perf_counter() - start
@@ -55,6 +67,7 @@ def _time(label: str, fn) -> float:  # fn: a thunk
 
 
 def main() -> None:
+    """Time the serial emptiness loop against the batched path."""
     provider = os.environ.get('STORIX_BENCH_PROVIDER')
     if provider:
         fs = get_storage(provider)

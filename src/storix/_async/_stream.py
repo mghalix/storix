@@ -1,7 +1,17 @@
 """Byte-stream normalization, splitting, and batching helpers."""
 
-from collections.abc import AsyncIterable, AsyncIterator, Buffer, Iterable, Iterator
+import inspect
+
+from collections.abc import (
+    AsyncIterable,
+    AsyncIterator,
+    Buffer,
+    Callable,
+    Iterable,
+    Iterator,
+)
 from io import BytesIO
+from typing import TypeGuard, cast
 
 from storix.constants import DEFAULT_SOURCE_READ_SIZE
 from storix.types import AsyncDataBuffer, DataBuffer
@@ -152,6 +162,33 @@ def _as_bytes(chunk: object) -> bytes:
     raise TypeError(msg)
 
 
+def _reads_by_size(read: object) -> TypeGuard[Callable[[int], object]]:
+    """Whether ``read`` is a synchronous reader that takes a size argument.
+
+    Every readable in the buffer union reads by size (``file.read(n)``), but
+    some objects in the wild expose a no-argument ``read()`` that returns the
+    whole body at once (``httpx.Response``) while also being iterable. Those
+    must keep their iterable behavior rather than be called with a size they
+    would reject.
+
+    Args:
+        read: Candidate ``read`` attribute of a data source.
+
+    Returns:
+        True when the attribute is callable, is not a coroutine function, and
+        accepts at least one argument. A callable whose signature cannot be
+        introspected (a C-level reader) counts as reading by size, which is
+        what every such reader in the standard library does.
+    """
+    if not callable(read) or inspect.iscoroutinefunction(read):
+        return False
+    try:
+        signature = inspect.signature(read)
+    except (TypeError, ValueError):
+        return True
+    return bool(signature.parameters)
+
+
 def iter_chunks(
     data: DataBuffer[str] | DataBuffer[bytes],
     *,
@@ -168,7 +205,7 @@ def iter_chunks(
         return
 
     read = getattr(data, 'read', None)
-    if callable(read):
+    if _reads_by_size(read):
         while chunk := read(read_size):
             yield _as_bytes(chunk)
         return
@@ -189,10 +226,23 @@ async def ensure_chunks(
 
     The scalar check must run first: str and bytes are themselves
     iterable (per character / per int), and must never be treated as
-    streams of items.
+    streams of items. A synchronous readable is pulled with ``read()``
+    for the same reason: a binary file object is also iterable, but by
+    newline-delimited lines, which for bytes is neither bounded (a file
+    with no newline yields itself whole) nor efficient (a 19 GiB video
+    yields ~250-byte chunks). The codegen turns the async-iterable branch
+    below into a plain iterable one, so without this check the sync
+    flavor would hand every file object to it.
     """
     if isinstance(data, (str, Buffer)):
         yield _as_bytes(data)
+        return
+
+    if _reads_by_size(getattr(data, 'read', None)):
+        # a size-taking synchronous reader is the IO[...] arm of the
+        # buffer union, whichever flavor is running
+        for chunk in iter_chunks(cast('DataBuffer[str] | DataBuffer[bytes]', data)):
+            yield chunk
         return
 
     if isinstance(data, AsyncIterable):
