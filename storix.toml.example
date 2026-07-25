@@ -76,15 +76,18 @@ read_prefetch_size = "8MiB"
 
 [profiles.media]
 provider = "azure"
+container = "raw"
 default_environment = "dev"     # the stage used when --env is not given
-account_name = "mediaaccount"
-credential = "env:MEDIA_AZURE_CREDENTIAL"
 
+# stages usually differ by more than a container: separate accounts, and a
+# separate credential each, so a dev run never holds the production secret
 [profiles.media.environments.dev]
-container = "media-dev"
+account_name = "acmedevstorage"
+credential = "env:ACME_DEV_CREDENTIAL"
 
 [profiles.media.environments.prod]
-container = "media-prod"
+account_name = "acmeprdstorage"
+credential = "env:ACME_PRD_CREDENTIAL"
 read_prefetch_size = "32MiB"
 
 [profiles.archive]
