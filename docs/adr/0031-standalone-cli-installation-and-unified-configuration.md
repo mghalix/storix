@@ -134,10 +134,16 @@ diagnostics can explain themselves.
 Canonical files:
 
 ```
-~/.config/storix/config.toml      # XDG user scope (XDG_CONFIG_HOME honored)
+~/.config/storix/config.toml      # user scope (XDG_CONFIG_HOME honored)
+%APPDATA%\storix\config.toml      # user scope on Windows
 storix.toml                       # project scope, standalone
 pyproject.toml -> [tool.storix]   # project scope, namespaced
 ```
+
+The user scope follows the platform: `%APPDATA%` on Windows (falling
+back to `~/AppData/Roaming` when it is unset), `~/.config` elsewhere.
+`XDG_CONFIG_HOME` overrides both, including on Windows, because a user
+who exports it means it.
 
 `.storix.toml` is retained as a compatibility-only read alias of
 `storix.toml` (same directory: `storix.toml` wins, as today). It is
@@ -383,7 +389,7 @@ Accepted subset, each solving a concrete problem:
 sx config path                   # which files exist / would be used
 sx config sources                # discovered files + precedence explanation
 sx config show [--effective]     # merged view; --effective adds provenance
-sx config get KEY                # e.g. s3.bucket, cli.icons
+sx config get KEY [--effective]  # e.g. s3.bucket, cli.icons
 sx config set KEY VALUE [--scope user|project]
 sx config unset KEY [--scope user|project]
 sx config init [--scope user|project] [--force]
@@ -391,6 +397,19 @@ sx config validate               # names file and exact invalid field
 sx config edit [--scope user|project]   # $VISUAL then $EDITOR
 sx config profiles               # list profiles + their environments + source
 ```
+
+Every scope-taking command also accepts `--user` as a shorthand for
+`--scope user`, since reaching for the machine-wide file is the common
+deviation from the project default.
+
+`--effective` answers "what will storix actually do", not "what is
+written down": it resolves the selected profile and environment, prints
+the provider in force and every field with its value, its readable size
+where the field is a size, and the layer that supplied it (default,
+user, project, profile, environment, environment variable, flag).
+Without a value in the output the provenance is unreadable, and a user
+cannot discover a default they never wrote; `sx config get --effective
+azure.read_prefetch_size` is the single-key form of the same question.
 
 Rules: two scopes only (`user`, `project`). Project scope writes the
 nearest existing `storix.toml`; else a `pyproject.toml` already
