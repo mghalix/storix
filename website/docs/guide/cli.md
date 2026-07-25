@@ -34,6 +34,17 @@ Connection settings come from the same sources the library reads: the
 file (`[s3]`, `[azure]`, ...). So `sx -p azure` talks to the account your code
 already talks to. See [Configure from settings](../recipes/settings.md).
 
+You should not have to come back here to use it. `sx --help` groups its
+commands by what they do (navigate, read, write, transfer, and the ones about
+sx itself) and its options by what they configure (connection, profile,
+session), and three commands answer the questions this page otherwise would:
+
+```bash
+sx config show --effective   # what this session will do, and where each value came from
+sx config sources            # which files are read, in which order they win
+sx doctor                    # installation, config, and what it can reach
+```
+
 ## Unix commands, any backend
 
 ```

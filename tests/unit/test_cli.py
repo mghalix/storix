@@ -1067,3 +1067,25 @@ def test_an_environment_without_a_profile_is_refused(tmp_path, monkeypatch):
 
     assert result.exit_code != 0
     assert 'name one with --profile' in str(result.exception) + result.stdout
+
+
+def test_help_groups_commands_and_options_by_what_they_do():
+    """Given --help, when read, then it is grouped, not one flat list.
+
+    A first-time reader should see which commands touch files, which move
+    bytes, and which are about sx itself, without reading the docs.
+    """
+    text = run('--help').stdout
+
+    for panel in ('Navigate', 'Read', 'Write', 'Transfer', 'Session and setup'):
+        assert panel in text, panel
+    for panel in ('Connection', 'Profile and overrides', 'Session', 'Inspect'):
+        assert panel in text, panel
+
+
+def test_help_points_at_the_commands_that_explain_the_session():
+    """Given --help, when read, then it names the way to inspect a session."""
+    text = run('--help').stdout
+
+    assert 'sx config show --effective' in text
+    assert 'sx doctor' in text
