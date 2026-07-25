@@ -30,7 +30,23 @@ StorageError                         # base for everything storix raises
 ├── NonRemovableLayerError           # without_layer() asked to strip a boundary
 └── ConfigurationError               # backend configuration is invalid
     └── StorageRootNotFoundError     # the configured bucket/container is absent
+
+BaseException                        # deliberately outside the tree above
+└── TransferStoppedError             # a caller asked a transfer to stop
 ```
+
+## Stopping is not failing
+
+`TransferStoppedError` is the one exception in `storix.errors` that is **not** a
+`StorageError`, because nothing failed: a caller asked a running transfer to
+stop. Raise it from a per-chunk callback (an `ObservabilityLayer` sink) and the
+stream unwinds; see [Progress bars](../recipes/progress.md#stop-a-transfer-from-the-sink).
+
+It derives from `BaseException`, the same choice the standard library makes for
+`asyncio.CancelledError`: a stop request must survive any `except Exception`
+sitting between the callback and the caller, or the transfer would keep running
+while the caller believed it had stopped. `except StorageError` will not catch
+it, and that is deliberate.
 
 ## Notes
 

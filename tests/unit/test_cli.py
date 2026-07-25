@@ -846,3 +846,67 @@ def test_debug_flag_prints_the_exception_chain():
     assert res.exit_code == 1
     assert 'Traceback' in res.stderr
     assert 'does not exist' in res.stderr
+
+
+def test_stopped_pull_reports_130_and_leaves_no_partial_files(tmp_path, monkeypatch):
+    """Given a stop asked for, when pulling, then nothing half-written survives."""
+    import contextlib
+    import threading
+
+    cli.use_fs(Storix(MemoryBackend()))
+    run('mkdir', '/d')
+    assert run('echo', 'payload', '-f', '/d/a.bin').exit_code == 0
+    assert run('echo', 'payload', '-f', '/d/b.bin').exit_code == 0
+
+    @contextlib.contextmanager
+    def already_stopped():
+        stop = threading.Event()
+        stop.set()
+        yield stop
+
+    monkeypatch.setattr(cli, '_cancellable', already_stopped)
+    out = tmp_path / 'pulled'
+    result = run('pull', '/d', str(out))
+
+    assert result.exit_code == 130
+    assert 'stopped' in result.stdout
+    assert [path for path in out.rglob('*') if path.is_file()] == []
+
+
+def test_stopped_push_reports_130(tmp_path, monkeypatch):
+    """Given a stop asked for, when pushing, then the command reports it."""
+    import contextlib
+    import threading
+
+    cli.use_fs(Storix(MemoryBackend()))
+    source = tmp_path / 'src'
+    source.mkdir()
+    (source / 'a.bin').write_bytes(b'payload')
+
+    @contextlib.contextmanager
+    def already_stopped():
+        stop = threading.Event()
+        stop.set()
+        yield stop
+
+    monkeypatch.setattr(cli, '_cancellable', already_stopped)
+    result = run('push', str(source), '/dst')
+
+    assert result.exit_code == 130
+    assert 'stopped' in result.stdout
+
+
+def test_stop_survives_a_broad_exception_handler() -> None:
+    """A stop request must not be swallowed by `except Exception` in between."""
+    from storix.errors import StorageError, TransferStoppedError
+
+    def a_sink_that_stops() -> None:
+        raise TransferStoppedError
+
+    with pytest.raises(TransferStoppedError):
+        try:
+            a_sink_that_stops()
+        except Exception:  # noqa: BLE001 - a layer or SDK in between might
+            pytest.fail('a stop request was swallowed by a broad handler')
+
+    assert not issubclass(TransferStoppedError, StorageError)

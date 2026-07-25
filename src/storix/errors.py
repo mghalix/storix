@@ -204,3 +204,22 @@ class NonRemovableLayerError(StorageError):
     def __init__(self, layer: str, msg: str | None = None) -> None:
         self.layer = layer
         super().__init__(msg or f'{layer} cannot be removed (it is a boundary)')
+
+
+class TransferStoppedError(BaseException):
+    """A caller asked a running transfer to stop, and it is unwinding.
+
+    Deliberately not a :class:`StorageError`: nothing failed. Raise it from
+    a per-chunk callback - an :class:`~storix.ObservabilityLayer` sink is
+    the usual one - and the stream it was called from unwinds, taking a
+    bulk transfer's other in-flight streams with it as each reaches its
+    next chunk. That is how ``sx`` implements Ctrl+C.
+
+    Deriving from ``BaseException`` rather than ``Exception`` is the same
+    choice the standard library made for ``asyncio.CancelledError``, and
+    for the same reason: a stop request must not be swallowed by an
+    ``except Exception`` somewhere between the callback and the caller -
+    in a custom layer, a third-party backend, or a provider SDK - which
+    would leave the transfer running while the caller believed it had
+    stopped. Handlers that want it must name it.
+    """
