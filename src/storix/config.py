@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 import tomllib
 import warnings
 
@@ -304,7 +305,11 @@ def _warn_if_world_readable(path: Path) -> None:
 
 
 def _field_extra(settings_cls: type[BaseSettings], field: str) -> dict[str, Any]:
-    extra = settings_cls.model_fields[field].json_schema_extra
+    """Field policy metadata, empty for a name the model does not have."""
+    info = settings_cls.model_fields.get(field)
+    if info is None:
+        return {}
+    extra = info.json_schema_extra
     return cast('dict[str, Any]', extra) if isinstance(extra, dict) else {}
 
 
@@ -937,6 +942,204 @@ def config_provenance(provider: str, /, **overrides: Any) -> dict[str, ConfigSou
 
 
 # --- installation remedy (context-aware, D7); shared by the CLI guards ---
+
+
+# --- writing: scope resolution and atomic, validated edits (ADR 0031 D10) ---
+
+
+type Scope = Literal['user', 'project']
+"""Where a write lands: the XDG user file, or the project's own."""
+
+
+def user_config_path() -> Path:
+    """The XDG user config file, whether or not it exists yet."""
+    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
+    return base / 'storix' / 'config.toml'
+
+
+def project_config_path() -> tuple[Path, bool]:
+    """Where a project write lands, and whether that file exists yet.
+
+    The nearest ``storix.toml`` walking upward, else a ``pyproject.toml``
+    that already carries ``[tool.storix]``, else ``./storix.toml`` in the
+    current directory - which is reported as not existing so the caller can
+    say it is creating one.
+    """
+    discovered = find_project_config()
+    if discovered is not None:
+        return discovered.path, True
+    return Path.cwd() / 'storix.toml', False
+
+
+def scope_path(scope: Scope) -> tuple[Path, bool]:
+    """The file a write to ``scope`` targets, and whether it exists."""
+    if scope == 'user':
+        path = user_config_path()
+        return path, path.is_file()
+    return project_config_path()
+
+
+def split_key(key: str) -> tuple[str, ...]:
+    """Split a dotted config key into its path.
+
+    Raises:
+        ConfigurationError: If the key is empty or has an empty segment.
+    """
+    parts = tuple(key.split('.'))
+    if not key or any(not part for part in parts):
+        msg = f'{key!r} is not a config key; write section.field, e.g. s3.bucket'
+        raise ConfigurationError(msg)
+    return parts
+
+
+def _document_root(path: Path) -> tuple[Any, tuple[str, ...]]:
+    """Parse ``path`` for editing, plus the prefix a key sits under.
+
+    ``pyproject.toml`` keeps storix config under ``[tool.storix]``; a
+    standalone file has no prefix.
+    """
+    import tomlkit
+
+    text = path.read_text(encoding='utf-8') if path.is_file() else ''
+    document = tomlkit.parse(text)
+    prefix = ('tool', 'storix') if path.name == 'pyproject.toml' else ()
+    return document, prefix
+
+
+def _validate_written(path: Path, document: Any) -> None:
+    """Reject an edit that would leave the file invalid, before writing it.
+
+    Raises:
+        ConfigurationError: If the resulting document fails the same checks
+            a discovered file gets.
+    """
+    import tomllib
+
+    data = tomllib.loads(document.as_string())
+    if path.name == 'pyproject.toml':
+        data = _table(data, 'tool', 'storix') or {}
+    _validate_document(path, data)
+    scope: Scope = 'user' if path == user_config_path() else 'project'
+    disc = DiscoveredConfig(path, data, scope)
+    for model in PROVIDER_MODELS.values():
+        _section_values(disc, model)
+
+
+def _write_atomically(path: Path, text: str, scope: Scope) -> None:
+    """Replace ``path`` in one step, keeping its mode (user files are 600)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if path.is_file() else None
+    with tempfile.NamedTemporaryFile(
+        'w', encoding='utf-8', dir=path.parent, delete=False
+    ) as handle:
+        handle.write(text)
+        temporary = Path(handle.name)
+    temporary.chmod(mode if mode is not None else (0o600 if scope == 'user' else 0o644))
+    temporary.replace(path)
+
+
+def set_setting(key: str, value: str, scope: Scope = 'project') -> Path:
+    """Set one config key, validated, atomically, comments preserved.
+
+    Args:
+        key: Dotted key, e.g. ``s3.bucket`` or ``cli.icons``.
+        value: The value as typed; parsed type-aware by TOML rules.
+        scope: Which file to write.
+
+    Returns:
+        The file that was written.
+
+    Raises:
+        ConfigurationError: If the key is malformed, names a secret in a
+            project file, or would leave the file invalid.
+    """
+    import tomlkit
+
+    parts = split_key(key)
+    path, _ = scope_path(scope)
+    _refuse_secret_write(path, parts, scope)
+    document, prefix = _document_root(path)
+
+    node: Any = document
+    for part in (*prefix, *parts[:-1]):
+        if part not in node:
+            node[part] = tomlkit.table()
+        node = node[part]
+    node[parts[-1]] = _parse_value(value)
+
+    _validate_written(path, document)
+    _write_atomically(path, tomlkit.dumps(document), scope)
+    return path
+
+
+def unset_setting(key: str, scope: Scope = 'project') -> Path:
+    """Remove one config key from ``scope``'s file.
+
+    Returns:
+        The file that was written.
+
+    Raises:
+        ConfigurationError: If the key is malformed or not present.
+    """
+    import tomlkit
+
+    parts = split_key(key)
+    path, exists = scope_path(scope)
+    if not exists:
+        msg = f'{path}: no config file to remove {key!r} from'
+        raise ConfigurationError(msg)
+    document, prefix = _document_root(path)
+
+    node: Any = document
+    for part in (*prefix, *parts[:-1]):
+        if part not in node:
+            msg = f'{path}: {key!r} is not set'
+            raise ConfigurationError(msg)
+        node = node[part]
+    if parts[-1] not in node:
+        msg = f'{path}: {key!r} is not set'
+        raise ConfigurationError(msg)
+    del node[parts[-1]]
+
+    _validate_written(path, document)
+    _write_atomically(path, tomlkit.dumps(document), scope)
+    return path
+
+
+def _parse_value(value: str) -> Any:
+    """Parse a command-line value the way TOML would read it.
+
+    A bare word stays a string, so ``sx config set s3.bucket media`` does
+    not need quoting, while ``true``, ``8``, and ``"8MiB"`` mean what they
+    say.
+    """
+    import tomllib
+
+    try:
+        return tomllib.loads(f'value = {value}')['value']
+    except tomllib.TOMLDecodeError:
+        return value
+
+
+def _refuse_secret_write(path: Path, parts: tuple[str, ...], scope: Scope) -> None:
+    """Apply the secret policy to a write.
+
+    Raises:
+        ConfigurationError: On a literal secret written to a project file.
+    """
+    section_and_field = 2
+    if len(parts) < section_and_field:
+        return
+    model = PROVIDER_MODELS.get(parts[0])
+    if model is None or not is_secret(model, parts[-1]):
+        return
+    if scope == 'project':
+        msg = (
+            f'{path}: {".".join(parts)} is a secret and project files are '
+            f'committed; set STORIX_{parts[0].upper()}_{parts[-1].upper()}, or '
+            f'write env:VAR here, or use --scope user'
+        )
+        raise ConfigurationError(msg)
 
 
 def _is_uv_tool() -> bool:

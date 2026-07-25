@@ -39,6 +39,7 @@ from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
 from storix.errors import StorageError, TransferStoppedError
 
+from . import config_cmds
 from .config import load_prefs
 from .render import (
     console,
@@ -92,6 +93,9 @@ app = typer.Typer(
     no_args_is_help=False,
     add_completion=False,
 )
+
+
+app.add_typer(config_cmds.config_app)
 
 
 def _die(cmd: str, exc: Exception) -> NoReturn:

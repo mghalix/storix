@@ -382,6 +382,37 @@ explicit act, and a stale exported variable must not quietly redirect it.
 The same chain applies to the library, with `get_storage()` keywords in
 place of flags; see [Configure from settings](../recipes/settings.md).
 
+### Seeing and editing it: `sx config`
+
+```bash
+sx config path              # which files are read, and whether they exist
+sx config sources           # what was found, and the precedence order
+sx config show              # everything as storix reads it, secrets redacted
+sx config show --effective  # plus where each effective value comes from
+sx config get s3.bucket     # one value, and the file that supplies it
+sx config profiles          # profiles, their stages, and the default (marked *)
+
+sx config set s3.bucket media           # writes the project file
+sx config set azure.credential X --scope user
+sx config unset s3.region
+sx config init              # a commented starter file; --force to overwrite
+sx config validate          # load every file the way storix does
+sx config edit              # $VISUAL, else $EDITOR
+```
+
+Writes go through a round-trip TOML editor, so **your comments and layout
+survive**; they are validated against the same models a loaded file gets, so
+an invalid edit is refused before the file changes; and they land atomically
+(temp file, then rename), so an interrupted write cannot leave a half-file.
+
+Project scope writes the nearest existing `storix.toml`, else a
+`pyproject.toml` already carrying `[tool.storix]`, else it creates
+`./storix.toml`. The target is always printed.
+
+Secrets are redacted in every read command, including inside profiles.
+Setting one in project scope is refused, naming the environment variable and
+the `env:` form instead; user-scope files are created mode 600.
+
 A complete annotated example of every key lives in the repository as
 [`storix.toml.example`](https://github.com/mghalix/storix/blob/main/storix.toml.example).
 

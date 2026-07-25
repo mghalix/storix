@@ -1683,6 +1683,7 @@ all = [
     { name = "opendal" },
     { name = "prompt-toolkit" },
     { name = "rich" },
+    { name = "tomlkit" },
     { name = "typer" },
 ]
 azadls = [
@@ -1703,6 +1704,7 @@ cli = [
     { name = "click" },
     { name = "prompt-toolkit" },
     { name = "rich" },
+    { name = "tomlkit" },
     { name = "typer" },
 ]
 core = [
@@ -1769,6 +1771,7 @@ requires-dist = [
     { name = "storix", extras = ["local", "azure", "s3", "gcs", "cli"], marker = "extra == 'all'" },
     { name = "storix", extras = ["s3"], marker = "extra == 'minio'" },
     { name = "storix", extras = ["s3"], marker = "extra == 'r2'" },
+    { name = "tomlkit", marker = "extra == 'cli'", specifier = ">=0.13" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.13.0" },
     { name = "wrapt", marker = "extra == 'core'", specifier = ">=2.0.1" },
 ]
