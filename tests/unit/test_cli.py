@@ -1012,3 +1012,28 @@ def test_missing_extra_reraises_under_traceback(monkeypatch):
             state.build_base('s3')
     finally:
         state.set_debug(False)
+
+
+def test_a_message_carrying_exit_still_reaches_the_user(capsys, monkeypatch):
+    """Given an exit that carries a message, when sx exits hard, then it prints.
+
+    `main` ends in `os._exit`, which skips the interpreter's own SystemExit
+    handling, so a `SystemExit('sx: ...')` raised by the config loader or the
+    override validator would otherwise vanish into a bare exit status.
+    """
+    import storix.cli.app as app_module
+
+    printed: list[str] = []
+    monkeypatch.setattr(app_module.err, 'print', lambda text: printed.append(text))
+    monkeypatch.setattr(
+        app_module, 'app', lambda: (_ for _ in ()).throw(SystemExit('sx: boom'))
+    )
+    monkeypatch.setattr(
+        app_module.os, '_exit', lambda code: (_ for _ in ()).throw(SystemExit(code))
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        app_module.main()
+
+    assert exit_info.value.code == 1
+    assert any('sx: boom' in text for text in printed)

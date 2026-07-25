@@ -1131,7 +1131,18 @@ def main() -> None:
         err.print(f'[red]sx: {exc}[/red]')
         code = 1
     except SystemExit as exc:
-        code = exc.code if isinstance(exc.code, int) else int(exc.code is not None)
+        # os._exit below skips the interpreter's own SystemExit handling, so
+        # a message-carrying exit (SystemExit('sx: ...'), which the config
+        # loader and the override validator both raise) has to be printed
+        # here or it would vanish and leave a bare exit status
+        match exc.code:
+            case None:
+                code = 0
+            case int() as status:
+                code = status
+            case message:
+                err.print(f'[red]{message}[/red]')
+                code = 1
     sys.stdout.flush()
     sys.stderr.flush()
     # a cancelled push/pull leaves worker threads mid-upload that the
