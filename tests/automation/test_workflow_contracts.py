@@ -1,10 +1,14 @@
 """Tests for Storix repository workflow contracts."""
 
 import re
+import shutil
+import subprocess
 import tomllib
 
 from pathlib import Path
 from typing import Final
+
+import pytest
 
 
 _ROOT: Final[Path] = Path(__file__).parents[2]
@@ -254,3 +258,76 @@ def test_release_check_is_verification_only_and_complete() -> None:
     assert not re.search(r'(?m)^release(?:\s[^-][^:]*)?:', justfile)
     for forbidden in ('git tag', 'git push', 'uv publish', 'gh release create'):
         assert forbidden not in justfile
+
+
+# --- the standalone installer (ADR 0031 D13) ---
+
+
+def _installer() -> Path:
+    """The single source of the published installer."""
+    return Path(__file__).resolve().parents[2] / 'website' / 'docs' / 'install.sh'
+
+
+def test_installer_is_posix_sh_and_parses() -> None:
+    """Given the installer, when a POSIX shell parses it, then it is valid.
+
+    It is piped into `sh` on a stranger's machine; a syntax error there is
+    a broken install, not a failed test.
+    """
+    result = subprocess.run(  # noqa: S603
+        ['/bin/sh', '-n', str(_installer())],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_installer_refuses_to_run_unsafely() -> None:
+    """Given the installer, when read, then its safety rails are in place."""
+    text = _installer().read_text(encoding='utf-8')
+
+    assert text.startswith('#!/bin/sh')
+    assert 'set -eu' in text  # no unset variable, no ignored failure
+    assert 'sudo' not in text  # never asks for root
+    assert 'uv tool install --force' in text  # idempotent, upgrades on rerun
+
+
+def test_installer_help_needs_no_network_and_exits_clean() -> None:
+    """Given --help, when run, then it prints usage and stops."""
+    result = subprocess.run(  # noqa: S603
+        ['/bin/sh', str(_installer()), '--help'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert 'uv tool uninstall storix' in result.stdout
+
+
+def test_installer_rejects_an_unknown_option() -> None:
+    """Given a typo, when run, then it stops rather than installing something."""
+    result = subprocess.run(  # noqa: S603
+        ['/bin/sh', str(_installer()), '--wtih', 'azure'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert 'unknown option' in result.stderr
+
+
+@pytest.mark.skipif(shutil.which('shellcheck') is None, reason='shellcheck absent')
+def test_installer_is_shellcheck_clean() -> None:
+    """Given shellcheck, when it lints the installer, then it has nothing to say."""
+    result = subprocess.run(  # noqa: S603
+        ['shellcheck', '--shell=sh', str(_installer())],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout

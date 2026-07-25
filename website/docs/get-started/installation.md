@@ -78,6 +78,44 @@ try things out.
 with `uv tool` and it works from any directory, no project checkout or virtual
 environment needed.
 
+### One line
+
+```bash
+curl -LsSf https://storix.mghalix.com/install.sh | sh
+```
+
+```bash
+curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --with azure,s3
+curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --all
+curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --version 0.5.0
+curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --help
+```
+
+The script is a thin wrapper over `uv tool install`: it installs one tool for
+your user, and it does **not** need root, ask for credentials, write any
+configuration, or edit your shell startup files. If `uv` is missing it says so
+and runs the official uv installer first. Re-running it upgrades in place.
+
+Piping a stranger's script into a shell deserves a look first, so read it
+before you run it:
+
+```bash
+curl -LsSf https://storix.mghalix.com/install.sh -o install.sh
+less install.sh
+sh install.sh --with azure
+```
+
+Windows is not covered by the installer; use the `uv tool install` command
+below directly.
+
+### Uninstall
+
+```bash
+uv tool uninstall storix
+```
+
+### With uv or pip directly
+
 ```bash
 uv tool install "storix[cli]"                 # sx, local backend only
 uv tool install "storix[cli,azure]"           # + both Azure backends
