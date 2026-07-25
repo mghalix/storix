@@ -39,7 +39,7 @@ from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
 from storix.errors import StorageError, TransferStoppedError
 
-from . import config_cmds
+from . import config_cmds, maintenance
 from .config import load_prefs
 from .render import (
     console,
@@ -51,6 +51,7 @@ from .render import (
 )
 from .state import (
     _fs,  # pyright: ignore[reportPrivateUsage]
+    _session,  # pyright: ignore[reportPrivateUsage]
     apply_layers,
     build_base,
     build_overrides,
@@ -87,15 +88,46 @@ _M_MMAP_THRESHOLD: Final[int] = -3
 """glibc ``mallopt`` parameter selecting the dynamic mmap threshold."""
 
 
+_NAVIGATE: Final[str] = 'Navigate'
+"""Help panel for commands that locate things."""
+
+_READ: Final[str] = 'Read'
+"""Help panel for commands that report without changing anything."""
+
+_WRITE: Final[str] = 'Write'
+"""Help panel for commands that change the store."""
+
+_TRANSFER: Final[str] = 'Transfer'
+"""Help panel for commands that move bytes between local and remote."""
+
+_SETUP: Final[str] = 'Session and setup'
+"""Help panel for commands about the session itself, not its contents."""
+
+_CONNECTION: Final[str] = 'Connection'
+"""Option panel for the coordinates of the store to talk to."""
+
+_SELECTION: Final[str] = 'Profile and overrides'
+"""Option panel for choosing configuration rather than spelling it out."""
+
+_SESSION: Final[str] = 'Session'
+"""Option panel for how this one invocation behaves."""
+
+_INSPECT: Final[str] = 'Inspect'
+"""Option panel for asking sx about itself."""
+
+
 app = typer.Typer(
     rich_markup_mode='rich',
     help='Storix - unix-like filesystem commands over any backend.',
+    epilog=(
+        'Ask sx about itself: [cyan]sx config show --effective[/cyan] '
+        '(what this session will do, and where each value came from), '
+        '[cyan]sx doctor[/cyan] (installation, config, reachability), '
+        '[cyan]sx config sources[/cyan] (which files are read, in which order).'
+    ),
     no_args_is_help=False,
     add_completion=False,
 )
-
-
-app.add_typer(config_cmds.config_app)
 
 
 def _die(cmd: str, exc: Exception) -> NoReturn:
@@ -125,7 +157,7 @@ def _count_label(count: int, singular: str, plural: str) -> str:
 # --- listing / navigation ---
 
 
-@app.command()
+@app.command(rich_help_panel=_NAVIGATE)
 def ls(
     path: Annotated[str | None, typer.Argument()] = None,
     *,
@@ -200,13 +232,13 @@ def ls(
     console.print(table)
 
 
-@app.command()
+@app.command(rich_help_panel=_NAVIGATE)
 def pwd() -> None:
     """Print the working directory."""
     console.print(str(_fs().pwd()))
 
 
-@app.command()
+@app.command(rich_help_panel=_NAVIGATE)
 def cd(path: Annotated[str | None, typer.Argument()] = None) -> None:
     """Change directory (no argument: home)."""
     try:
@@ -280,7 +312,7 @@ def _sorted_entries(fs: Storix, entries: list[DirEntry], sort: str) -> list[DirE
     return sorted(entries, key=lambda e: e.name)
 
 
-@app.command()
+@app.command(rich_help_panel=_NAVIGATE)
 def tree(
     path: Annotated[str | None, typer.Argument()] = None,
     *,
@@ -376,7 +408,7 @@ def tree(
     console.print(f'\n{dirs} {d}, {files} {f}')
 
 
-@app.command()
+@app.command(rich_help_panel=_NAVIGATE)
 def find(
     path: Annotated[str | None, typer.Argument()] = None,
     *,
@@ -411,7 +443,7 @@ def find(
 # --- creating / writing ---
 
 
-@app.command()
+@app.command(rich_help_panel=_WRITE)
 def mkdir(
     directories: Annotated[list[str], typer.Argument()],
     *,
@@ -424,7 +456,7 @@ def mkdir(
         _die('mkdir', exc)
 
 
-@app.command()
+@app.command(rich_help_panel=_WRITE)
 def touch(files: Annotated[list[str], typer.Argument()]) -> None:
     """Create files (or refresh their mtime)."""
     try:
@@ -433,7 +465,7 @@ def touch(files: Annotated[list[str], typer.Argument()]) -> None:
         _die('touch', exc)
 
 
-@app.command()
+@app.command(rich_help_panel=_WRITE)
 def echo(
     text: Annotated[str, typer.Argument()],
     file: Annotated[str | None, typer.Option('-f', '--file')] = None,
@@ -453,7 +485,7 @@ def echo(
 # --- reading ---
 
 
-@app.command()
+@app.command(rich_help_panel=_READ)
 def cat(
     files: Annotated[list[str], typer.Argument()],
     *,
@@ -482,7 +514,7 @@ def cat(
     console.print(text, end='', markup=False, highlight=False)
 
 
-@app.command()
+@app.command(rich_help_panel=_READ)
 def stat(path: Annotated[str, typer.Argument()]) -> None:
     """Show a path's properties."""
     try:
@@ -491,7 +523,7 @@ def stat(path: Annotated[str, typer.Argument()]) -> None:
         _die('stat', exc)
 
 
-@app.command()
+@app.command(rich_help_panel=_READ)
 def du(
     path: Annotated[str | None, typer.Argument()] = None,
     *,
@@ -548,7 +580,7 @@ def du(
         _die('du', exc)
 
 
-@app.command()
+@app.command(rich_help_panel=_READ)
 def url(
     path: Annotated[str, typer.Argument()],
     *,
@@ -571,7 +603,7 @@ def url(
 # --- removing ---
 
 
-@app.command()
+@app.command(rich_help_panel=_WRITE)
 def rm(
     files: Annotated[list[str], typer.Argument()],
     *,
@@ -587,7 +619,7 @@ def rm(
             _die('rm', exc)
 
 
-@app.command()
+@app.command(rich_help_panel=_WRITE)
 def rmdir(directories: Annotated[list[str], typer.Argument()]) -> None:
     """Remove empty directories (use rm -r for non-empty)."""
     try:
@@ -599,7 +631,7 @@ def rmdir(directories: Annotated[list[str], typer.Argument()]) -> None:
 # --- moving / copying ---
 
 
-@app.command()
+@app.command(rich_help_panel=_WRITE)
 def cp(
     paths: Annotated[list[str], typer.Argument()],
     *,
@@ -612,7 +644,7 @@ def cp(
         _die('cp', exc)
 
 
-@app.command()
+@app.command(rich_help_panel=_WRITE)
 def mv(paths: Annotated[list[str], typer.Argument()]) -> None:
     """Move/rename; the last argument is the destination."""
     try:
@@ -624,7 +656,7 @@ def mv(paths: Annotated[list[str], typer.Argument()]) -> None:
 # --- queries ---
 
 
-@app.command()
+@app.command(rich_help_panel=_NAVIGATE)
 def exists(paths: Annotated[list[str], typer.Argument()]) -> None:
     """Exit 0 only if every path exists."""
     fs = _fs()
@@ -772,7 +804,7 @@ def _range_budget(files: int) -> int:
     return max(1, min(ceiling, DEFAULT_CONCURRENCY // max(files, 1)))
 
 
-@app.command()
+@app.command(rich_help_panel=_TRANSFER)
 def pull(
     remote: Annotated[
         str, typer.Argument(help='Remote source file or directory path on backend')
@@ -854,7 +886,7 @@ def pull(
     console.print(f'{remote} -> {dst}')
 
 
-@app.command()
+@app.command(rich_help_panel=_TRANSFER)
 def push(
     local: Annotated[
         str, typer.Argument(help='Local source file or directory path on host machine')
@@ -944,7 +976,7 @@ def push(
 # --- session ---
 
 
-@app.command()
+@app.command(rich_help_panel=_SETUP)
 def provider() -> None:
     """Show the active backend and where it is anchored."""
     fs = _fs()
@@ -957,7 +989,7 @@ def provider() -> None:
         console.print(f'[green]layers:[/green]  {summary}')
 
 
-@app.command()
+@app.command(rich_help_panel=_SETUP)
 def provision() -> None:
     """Create the backend's storage root if missing (idempotent).
 
@@ -975,12 +1007,19 @@ def provision() -> None:
     console.print(f'provisioned: {root}' if created else f'already present: {root}')
 
 
-@app.command()
+@app.command(rich_help_panel=_SETUP)
 def shell() -> None:
     """Start the interactive shell."""
     from .shell import start_shell
 
     start_shell(_fs())
+
+
+# registered last so the help lists the filesystem commands a user came for
+# above the ones about sx itself; panels appear in registration order
+app.add_typer(config_cmds.config_app, rich_help_panel=_SETUP)
+app.command('update', rich_help_panel=_SETUP)(maintenance.update)
+app.command('doctor', rich_help_panel=_SETUP)(maintenance.doctor)
 
 
 def _version_callback(value: bool) -> None:  # noqa: FBT001 - typer eager callback
@@ -1004,37 +1043,73 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
             callback=_version_callback,
             is_eager=True,
             help='show the sx version and exit',
+            rich_help_panel=_INSPECT,
         ),
     ] = False,
     provider_: Annotated[
         str | None,
-        typer.Option('-p', '--provider', help='local | memory | azure | ...'),
+        typer.Option(
+            '-p',
+            '--provider',
+            help='local | memory | azure | azblob | s3 | gcs',
+            rich_help_panel=_CONNECTION,
+        ),
     ] = None,
     base: Annotated[
-        str | None, typer.Option('--base', help='local base directory')
+        str | None,
+        typer.Option(
+            '--base', help='local base directory', rich_help_panel=_CONNECTION
+        ),
     ] = None,
     bucket: Annotated[
-        str | None, typer.Option('--bucket', help='s3 / gcs bucket')
+        str | None,
+        typer.Option('--bucket', help='s3 / gcs bucket', rich_help_panel=_CONNECTION),
     ] = None,
     container: Annotated[
-        str | None, typer.Option('--container', help='azure container')
+        str | None,
+        typer.Option(
+            '--container', help='azure container', rich_help_panel=_CONNECTION
+        ),
     ] = None,
     account_name: Annotated[
-        str | None, typer.Option('--account-name', help='azure storage account')
+        str | None,
+        typer.Option(
+            '--account-name',
+            help='azure storage account',
+            rich_help_panel=_CONNECTION,
+        ),
     ] = None,
-    region: Annotated[str | None, typer.Option('--region', help='s3 region')] = None,
+    region: Annotated[
+        str | None,
+        typer.Option('--region', help='s3 region', rich_help_panel=_CONNECTION),
+    ] = None,
     endpoint: Annotated[
-        str | None, typer.Option('--endpoint', help='custom endpoint URL')
+        str | None,
+        typer.Option(
+            '--endpoint', help='custom endpoint URL', rich_help_panel=_CONNECTION
+        ),
     ] = None,
     root: Annotated[
-        str | None, typer.Option('--root', help='key prefix anchoring "/"')
+        str | None,
+        typer.Option(
+            '--root', help='key prefix anchoring "/"', rich_help_panel=_CONNECTION
+        ),
     ] = None,
     kind: Annotated[
-        str | None, typer.Option('--kind', help='azure surface: auto | adls | blob')
+        str | None,
+        typer.Option(
+            '--kind',
+            help='azure surface: auto | adls | blob',
+            rich_help_panel=_CONNECTION,
+        ),
     ] = None,
     profile: Annotated[
         str | None,
-        typer.Option('--profile', help='named profile from a config file'),
+        typer.Option(
+            '--profile',
+            help='named profile from a config file (sx config profiles)',
+            rich_help_panel=_SELECTION,
+        ),
     ] = None,
     environment: Annotated[
         str | None,
@@ -1042,6 +1117,7 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
             '--environment',
             '--env',
             help='stage overlay within the selected profile',
+            rich_help_panel=_SELECTION,
         ),
     ] = None,
     set_: Annotated[
@@ -1049,23 +1125,39 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
         typer.Option(
             '--set',
             help='provider.field=value override, repeatable (e.g. --set s3.root=/x)',
+            rich_help_panel=_SELECTION,
         ),
     ] = None,
     cache: Annotated[
-        bool, typer.Option('--cache', help='read-through cache: du/ls/stat/cat')
+        bool,
+        typer.Option(
+            '--cache',
+            help='read-through cache: du/ls/stat/cat',
+            rich_help_panel=_SESSION,
+        ),
     ] = False,
     cache_ttl: Annotated[
         float | None,
-        typer.Option('--cache-ttl', help='seconds before cached entries expire'),
+        typer.Option(
+            '--cache-ttl',
+            help='seconds before cached entries expire',
+            rich_help_panel=_SESSION,
+        ),
     ] = None,
     sandbox: Annotated[
-        str | None, typer.Option('--sandbox', help='jail the session under this path')
+        str | None,
+        typer.Option(
+            '--sandbox',
+            help='jail the session under this path',
+            rich_help_panel=_SESSION,
+        ),
     ] = None,
     icons: Annotated[
         bool | None,
         typer.Option(
             '--icons/--no-icons',
             help='Nerd Font icons in listings (default: persistent prefs)',
+            rich_help_panel=_SESSION,
         ),
     ] = None,
     debug: Annotated[
@@ -1074,15 +1166,26 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
             '--debug',
             '--traceback',
             help='print the full provider traceback when a command fails',
+            rich_help_panel=_INSPECT,
         ),
     ] = False,
-    interactive: Annotated[bool, typer.Option('-i', '--interactive')] = False,
+    interactive: Annotated[
+        bool,
+        typer.Option(
+            '-i',
+            '--interactive',
+            help='start the sx shell instead of running one command',
+            rich_help_panel=_SESSION,
+        ),
+    ] = False,
 ) -> None:
     """Set up the session; launch the shell when no command is given."""
     set_debug(debug)
     if icons is not None:
         set_icons(icons)
     selected_profile, selected_environment = resolve_selection(profile, environment)
+    _session.profile = selected_profile
+    _session.environment = selected_environment
     overrides = build_overrides(
         resolve_provider(provider_, selected_profile),
         flags={

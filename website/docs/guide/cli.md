@@ -34,6 +34,17 @@ Connection settings come from the same sources the library reads: the
 file (`[s3]`, `[azure]`, ...). So `sx -p azure` talks to the account your code
 already talks to. See [Configure from settings](../recipes/settings.md).
 
+You should not have to come back here to use it. `sx --help` groups its
+commands by what they do (navigate, read, write, transfer, and the ones about
+sx itself) and its options by what they configure (connection, profile,
+session), and three commands answer the questions this page otherwise would:
+
+```bash
+sx config show --effective   # what this session will do, and where each value came from
+sx config sources            # which files are read, in which order they win
+sx doctor                    # installation, config, and what it can reach
+```
+
 ## Unix commands, any backend
 
 ```
@@ -381,6 +392,35 @@ A profile sits above the environment on purpose: selecting one is an
 explicit act, and a stale exported variable must not quietly redirect it.
 The same chain applies to the library, with `get_storage()` keywords in
 place of flags; see [Configure from settings](../recipes/settings.md).
+
+### Keeping it working: `sx doctor` and `sx update`
+
+```bash
+sx doctor              # how storix is installed, configured, and what it reaches
+sx doctor --updates    # the same, plus one question to PyPI
+sx update              # upgrade through the package manager that installed it
+sx update --check      # report installed and latest, change nothing
+```
+
+`sx doctor` reports the version and how it was installed, the Python it runs
+on, which provider extras are importable, the config files it found, the
+profile and stage in force, the effective provider with **where each value
+came from**, and whether `$VISUAL`/`$EDITOR` is set for `config edit`. It
+asks the network nothing unless you pass `--updates`.
+
+`sx update` drives the package manager that installed storix and never
+rewrites its own files. On a `uv tool` install it runs `uv tool upgrade
+storix`, printing the command first - uv's receipt already remembers the
+extras you asked for, so they survive the upgrade. Anywhere else (a
+virtualenv, an editable checkout, a system install) it refuses and prints
+the exact command for that context:
+
+```console
+$ sx update
+sx: storix runs from a virtualenv install, which sx will not modify.
+Upgrade it the way you installed it:
+  /path/to/python -m pip install --upgrade storix
+```
 
 ### Seeing and editing it: `sx config`
 
