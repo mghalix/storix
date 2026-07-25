@@ -41,7 +41,7 @@ In this demo, FFmpeg generates a fragmented MP4 through stdout. Python exposes t
 - Azure Blob Storage
 - Cloudflare R2 through its S3-compatible API
 
-The Python code and logical destination path stay the same. Only the storage configuration changes.
+The Python code and logical destination path stay fixed. Only the selected Storix configuration changes.
 
 <figure class="storix-demo">
   <video
@@ -64,12 +64,13 @@ The Python code and logical destination path stay the same. Only the storage con
 
   <figcaption>
     FFmpeg stdout streamed to local storage, Azure Blob Storage, and
-    Cloudflare R2. Only <code>STORIX_PROVIDER</code> changes.
+    Cloudflare R2. The producer and logical path do not change.
   </figcaption>
 </figure>
 
-<!-- <img src="https://youtube.com" width="16" height="16"/> [Watch on YouTube](https://youtu.be/l9SpFWYtRR8) -->
 [:fontawesome-brands-youtube: Watch on YouTube](https://youtu.be/l9SpFWYtRR8)
+
+[:fontawesome-brands-github: View the complete runnable demo](https://github.com/mghalix/storix/tree/main/samples/showcase/one-stream-three-backends)
 
 > The demo uses three destinations to keep the sequence short and readable. Storix also supports Azure Data Lake Gen2, Amazon S3 and compatible stores such as MinIO, and Google Cloud Storage.
 
@@ -78,9 +79,10 @@ The Python code and logical destination path stay the same. Only the storage con
 This is the part of the demo that matters:
 
 ```python
-# Same code.
-# The provider comes from STORIX_PROVIDER.
-async with session as fs:
+from storix.aio import get_storage
+
+
+async with get_storage() as fs:
     await fs.mkdir("/launch", parents=True)
     await fs.echo(
         ffmpeg_stream(),
@@ -99,7 +101,7 @@ FFmpeg produces chunks. Storix consumes them.
 
 Developer experience is one of the main reasons I built Storix around native Python types.
 
-You should not have to convert your data into a library-specific upload object before it can be stored.
+You should not have to convert data into a library-specific upload object before it can be stored.
 
 `echo()` accepts the values Python developers already work with:
 
@@ -114,6 +116,7 @@ The FFmpeg producer is therefore an ordinary async generator:
 
 ```python
 import asyncio
+import contextlib
 
 from collections.abc import AsyncIterator
 
@@ -126,9 +129,32 @@ async def ffmpeg_stream() -> AsyncIterator[bytes]:
     )
 
     assert process.stdout is not None
+    assert process.stderr is not None
 
-    while chunk := await process.stdout.read(64 * 1024):
-        yield chunk
+    # Drain stderr while stdout is being consumed so FFmpeg cannot block on a
+    # full error pipe. The complete sample also reports FFmpeg failures.
+    stderr_task = asyncio.create_task(process.stderr.read())
+
+    try:
+        while chunk := await process.stdout.read(64 * 1024):
+            yield chunk
+
+        return_code = await process.wait()
+        stderr = await stderr_task
+
+        if return_code != 0:
+            detail = stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(detail or f"FFmpeg exited with status {return_code}")
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
+        if not stderr_task.done():
+            stderr_task.cancel()
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await stderr_task
 ```
 
 Nothing in this function knows that Storix exists.
@@ -136,8 +162,6 @@ Nothing in this function knows that Storix exists.
 It could feed those chunks into an HTTP response, a message broker, a hashing pipeline, a parser, or any other consumer that accepts an async iterable.
 
 Storix is only the destination.
-
-That separation makes pipelines easier to compose because their boundaries use standard language types instead of framework-specific containers.
 
 See the [`echo()` reference](https://storix.mghalix.com/reference/storix/#echo) for the complete input contract.
 
@@ -152,6 +176,8 @@ from storix.aio import get_storage
 
 
 async with get_storage("local", base="./data") as fs:
+    await fs.mkdir("/reports", parents=True)
+
     with open("report.parquet", "rb") as source:
         await fs.echo(source, "/reports/report.parquet")
 ```
@@ -160,6 +186,8 @@ Text files work the same way:
 
 ```python
 async with get_storage() as fs:
+    await fs.mkdir("/events", parents=True)
+
     with open("events.ndjson", encoding="utf-8") as source:
         await fs.echo(source, "/events/events.ndjson")
 ```
@@ -176,6 +204,7 @@ async def generate_export() -> AsyncIterator[bytes]:
 
 
 async with get_storage() as fs:
+    await fs.mkdir("/exports", parents=True)
     await fs.echo(
         generate_export(),
         "/exports/customers.ndjson",
@@ -188,7 +217,7 @@ The storage API does not force the producer to become storage-aware.
 
 Writing is only half of the flow.
 
-Storix can also read files incrementally with `stream()`.
+Storix can read files incrementally with `stream()`.
 
 The synchronous API produces a regular iterator:
 
@@ -215,35 +244,20 @@ async with get_storage() as fs:
         await downstream.send(chunk)
 ```
 
-The downstream consumer might be:
+The downstream consumer might be an HTTP response, decompressor, parser, media processor, hashing pipeline, inference component, or another storage destination.
 
-- An HTTP response
-- A decompressor
-- A parser
-- A media processor
-- A hashing or encryption pipeline
-- Another storage destination
-- A machine-learning inference component
+For small, known-size files, `cat()` returns the complete contents as `bytes`. For larger workloads, `stream()` lets the application process data incrementally instead of materializing the complete object first.
 
-For small, known-size files, `cat()` returns the complete contents as `bytes`.
+For downloads into a seekable file, Storix 0.5.0 can go further than an ordered stream. `download()` may fetch several byte ranges of one large object concurrently and write each range at its destination offset. `stream()` remains the ordered incremental API for arbitrary consumers.
 
-For larger workloads, `stream()` lets the application process data incrementally instead of materializing the complete object first.
+In one measured 200 MiB Azure download over a home connection, eight ranges reduced wall time from 61.53 seconds to 25.51 seconds, with peak RSS of 173 MB. This is one measurement, not a universal speed guarantee. Each range is a separate request, so the throughput improvement trades against transaction count. Use `ranges=1`, or `STORIX_MAX_TRANSFER_RANGES=1`, to keep every download on one stream.
 
-Both directions use ordinary Python iteration:
+See:
 
-```text
-Python producer
--> echo()
--> storage
+- [`stream()` reference](https://storix.mghalix.com/reference/storix/#stream)
+- [Tune transfer memory and throughput](https://storix.mghalix.com/recipes/transfers/)
 
-storage
--> stream()
--> Python consumer
-```
-
-The [`stream()` reference](https://storix.mghalix.com/reference/storix/#stream) documents the read side, including backend-selected chunk sizes and bounded-memory behavior for streaming-native backends.
-
-## Provider selection belongs in configuration
+## Provider selection belongs at the composition boundary
 
 The demo uses `get_storage()` without naming a provider in the Python code:
 
@@ -255,7 +269,7 @@ async with get_storage() as fs:
     ...
 ```
 
-Storix reads the selected provider from the environment:
+The active provider can come from environment configuration:
 
 ```bash
 STORIX_PROVIDER=local uv run python demo.py
@@ -273,13 +287,11 @@ STORIX_AZURE_CONTAINER=storix-demo
 STORIX_AZURE_ACCOUNT_NAME=my-account
 STORIX_AZURE_CREDENTIAL=...
 
-# Optional:
-# Omit this setting to auto-detect Blob Storage versus ADLS Gen2.
-# Set it explicitly to "blob" or "adls" to skip detection.
+# Optional. The default is auto.
 STORIX_AZURE_KIND=blob
 ```
 
-The default Azure kind is `auto`. Storix checks whether the account has hierarchical namespaces enabled and selects either the ADLS Gen2 backend or the Blob backend. Explicit `blob` or `adls` selection is useful when account-level detection is unavailable or when the required surface is already known.
+With `kind="auto"`, Storix checks whether the account has hierarchical namespaces enabled and selects either the ADLS Gen2 backend or the Blob backend. Explicit `blob` or `adls` selection skips that detection when the intended surface is already known or account-level detection is unavailable.
 
 For Cloudflare R2:
 
@@ -292,7 +304,7 @@ STORIX_S3_ACCESS_KEY_ID=...
 STORIX_S3_SECRET_ACCESS_KEY=...
 ```
 
-R2 uses Storix's S3 backend because it exposes an S3-compatible API. Cloudflare's official SDK example uses `region_name="auto"` and notes that the value is required by the AWS SDK but is not used by R2.
+R2 uses Storix's S3 backend because it exposes an S3-compatible API. Cloudflare's SDK guidance uses `region_name="auto"`; the value is required by AWS SDK conventions but is not used as an R2 region.
 
 See:
 
@@ -301,52 +313,11 @@ See:
 - [Storix backends](https://storix.mghalix.com/guide/backends/)
 - [Cloudflare R2 S3 SDK configuration](https://developers.cloudflare.com/r2/get-started/s3/#3-use-an-aws-sdk)
 
-## Configure supported providers once, then select one
+### Name a connection once, then select it by name
 
-Provider credentials and deployment settings remain provider-specific, but they are configured once at the application's composition boundary.
+Storix 0.5.0 gives that composition boundary a name.
 
-An application can configure every provider it intends to support:
-
-```dotenv
-STORIX_AZURE_CONTAINER=raw
-STORIX_AZURE_ACCOUNT_NAME=...
-STORIX_AZURE_CREDENTIAL=...
-
-STORIX_S3_BUCKET=raw
-STORIX_S3_REGION=auto
-STORIX_S3_ENDPOINT=...
-STORIX_S3_ACCESS_KEY_ID=...
-STORIX_S3_SECRET_ACCESS_KEY=...
-
-STORIX_GCS_BUCKET=raw
-STORIX_GCS_CREDENTIAL_PATH=...
-```
-
-The active provider can then be selected by deployment configuration:
-
-```dotenv
-STORIX_PROVIDER=azure
-```
-
-or explicitly in code:
-
-```python
-fs = get_storage(
-    settings.storage_provider,
-    **settings.provider_options,
-)
-```
-
-The goal is not to pretend that an Azure account name and an R2 endpoint are the same setting.
-
-The goal is to keep those differences at one configuration boundary so they do not spread into materialization, inference, synchronization, or data-processing logic.
-
-### Name the connection once, select it by name
-
-Since 0.5.0 that boundary has a name. A *profile* is one provider plus its
-settings, written in a config file and selected by name; a *stage* overlays
-what differs between deployments, which in practice is a separate account
-with its own credential:
+A *profile* is one provider plus its settings. A *stage* overlays what differs between deployments:
 
 ```toml
 # storix.toml, or ~/.config/storix/config.toml
@@ -371,98 +342,43 @@ endpoint = "https://<account-id>.r2.cloudflarestorage.com"
 ```
 
 ```python
-fs = get_storage(profile="ingest", environment=os.environ["STAGE"])
+fs = get_storage(
+    profile="ingest",
+    environment=os.environ["STAGE"],
+)
 ```
 
 ```bash
 sx --profile ingest --env prod ls /
 ```
 
-Non-secret coordinates live in the file; a credential is named, never held -
-`credential = "env:ACME_PRD_CREDENTIAL"` reads that variable at load time, and
-a literal secret in a project file is refused outright. Each stage reads its
-own variable, so a process running against `dev` never has the production
-secret in its environment at all, and an unset one fails at load instead of
-falling back to another stage's.
+Non-secret coordinates can live in the file. A credential can be named without being stored there:
 
-The profile only reaches the library when a call asks for it. A `profile` key
-pinned in a config file and `STORIX_PROFILE` steer `sx`, deliberately not
-`get_storage()`: a personal file must not be able to point an application's
-session at another account, and
+```toml
+credential = "env:ACME_PRD_CREDENTIAL"
+```
+
+Each stage can name its own credential variable, so a deployment only needs to expose the credential for the stage it runs. An unset variable fails during configuration loading instead of falling back to another stage.
+
+A pinned profile and `STORIX_PROFILE` steer `sx`, deliberately not a plain `get_storage()` call. The library selects a profile only when the call asks for one, so personal CLI configuration cannot silently redirect application code.
 
 ```python
 src = get_storage("azure", container="raw")
 dst = get_storage("s3", bucket="archive")
 ```
 
-has to mean what it says on every machine - which is the shape every
-migration between two providers takes.
+Profiles sit alongside direct environment and explicit configuration rather than replacing them. `sx config show --effective` reports the configuration source that supplied each value.
 
-Profiles do not replace the environment variables above; they sit alongside
-them, and `sx config show --effective` prints which of the two supplied each
-value.
+## Explicit sessions remain first-class
 
-## Explicit configuration is just as easy
+Environment-driven selection is useful when an application has one active provider, but some systems need several storage sessions at the same time.
 
-Environment-driven configuration is useful when an application has one active provider, but it is not the only option.
-
-Every provider can also be selected and configured explicitly:
+Every provider can be configured explicitly:
 
 ```python
 from storix.aio import get_storage
 
 
-fs = get_storage(
-    "azure",
-    container="raw",
-    account_name=settings.azure_account_name,
-    credential=settings.azure_credential,
-)
-```
-
-This is useful in data engineering systems that need several storage sessions at the same time.
-
-For example, one of my common patterns separates data across raw, staging, and processed zones, often described as bronze, silver, and gold in the medallion architecture:
-
-```python
-from storix.aio import Storix, get_storage
-
-
-def azure_container(name: str) -> Storix:
-    return get_storage(
-        "azure",
-        container=name,
-        account_name=settings.azure_account_name,
-        credential=settings.azure_credential,
-    )
-
-
-raw = azure_container("raw")
-staging = azure_container("staging")
-processed = azure_container("processed")
-```
-
-Because `kind` is omitted, Storix auto-detects whether the Azure account should use Blob Storage or ADLS Gen2.
-
-Those sessions can be passed explicitly into application services:
-
-```python
-class MaterializationPipeline:
-    def __init__(
-        self,
-        *,
-        raw: Storix,
-        staging: Storix,
-        processed: Storix,
-    ) -> None:
-        self.raw = raw
-        self.staging = staging
-        self.processed = processed
-```
-
-The sessions do not need to use the same provider:
-
-```python
 raw = get_storage(
     "azure",
     container="raw",
@@ -478,9 +394,26 @@ processed = get_storage(
 )
 ```
 
-Configuration remains provider-specific where it needs to be.
+Those sessions can be injected into a pipeline:
 
-The operations performed by the application remain consistent.
+```python
+from storix.aio import Storix
+
+
+class MaterializationPipeline:
+    def __init__(
+        self,
+        *,
+        raw: Storix,
+        staging: Storix,
+        processed: Storix,
+    ) -> None:
+        self.raw = raw
+        self.staging = staging
+        self.processed = processed
+```
+
+Configuration remains provider-specific where it needs to be. The filesystem operations performed by the application remain consistent.
 
 ## The same logical path across providers
 
@@ -490,23 +423,22 @@ The demo writes to one logical path:
 /launch/one-stream-three-backends.mp4
 ```
 
-That path resolves to a different physical destination depending on the configured backend:
+`fs.locate()` reveals the physical URI selected by the backend:
 
 ```text
-Local -> file:///.../launch/one-stream-three-backends.mp4
-Azure -> abfss://.../launch/one-stream-three-backends.mp4
-R2    -> s3://storix-demo/launch/one-stream-three-backends.mp4
+Local       -> file:///.../launch/one-stream-three-backends.mp4
+Azure Blob  -> wasbs://storix-demo@my-account.blob.core.windows.net/launch/one-stream-three-backends.mp4
+Azure ADLS  -> abfss://storix-demo@my-account.dfs.core.windows.net/launch/one-stream-three-backends.mp4
+R2 / S3     -> s3://storix-demo/launch/one-stream-three-backends.mp4
 ```
 
-Application code works with one Unix-style filesystem model.
-
-Storix handles the provider boundary underneath it.
+Application code works with one Unix-style filesystem model. Storix handles the provider boundary underneath it.
 
 ## More than `echo()` and `stream()`
 
 Storix is not only an upload helper, and it is more than a cloud-aware path object.
 
-A Storix session provides a broader filesystem API across its backends:
+A session provides a broader filesystem API across its backends:
 
 ```python
 await fs.mkdir("/datasets/processed", parents=True)
@@ -546,65 +478,29 @@ await fs.rm(
 )
 ```
 
-The API includes familiar controls for:
-
-- Listing and lazy directory scanning
-- Recursive walking
-- Finding entries by name and kind
-- Path-style globbing
-- Copying and moving
-- Removing files and directory trees
-- Inspecting file metadata
-- Calculating apparent size
-- Working with current directories and relative paths
-- Creating temporary or sandboxed workspaces
-- Generating provider-native URLs where supported
+The API includes familiar controls for listing, lazy scanning, recursive walking, searching, globbing, copying, moving, removal, metadata, apparent size, current directories, sandboxes, temporary workspaces, and provider-native URLs where supported.
 
 See the complete [Storix session reference](https://storix.mghalix.com/reference/storix/).
 
-The goal is not to pretend that every storage provider is identical.
+Providers still have different native capabilities. Storix reports those capabilities explicitly, while layers can backfill selected behavior when a meaningful portable implementation exists.
 
-Providers have different native capabilities. Storix makes those differences explicit, while prebuilt layers can backfill selected capabilities and custom layers can add application-specific behavior.
+## Portable capabilities through layers
 
-## Extensibility does not stop at the provider
+Some storage behavior should remain stable even when the provider changes.
 
-Storix is provider-agnostic, but I did not want extensibility to end at selecting a backend.
+### URLs
 
-The same design extends into cross-cutting storage behavior:
-
-```text
-backend
--> determines where the data lives
-
-layer
--> adds behavior around storage operations
-
-cache store
--> determines where cached values live
-```
-
-Backends, layers, and cache stores each have small structural contracts. They can be replaced independently without changing the application-facing filesystem API.
-
-## Portable URLs for local and cloud development
-
-`DataUrlLayer` came from a practical computer vision and agent UI problem.
-
-In production, a cloud object can usually be exposed through a URL that the UI can render. During local development and rapid prototyping, the same image or vision result may live on the local filesystem, where no provider-native URL capability exists.
-
-I did not want UI events or agent messages to care which backend produced the asset.
+A cloud backend can often produce a provider-native URL. A local filesystem cannot. For small local UI assets, `DataUrlLayer` can backfill the missing capability:
 
 ```python
 from storix.aio import DataUrlLayer, get_storage
 
 
 fs = get_storage().with_layer_missing(DataUrlLayer)
-
 result_url = await fs.url("/results/detected-person.jpg")
 ```
 
-The method used to compose the layer is intentional.
-
-`with_layer_missing()` prefers a provider-native URL implementation and adds `DataUrlLayer` only when that capability is absent:
+`with_layer_missing()` prefers a native implementation and adds the layer only when the capability is absent:
 
 ```text
 backend with native URL support
@@ -615,112 +511,13 @@ backend without URL support
 -> return an inline data: URL
 ```
 
-Using `with_layer(DataUrlLayer)` instead applies the layer unconditionally. In that case, the layer wins even when the backend could have generated a native provider URL.
+Using `with_layer(DataUrlLayer)` applies it unconditionally. `fs.data_url(path)` is also available when the caller explicitly wants an inline representation.
 
-If a caller explicitly always wants an inline representation, `fs.data_url(path)` is also available directly on the session.
+Data URLs are useful for small browser-rendered assets, but they are unsuitable for large media and expensive inside an LLM context. A different application can provide a custom URL layer backed by its own media gateway while continuing to call `fs.url(path)`.
 
-The same native-preference behavior is available as a functional combinator when layers need to be assembled before constructing the filesystem:
+### Metadata
 
-```python
-import functools
-
-from storix.aio import (
-    CacheLayer,
-    DataUrlLayer,
-    InMemoryCacheStore,
-    MetadataLayer,
-    SandboxLayer,
-    when_missing,
-)
-
-
-@staticmethod
-def _build_layers(
-    cfg: StorageLayerConfiguration,
-) -> tuple[BoundLayer, ...]:
-    serializer = get_serializer()
-
-    layers: list[BoundLayer] = [
-        when_missing(
-            MetadataLayer,
-            serialize=serializer.dumpb,
-            deserialize=serializer.loads,
-        ),
-        when_missing(DataUrlLayer),
-    ]
-
-    if (root := cfg.sandbox) is not None:
-        layers.append(
-            functools.partial(
-                SandboxLayer,
-                root=root,
-            )
-        )
-
-    if cfg.cache.enabled:
-        content_store = InMemoryCacheStore(
-            maxsize=CONTENT_CACHE_MAX_ENTRIES,
-        )
-        layers.append(
-            functools.partial(
-                CacheLayer,
-                **cfg.cache.as_layer_kwargs(
-                    content_store=content_store,
-                ),
-            )
-        )
-
-    return tuple(layers)
-```
-
-This is useful when the storage stack is produced by application configuration or dependency injection rather than built fluently at one call site.
-
-`DataUrlLayer` is only one possible backfill strategy.
-
-Data URLs work especially well for small images rendered directly by a browser UI, but they inline the complete asset as base64. That is undesirable when a URL is passed through an LLM context because it consumes a large number of tokens, and it is unsuitable for larger media.
-
-A workflow focused on images could instead provide a custom URL layer that publishes local results through an image hosting service or, preferably, an application-owned media gateway. Another implementation could use temporary application endpoints or a dedicated media service supporting images, audio, and video.
-
-```text
-small local UI asset
--> DataUrlLayer
--> inline data: URL
-
-image sent through an LLM workflow
--> custom hosted-image layer
--> compact HTTPS URL
-
-general media workflow
--> application media gateway
--> temporary HTTPS URL
-```
-
-The application still calls:
-
-```python
-url = await fs.url(path)
-```
-
-Only the portable capability strategy changes.
-
-## Portable metadata for inference datasets
-
-`MetadataLayer` came from another computer vision workflow.
-
-Some cloud vision APIs required each training or inference image to remain associated with identifiers such as:
-
-```text
-person_directory_id
-person_id
-```
-
-Cloud object stores could preserve that information as object metadata.
-
-Local storage could not.
-
-Without a portable metadata layer, switching the same knowledge-base images to local storage for development would require a separate database, filename conventions, or provider checks throughout the pipeline.
-
-The simplest construction uses Storix's built-in standard-library JSON codec:
+`MetadataLayer` solves the same portability problem for custom metadata:
 
 ```python
 from storix.aio import MetadataLayer, get_storage
@@ -729,11 +526,11 @@ from storix.aio import MetadataLayer, get_storage
 fs = get_storage().with_layer_missing(MetadataLayer)
 ```
 
-Serialization is customizable when the application already has a faster or domain-specific byte serializer:
+When the backend supports custom metadata natively, the layer is skipped. Otherwise it preserves metadata through a hidden sidecar stored with the data.
+
+Serialization is customizable:
 
 ```python
-serializer = get_serializer()
-
 fs = get_storage().with_layer_missing(
     MetadataLayer,
     serialize=serializer.dumpb,
@@ -741,25 +538,15 @@ fs = get_storage().with_layer_missing(
 )
 ```
 
-The callbacks are optional. Applications can substitute `orjson.dumps` and `orjson.loads`, a Pydantic-aware serializer, or another object-to-bytes codec. The serializer must return bytes rather than the string returned by `json.dumps`.
-
-When the backend supports custom metadata natively, `with_layer_missing()` leaves it unchanged. When it does not, `MetadataLayer` preserves the metadata through a hidden sidecar stored with the data.
-
-As with URLs, using `with_layer(MetadataLayer)` deliberately forces the sidecar implementation even over a backend with native metadata.
-
-The inference pipeline continues to read the same metadata through Storix regardless of where the sample is stored.
+Storix's local backend does not expose native object metadata, while cloud object stores can. The pipeline still reads the same metadata through Storix regardless of where a sample is stored.
 
 See [Layers](https://storix.mghalix.com/guide/layers/) for capability-aware composition and the built-in layer stack.
 
-## A provider-agnostic cache with provider-agnostic storage
+## Provider-agnostic caching and custom behavior
 
-The same extensibility applies to caching.
+`CacheLayer` wraps the same storage port, so one cache policy can operate over local storage, Azure, S3, GCS, or a custom backend.
 
-`CacheLayer` is not tied to Azure, S3, local storage, or any particular cache technology. It wraps the storage port, so the same caching policy can operate over every backend.
-
-Its cache store is also replaceable.
-
-Storix ships an in-memory store, while the `CacheStore` protocol requires only four operations:
+Its cache store is replaceable too. Storix ships an in-memory store, while the `CacheStore` protocol requires only:
 
 ```python
 get(key, default=None)
@@ -768,19 +555,9 @@ delete(key)
 delete_match(pattern)
 ```
 
-For async Storix, a Cashews cache already satisfies that protocol directly. It can be configured with memory, disk, local Redis, or managed Redis. An existing cache library with different method names can be supported through a small adapter.
+For async Storix, a Cashews cache already satisfies that protocol and can use memory, disk, local Redis, or managed Redis.
 
-The cache technology is therefore independent from the storage technology:
-
-```text
-Azure storage + in-memory cache
-Azure storage + Redis cache
-S3 storage + disk cache
-local storage + Redis cache
-custom backend + custom cache store
-```
-
-The policy is fine-grained as well. Metadata, directory sizes, URLs, and file contents can each have different TTLs, stores, and limits:
+Metadata, directory sizes, URLs, and file contents can each have their own TTL, store, and limits:
 
 ```python
 from storix.aio import CacheLayer, cache, get_storage
@@ -791,83 +568,36 @@ fs = get_storage("azure").with_layer(
     store=stores[settings.default_store],
     ttl=settings.default_ttl,
     environment=settings.environment,
-    metadata=cache(
-        ttl=settings.metadata_ttl,
-    ),
-    du=cache(
-        ttl=settings.du_ttl,
-    ),
-    url=cache(
-        ttl=settings.url_ttl,
-    ),
-    read=(
-        cache(
-            ttl=settings.read_ttl,
-            max_bytes=settings.read_max_bytes,
-            store=stores[settings.read_store],
-        )
-        if settings.read_enabled
-        else False
+    metadata=cache(ttl=settings.metadata_ttl),
+    du=cache(ttl=settings.du_ttl),
+    url=cache(ttl=settings.url_ttl),
+    read=cache(
+        ttl=settings.read_ttl,
+        max_bytes=settings.read_max_bytes,
+        store=stores[settings.read_store],
     ),
 )
 ```
 
-This configuration can:
+The same structural design supports custom backends and custom layers. A backend implements `StorageBackend`; a layer wraps that same port and overrides only the operations it needs. Existing sessions, the CLI, and other layers continue to work without provider-specific rewrites.
 
-- Cache metadata in shared Redis
-- Cache content in a bounded local or disk store
-- Give expensive recursive `du()` calls their own TTL
-- Cache generated URLs separately
-- Refuse to cache file contents larger than `max_bytes`
-- Namespace entries by deployment environment
-- Disable any operation independently
-
-Each operation accepts `True`, `False`, or a `cache(...)` specification. A specification can override the default store, TTL, and, for content reads, the maximum cacheable object size.
-
-This is an important part of the design philosophy:
-
-> Storix does not stop at making the filesystem provider-agnostic. Its optional behavior is built around the same replaceable, protocol-driven boundaries.
-
-See [Caching with Redis or disk](https://storix.mghalix.com/recipes/caching/#cashews-with-async-storix) for Cashews, Redis, disk caching, and adapting an existing cache client.
-
-## Custom behavior without forking Storix
-
-The same ports support extensions outside the built-in components.
-
-A custom backend implements the `StorageBackend` contract. The Storix core continues to own path resolution, current-directory behavior, Unix operations, and layer composition.
-
-As a result, the CLI, session API, and existing layers can work over the new backend without being rewritten.
-
-A custom layer implements the same storage port, wraps an inner backend, and overrides only the operations it needs to change. `LayerBase` delegates everything else, so the layer remains portable across local storage, memory, Azure, object stores, and custom providers.
-
-Examples include:
-
-- Audit events
-- Content validation
-- Encryption
-- Tracing
-- Notifications
-- Organization-specific authorization
-- Domain-specific metadata
-- Custom resilience policies
+Examples include audit events, content validation, encryption, tracing, notifications, organization-specific authorization, and domain-specific metadata.
 
 See:
 
+- [Caching with Redis or disk](https://storix.mghalix.com/recipes/caching/#cashews-with-async-storix)
 - [Write a custom backend](https://storix.mghalix.com/recipes/custom-backend/)
 - [Write a custom layer](https://storix.mghalix.com/recipes/custom-layer/)
 
 ## Architecture built to grow
 
-The architecture follows ports and adapters at more than one boundary.
-
-The Python API and `sx` CLI present the core to users. The `StorageBackend` port isolates storage implementations. Layers implement that same port and can wrap any provider. `CacheLayer` introduces another small port for replaceable cache stores.
+The Python API and `sx` CLI drive the core. The `StorageBackend` port isolates storage implementations. Layers implement that same port and wrap any backend. `CacheLayer` introduces another small port for replaceable cache stores.
 
 ```mermaid
 flowchart LR
     subgraph driving["Driving adapters"]
         library["Python API"]
         cli["sx CLI"]
-        future["Future adapters<br/>pathlike / flat API / MCP"]
     end
 
     core["Storix core<br/>cwd / home / path resolution<br/>Unix operations"]
@@ -902,7 +632,6 @@ flowchart LR
 
     library --> core
     cli --> core
-    future -.-> core
 
     core --> outer_port
     outer_port --> layers
@@ -916,81 +645,40 @@ flowchart LR
     cache_port --> adapted
 ```
 
-This separation lets Storix add providers, middleware, cache technologies, and user-facing adapters without moving all of those concerns into one monolithic abstraction.
+This separation lets Storix add providers, middleware, cache technologies, and user-facing interfaces without moving every concern into one monolithic abstraction.
 
-## Designed for the path from prototype to production
+## Where this model has held up
 
-Storix did not begin only as a theoretical abstraction, nor only after a system was already in production.
+Storix was shaped by workflows that had to survive the path from isolated tests to cloud production.
 
-It also came from wanting one workflow to survive the entire development lifecycle:
+### Prototype to production
 
-```text
-fast isolated test
--> local prototype
--> proof of concept
--> MVP
--> production cloud deployment
-```
-
-During early development, I can use `MemoryBackend` when I need isolated execution with no external storage I/O:
+Tests can use a disposable in-process backend:
 
 ```python
+from storix.aio import get_storage
+
+
 fs = get_storage("memory")
 ```
 
-When I want files I can inspect directly, I can switch to local storage:
+Local prototypes can write inspectable files:
 
 ```python
-fs = get_storage(
-    "local",
-    base="./development-data",
-)
+fs = get_storage("local", base="./development-data")
 ```
 
-Later, the cloud infrastructure team may choose Azure, S3, GCS, or an S3-compatible service.
+Later, deployment configuration can select Azure, S3, GCS, or an S3-compatible service without rewriting the shared pipeline operations.
 
-The shared pipeline operations should not need to change because that decision was made later:
+### Computer vision and multimedia knowledge bases
 
-```python
-fs = get_storage()
-```
+Computer vision systems handle source images and videos, extracted frames, generated clips, inference artifacts, reference media, and domain metadata.
 
-```dotenv
-STORIX_PROVIDER=azure
-```
+The inference pipeline should process those assets and maintain their metadata. It should not contain separate storage branches for local development and cloud deployment. The `MetadataLayer` and `DataUrlLayer` examples above came directly from this need.
 
-This makes it possible to prototype and test before the final production provider is known while still designing against the same interface that will be deployed.
+### Terabyte-scale video materialization
 
-The provider-specific configuration appears at the composition boundary. It does not spread through the processing code.
-
-Storix was then shaped further by production systems and customer deployments where those same patterns had to operate over real data volumes, concurrent workloads, cloud services, and constrained machines.
-
-## Computer vision inference and multimedia knowledge bases
-
-Computer vision systems need to manage more than model inputs and numeric outputs.
-
-They may handle:
-
-- Source images and videos
-- Extracted frames
-- Generated clips
-- Detection and inference artifacts
-- Knowledge-base documents
-- Knowledge-base media such as reference images and videos
-- Person-directory and identity metadata
-- Indexed or enriched representations
-
-In my own workflows, knowledge-base samples included images and video used by computer vision services for training and inference.
-
-The inference pipeline should focus on processing those assets and maintaining their domain metadata. It should not contain separate storage branches for local development and cloud deployment.
-
-The `MetadataLayer` and `DataUrlLayer` examples above came directly from this need.
-
-## Video materialization at terabyte scale
-
-I have used this streaming pattern to materialize more than a terabyte of YouTube videos directly into the selected storage provider.
-
-Each video is produced as a stream of chunks and written incrementally. The workflow does not first load a complete video into application memory, and it does not require a second provider-specific upload pass.
+I have used the same streaming pattern to materialize more than a terabyte of YouTube videos directly into the selected storage provider.
 
 ```text
 video producer
@@ -999,162 +687,66 @@ video producer
 -> selected provider
 ```
 
-Reads scale the same way without changing the call. A single stream to an
-object store is bounded by round trips rather than bandwidth, so
-`download()` fetches several byte ranges of one file concurrently and writes
-each at its offset - measured at 2.1x on a 200 MiB pull from Azure over one
-home connection, with peak resident memory at 173 MB. Every range is a
-separate request, so the speed is bought with transaction count;
-`ranges=1`, or `STORIX_MAX_TRANSFER_RANGES=1`, keeps every transfer on one
-stream.
+The workflow does not first load a complete video into application memory and does not require a second provider-specific upload pass.
 
-This is important beyond memory usage.
+### Scheduled synchronization and concurrent data pipelines
 
-In cloud-hosted web applications and serverless-style deployments, temporary files are often instance-local and ephemeral. They may disappear after a restart, be unavailable to another replica after scale-out, or compete with tightly limited temporary disk.
+The same model runs in scheduled audio-library synchronization and highly concurrent data-engineering workloads across raw, staging, and processed zones.
 
-Removing an unnecessary intermediate-file stage therefore reduces resource pressure and avoids making pipeline correctness depend on the lifetime of one application instance.
+Each storage zone can have its own container, bucket, prefix, provider, credentials, cache policy, sandbox, and observability hooks. The processing components retain the same filesystem operations.
 
-## Scheduled audio-library synchronization
-
-I also use the same model in a scheduled pipeline that runs daily to synchronize a large library of audio files into storage.
-
-The workflow can be parameterized by source, category, language, checkpoint, and destination:
-
-```python
-async def synchronize_audio(
-    *,
-    source: AudioSource,
-    destination: Storix,
-    checkpoint: CheckpointStore,
-) -> None:
-    ...
-```
-
-The scheduled process can:
-
-1. Discover new or changed audio files
-2. Resume from its checkpoint
-3. Stream each source incrementally
-4. Write it into the configured storage session
-5. Persist the updated checkpoint
-
-The pipeline does not need a separate Azure version, S3 version, and local version. It is easily parameterized by the storage session.
-
-This matters when the same synchronization logic runs across development, staging, and production environments whose infrastructure choices differ.
-
-## Raspberry Pi and low-resource deployments
-
-My self-hosted Raspberry Pi applications benefit from the same incremental model.
-
-Low-resource machines, small containers, and serverless-style environments are exactly where materializing complete objects or maintaining large temporary working directories becomes most painful.
-
-A storage abstraction should not assume that every process has large amounts of RAM or durable temporary disk.
-
-## Highly concurrent data engineering workloads
-
-Data engineering pipelines often process many objects concurrently across several storage zones:
-
-```text
-raw / bronze
--> staging / silver
--> processed / gold
-```
-
-In my own workloads, these operations run through many concurrent async tasks rather than one sequential transfer loop.
-
-Each storage zone can have its own:
-
-- Container or bucket
-- Prefix
-- Provider
-- Credentials
-- Cache policy and cache store
-- Sandboxing rules
-- Observability hooks
-
-Storix sessions can be configured independently and injected into each processing component while retaining the same filesystem operations.
-
-## Testing without cloud infrastructure
-
-The same abstraction is useful in tests.
-
-Production code can receive a Storix session backed by Azure, S3, or GCS, while tests receive the in-memory backend:
-
-```python
-from storix.aio import Storix
-from storix.aio.backends import MemoryBackend
-
-
-fs = Storix(MemoryBackend())
-```
-
-The test does not need to mock every provider SDK method.
-
-It can exercise real filesystem behavior against a disposable in-process backend:
-
-```python
-await fs.mkdir("/input")
-await fs.echo(b"payload", "/input/item.bin")
-
-assert await fs.cat("/input/item.bin") == b"payload"
-assert await fs.exists("/input/item.bin")
-```
-
-This is another benefit of basing the public API on standard Python values and filesystem operations rather than provider request objects.
+Low-resource and ephemeral environments benefit too. Removing unnecessary materialization reduces RAM and temporary-disk pressure and avoids making correctness depend on the lifetime of one application instance.
 
 ## Work with the same storage from the terminal
 
-Storix also ships `sx`, a Unix-flavored command-line interface over the same sessions, providers, layers, and typed storage behavior.
+Storix also ships `sx`, a Unix-flavored CLI over the same sessions, providers, layers, and typed errors.
 
-One command installs it, on any operating system:
+Install it on POSIX systems:
 
 ```bash
 curl -LsSf https://storix.mghalix.com/install.sh | sh
 ```
 
+Or on Windows:
+
 ```powershell
 powershell -c "irm https://storix.mghalix.com/install.ps1 | iex"
 ```
 
-Both are thin wrappers over `uv tool install`, and take the providers you
-want (`--with azure,s3`, `--all`, `--version`). They need no root, ask for no
-credentials, write no configuration, and edit no shell startup files. If you
-would rather run the package manager yourself:
+Both installers are thin wrappers over `uv tool install`. They accept provider selections such as `--with azure,s3`, `--all`, and `--version`, require no root access, ask for no credentials, write no configuration, and do not edit shell startup files.
+
+You can also use uv directly:
 
 ```bash
 uv tool install "storix[cli,azure,s3]>=0.5.0,<0.6.0"
 uv tool install "storix[all]>=0.5.0,<0.6.0"
 ```
 
-`sx update` upgrades through whichever package manager installed it, and
-refuses rather than rewriting an environment it did not create.
+`sx update` upgrades installations owned by `uv tool`, preserving the extras recorded in uv's receipt. In editable, virtual-environment, and other installation modes, it refuses to rewrite the environment and prints manual upgrade guidance.
 
-`sx` can execute one command:
+Run one command:
 
 ```bash
 sx -p azure tree --long --level 2
 sx -p azure du -sh /knowledge-base
 ```
 
-or open an interactive session:
+Or enter an interactive session:
 
 ```bash
 sx -p azure
 ```
 
-The interactive shell keeps its current directory and tab-completes command names and remote paths. Completion is context-aware: `push` and `pull` complete local or remote paths based on the active argument position.
-
-Transfers stream files or complete directory trees between the host and the configured provider with progress reporting:
+The shell retains its current directory and tab-completes commands and paths. `push` and `pull` complete local or remote paths according to the argument position and stream files or complete directory trees with progress reporting:
 
 ```bash
 sx push ./media /knowledge-base/media
 sx pull /knowledge-base/results ./results
 ```
 
-I use `sx` for quick inspection from the project root, navigating remote storage without opening a cloud dashboard, and moving data between local and cloud storage from the terminal.
+Missing destination parents are created automatically inside the configured storage root. The bucket or container itself remains a provider control-plane resource and must already exist, except where `sx provision` explicitly supports the backend.
 
-When a session is not where you expected it to be, `sx` answers rather than
-leaving you to guess:
+When a session is not where you expected, `whereami` shows the connection without making you guess:
 
 ```console
 $ sx --profile ingest --env prod whereami
@@ -1166,26 +758,21 @@ home:     /
 layers:   cache ls/stat/du/cat via InMemoryCacheStore
 ```
 
-`sx config show --effective` goes further and prints every field with the
-layer that supplied it - flag, stage, profile, environment variable, `.env`,
-project file, user file, or built-in default - and `sx doctor` reports how
-storix is installed, which extras are importable, and which config files were
-found. None of them opens a connection or resolves a credential, so they
-still answer when the connection is the thing that is broken.
+`sx config show --effective` prints each effective field with the configuration source that supplied it: a flag, stage overlay, profile, process environment, `.env`, project file, user file, or built-in default. `sx config sources` lists discovered files and precedence. `sx doctor` reports the installation method, importable provider extras, selected profile and stage, and configuration discovery without opening a connection or resolving a credential.
 
-Project or personal configuration can provide a default backend, persistent layers, and aliases.
-
-For `storix.toml`:
+Project or personal configuration can provide provider coordinates, CLI preferences, layers, and aliases:
 
 ```toml
+# storix.toml
 provider = "azure"
+
+[azure]
+account_name = "example"
+container = "media"
+credential = "env:AZURE_STORAGE_CREDENTIAL"
 
 [cli]
 icons = true
-
-# Every interactive sx session gets a read-through cache.
-# Inside one live shell, repeated ls, du, tree, and path completion
-# can reuse the cached remote results.
 layers = [
     { name = "cache", ttl = 300 },
 ]
@@ -1193,60 +780,28 @@ layers = [
 [cli.alias]
 l = "ls -l"
 ll = "ls -la"
-lsn = "ls -lr"
 lt = "tree --level 2"
 lT = "tree --long"
 ```
 
-For `pyproject.toml`:
-
-```toml
-[tool.storix]
-provider = "azure"
-
-[tool.storix.cli]
-icons = true
-layers = [
-    { name = "cache", ttl = 300 },
-]
-
-[tool.storix.cli.alias]
-l = "ls -l"
-ll = "ls -la"
-lsn = "ls -lr"
-lt = "tree --level 2"
-lT = "tree --long"
-```
-
-An unknown key is an error naming the file, the key, and the legal set, so a
-setting written in the wrong place fails loudly instead of doing nothing.
-`sx config validate` checks every discovered file, and `sx config sources`
-prints which files were found and in what order they win.
-
-The cache is in memory for the lifetime of the `sx` session. It is most useful while navigating repeatedly inside the interactive shell:
+The in-memory cache lives for the duration of one `sx` process, so it is most useful while repeatedly navigating an interactive session:
 
 ```console
 $ sx -p azure
 storix shell
 connected to AzureBlobBackend
 cache ls/stat/du/cat via InMemoryCacheStore - type refresh to clear
-type 'help' for commands, 'whereami' for this session, 'exit' to quit
 
 / > cd /knowledge-base
 /knowledge-base > lT
 /knowledge-base > lT
 ```
 
-The first traversal reaches remote storage. Repeated reads in the same session can reuse cached values until their TTL expires or `refresh` clears the cache.
+The first traversal reaches remote storage. Repeated reads can reuse cached values until the TTL expires or `refresh` clears them.
 
-`sx` also carries the full eza icon catalog, richer `ls -l` output, aliases, recursive `push` and `pull`, and monotonic progress across multi-file transfers. Ctrl+C stops a transfer where it stands: every stream unwinds at its next chunk boundary, queued files never start, and a half-written local file is removed rather than left looking complete.
+`sx` also includes provider flags such as `--base`, `--bucket`, `--container`, `--account-name`, `--region`, `--endpoint`, `--root`, and `--kind`, plus a typed `--set provider.field=value` escape hatch for less common non-secret coordinates.
 
-See:
-
-- [The `sx` CLI](https://storix.mghalix.com/guide/cli/)
-- [Transfers with progress](https://storix.mghalix.com/guide/cli/#transfers-with-progress)
-- [CLI configuration](https://storix.mghalix.com/guide/cli/#configuration)
-- [Storix 0.5.0 release notes](https://storix.mghalix.com/release-notes/#050-2026-07-25)
+See [The `sx` CLI](https://storix.mghalix.com/guide/cli/).
 
 ## What this demo proves
 
@@ -1254,9 +809,7 @@ This demo demonstrates architectural portability. It is not a provider benchmark
 
 The elapsed times shown in the video include different networks, services, account configurations, and initialization paths. They should not be interpreted as a direct performance comparison.
 
-Provider credentials and deployment settings remain provider-specific, but they can be defined once and selected through `STORIX_PROVIDER` or explicit application configuration as shown earlier.
-
-Providers can expose different native capabilities. Storix reports those capabilities explicitly and can backfill selected behavior through prebuilt or custom layers when that behavior has a meaningful portable implementation.
+Provider credentials and deployment settings remain provider-specific. Providers also expose different native capabilities. Storix keeps those differences at the composition boundary and makes capabilities explicit.
 
 What the demo proves is focused:
 
@@ -1264,26 +817,20 @@ What the demo proves is focused:
 
 ## Try it
 
-Storix is pre-1.0 and follows a documented versioning convention for its `0.x` releases:
+Storix is pre-1.0 and follows a documented versioning convention:
 
 - Patch releases contain fixes or backward-compatible features.
 - Minor releases may contain breaking public API changes.
 
-To stay on the current release line:
+To stay on the 0.5 release line:
 
 ```bash
 uv add "storix[azure,s3]>=0.5.0,<0.6.0"
 ```
 
-To reproduce the exact environment used for the FFmpeg recording:
+The video was recorded with Storix 0.4.6. The streaming write shown in it remains valid in 0.5.0. This article and its installation instructions target 0.5.0, which adds unified provider configuration, profiles and stages, standalone `sx` installation, CLI diagnostics, and parallel range downloads.
 
-```bash
-uv add "storix[azure,s3]==0.4.6"
-```
-
-The recording was produced with 0.4.6. The article is written against 0.5.0, which added the profiles, configuration files, standalone installers, and parallel range reads described above.
-
-This is Storix's documented pre-1.0 convention: patch releases are intended to be safe within the current minor line, while a minor increment is the breaking-change signal. See the [versioning policy](https://github.com/mghalix/storix/blob/main/docs/adr/0021-versioning-policy.md).
+See the [versioning policy](https://github.com/mghalix/storix/blob/main/docs/adr/0021-versioning-policy.md).
 
 For a zero-configuration experiment, start with memory:
 
@@ -1350,6 +897,7 @@ Zero storage rewrites.
 
 - [Storix documentation](https://storix.mghalix.com/)
 - [GitHub repository](https://github.com/mghalix/storix)
+- [Complete runnable demo](https://github.com/mghalix/storix/tree/main/samples/showcase/one-stream-three-backends)
 - [Storix 0.5.0 release notes](https://storix.mghalix.com/release-notes/#050-2026-07-25)
 - [Reading and writing](https://storix.mghalix.com/guide/reading-and-writing/)
 - [Profiles and stages](https://storix.mghalix.com/guide/profiles/)

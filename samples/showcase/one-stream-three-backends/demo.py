@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
 import time
@@ -82,22 +83,32 @@ async def ffmpeg_stream() -> AsyncIterator[bytes]:
     assert process.stdout is not None
     assert process.stderr is not None
 
+    # Drain stderr while stdout is consumed. Waiting until stdout finishes can
+    # deadlock if FFmpeg fills the stderr pipe first.
+    stderr_task = asyncio.create_task(process.stderr.read())
+
     try:
         while chunk := await process.stdout.read(CHUNK_SIZE):
             yield chunk
-    except BaseException:
+
+        return_code = await process.wait()
+        stderr = await stderr_task
+
+        if return_code != 0:
+            detail = stderr.decode('utf-8', errors='replace').strip()
+            message = detail or f'FFmpeg exited with status {return_code}'
+            raise RuntimeError(message)
+    finally:
+        # A cancelled/failed Storix consumer must not leave FFmpeg running.
         if process.returncode is None:
             process.kill()
-        await process.wait()
-        raise
+            await process.wait()
 
-    stderr = await process.stderr.read()
-    return_code = await process.wait()
+        if not stderr_task.done():
+            stderr_task.cancel()
 
-    if return_code != 0:
-        detail = stderr.decode('utf-8', errors='replace').strip()
-        message = detail or f'FFmpeg exited with status {return_code}'
-        raise RuntimeError(message)
+        with contextlib.suppress(asyncio.CancelledError):
+            await stderr_task
 
 
 def provider_label(provider: str) -> str:
@@ -152,8 +163,7 @@ async def main() -> None:
 
         started = time.perf_counter()
 
-        # Same code.
-        # The provider comes from STORIX_PROVIDER.
+        # Same code and logical path. The provider comes from configuration.
         async with session as fs:
             await fs.mkdir('/launch', parents=True)
             await fs.echo(

@@ -10,7 +10,10 @@ run_demo() {
     STORIX_PROVIDER="$provider" uv run --no-sync python demo.py
 }
 
-clear
+if [[ -t 1 && "${STORIX_DEMO_NO_CLEAR:-0}" != "1" ]]; then
+    clear
+fi
+
 printf '\nONE STREAM. THREE BACKENDS.\n\n'
 
 run_demo local
