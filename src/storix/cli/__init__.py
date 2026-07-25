@@ -7,11 +7,6 @@ _CLI_PACKAGES: Final[frozenset[str]] = frozenset(
 )
 """Top-level packages provided by the optional CLI extra."""
 
-_CLI_EXTRA_ERROR: Final[str] = (
-    "cli extra not installed. Install it by running `uv add 'storix[cli]'`."
-)
-"""Actionable error shown when the console launcher lacks CLI dependencies."""
-
 
 def main() -> None:
     """Entry point for the storix CLI."""
@@ -21,7 +16,12 @@ def main() -> None:
         missing = (exc.name or '').partition('.')[0]
         if missing not in _CLI_PACKAGES:
             raise
-        raise SystemExit(_CLI_EXTRA_ERROR) from None
+        # context-aware remedy (D7): uv tool users need `uv tool install`,
+        # not the project-context `uv add`
+        from storix.config import install_hint
+
+        message = f'cli extra not installed. Install it: {install_hint("cli")}'
+        raise SystemExit(message) from None
 
     cli_main = cli_module.main
     cli_main()

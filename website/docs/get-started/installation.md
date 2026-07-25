@@ -74,8 +74,20 @@ try things out.
 
 ## The CLI
 
-The CLI dependencies are optional. Install `storix[cli]` (or `storix[all]`)
-before using `sx`, a small shell over the same core:
+`sx` is a small shell over the same core. It is standalone: install it once
+with `uv tool` and it works from any directory, no project checkout or virtual
+environment needed.
+
+```bash
+uv tool install "storix[cli]"                 # sx, local backend only
+uv tool install "storix[cli,azure]"           # + both Azure backends
+uv tool install "storix[cli,s3]"              # + S3/R2/MinIO
+uv tool install "storix[cli,gcs]"             # + Google Cloud Storage
+uv tool install "storix[cli,azure,s3,gcs]"    # a mix
+uv tool install "storix[all]"                 # everything
+```
+
+Inside a project you can instead add it as a dependency:
 
 === "uv"
 
@@ -90,13 +102,22 @@ before using `sx`, a small shell over the same core:
     ```
 
 ```bash
+sx --version       # print the installed version
 sx                 # start the interactive shell (defaults to ~/.storix)
 sx ls /            # or run a single command
 sx -p azure ls /   # point it at a configured provider
 ```
 
-If you run the launcher without the extra, it exits with the install command
-instead of an optional-dependency traceback.
+A globally installed `sx` discovers its configuration from three canonical
+files (a project `storix.toml`, `pyproject.toml`'s `[tool.storix]`, and the
+user file `~/.config/storix/config.toml`) plus the `STORIX_*` environment, so
+it does not need a cwd-local `.env`. See [The sx CLI](../guide/cli.md) for the
+flags, the precedence chain, and the secret policy.
+
+If you run the launcher without the `cli` extra, or name a provider whose extra
+is missing, it exits with the exact install command instead of an
+optional-dependency traceback (`uv tool install "storix[cli,s3]"` when it runs
+from a uv tool install).
 
 Tab completion, icons, transfer progress bars, and the persistent config file
 are covered in [The sx CLI](../guide/cli.md).

@@ -20,11 +20,17 @@ from storix import (
     get_storage,
 )
 from storix._sync._compat import concurrent
+from storix.config import (
+    PROVIDER_MODELS,
+    StorixSettings,
+    install_hint,
+    is_secret,
+)
 from storix.errors import StorageError
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from storix import Storix
     from storix.models import RawStat
@@ -51,7 +57,102 @@ class _Session:
 _session = _Session()
 
 
-def build_base(provider: str | None = None) -> Storix:
+_FLAG_TO_FIELD: Final[dict[str, str]] = {
+    'base': 'base',
+    'bucket': 'bucket',
+    'container': 'container',
+    'account_name': 'account_name',
+    'region': 'region',
+    'endpoint': 'endpoint',
+    'root': 'root',
+    'kind': 'kind',
+}
+"""Root coordinate flags -> the provider field they set (D5). A flag whose
+field is not on the effective provider's model is rejected as foreign."""
+
+
+def resolve_provider(explicit: str | None = None) -> str:
+    """The effective provider: ``-p`` beats the CLI config beats the env.
+
+    Precedence: an explicit ``-p/--provider``, then the config file's
+    ``provider`` (``STORIX_CLI_PROVIDER`` / project TOML), then
+    ``STORIX_PROVIDER`` and the factory default.
+    """
+    from .config import load_prefs
+
+    return explicit or load_prefs().provider or StorixSettings().provider
+
+
+def build_overrides(
+    provider: str, *, flags: Mapping[str, str | None], sets: Sequence[str]
+) -> dict[str, str]:
+    """Turn coordinate flags and ``--set`` into ``get_storage`` overrides.
+
+    Every value is validated against the effective provider's model:
+    foreign flags, unknown fields, and secret ``--set`` are refused with a
+    named remedy (D5). Values stay strings; pydantic coerces them.
+
+    Args:
+        provider: The effective provider the overrides apply to.
+        flags: Coordinate flag name -> its value (``None`` when unset).
+        sets: Raw ``provider.field=value`` strings from ``--set``.
+
+    Raises:
+        SystemExit: On a foreign flag, an unknown field, a malformed
+            ``--set``, or a secret ``--set``.
+    """
+    model = PROVIDER_MODELS.get(provider)
+    fields: set[str] = set(model.model_fields) if model is not None else set()
+    accepted = sorted(
+        f'--{flag.replace("_", "-")}'
+        for flag, field in _FLAG_TO_FIELD.items()
+        if field in fields
+    )
+    accepted_text = ', '.join(accepted) if accepted else 'none'
+
+    overrides: dict[str, str] = {}
+    for flag, value in flags.items():
+        if value is None:
+            continue
+        if _FLAG_TO_FIELD[flag] not in fields:
+            message = (
+                f'sx: --{flag.replace("_", "-")} is not a setting for provider '
+                f'{provider!r} (accepted: {accepted_text})'
+            )
+            raise SystemExit(message)
+        overrides[_FLAG_TO_FIELD[flag]] = value
+
+    for item in sets:
+        key, sep, value = item.partition('=')
+        if not sep or '.' not in key:
+            message = f'sx: --set expects provider.field=value, got {item!r}'
+            raise SystemExit(message)
+        prefix, _, field = key.partition('.')
+        if prefix != provider:
+            message = (
+                f'sx: --set {key} targets provider {prefix!r}, not the active '
+                f'{provider!r}'
+            )
+            raise SystemExit(message)
+        if field not in fields:
+            known = ', '.join(sorted(fields)) if fields else 'none'
+            message = f'sx: --set: {provider!r} has no field {field!r} (known: {known})'
+            raise SystemExit(message)
+        if model is not None and is_secret(model, field):
+            message = (
+                f'sx: --set refuses the secret field {key} (it would land in '
+                f'shell history); set STORIX_{provider.upper()}_{field.upper()} '
+                f'or an env: reference in a config file'
+            )
+            raise SystemExit(message)
+        overrides[field] = value
+
+    return overrides
+
+
+def build_base(
+    provider: str | None = None, overrides: Mapping[str, str] | None = None
+) -> Storix:
     """Open a bare session on ``provider``, else the configured default.
 
     Precedence: an explicit ``-p/--provider``, then the config file's
@@ -60,24 +161,34 @@ def build_base(provider: str | None = None) -> Storix:
 
     Args:
         provider: The provider named on the command line, if any.
+        overrides: Coordinate flag / ``--set`` overrides (strongest source).
 
     Raises:
-        SystemExit: If the provider is unknown, naming the available ones.
+        SystemExit: If the provider is unknown (naming the available ones),
+            its configuration is invalid, or its optional extra is missing
+            (with a context-aware install remedy, D7).
     """
-    from .config import load_prefs
-
-    name = provider or load_prefs().provider
+    name = resolve_provider(provider)
     try:
-        return get_storage(name) if name is not None else get_storage()
+        return get_storage(name, **(overrides or {}))
     except (StorageError, ValueError, KeyError) as exc:
         # the factory's own error already names the available providers
         message = f'sx: cannot open provider {name!r}: {exc}'
         raise SystemExit(message) from exc
+    except ImportError as exc:
+        if debug_enabled():
+            raise
+        message = (
+            f'sx: the {name} extra is not installed. Install it: {install_hint(name)}'
+        )
+        raise SystemExit(message) from exc
 
 
-def build_session(provider: str | None = None) -> Storix:
+def build_session(
+    provider: str | None = None, overrides: Mapping[str, str] | None = None
+) -> Storix:
     """A session on the resolved provider, wrapped in the configured stack."""
-    return stack_from_prefs(build_base(provider))
+    return stack_from_prefs(build_base(provider, overrides))
 
 
 def _fs() -> Storix:

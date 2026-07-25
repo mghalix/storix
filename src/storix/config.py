@@ -3,13 +3,34 @@
 One brand prefix, one model per backend: ``STORIX_PROVIDER`` picks the
 backend, ``STORIX_<PROVIDER>_*`` configures it, and every field can be
 overridden per-call through ``get_storage(**overrides)``. Values are
-read from the environment and a local ``.env`` file.
+read, strongest first, from explicit overrides, the process environment,
+a local ``.env`` file, the nearest project TOML, and the XDG user file
+(ADR 0031).
+
+This is the single loader shared by the library and the ``sx`` CLI: it
+discovers the config files once (``find_project_config`` /
+``find_user_config``), extracts each provider section, validates it
+through the per-provider pydantic-settings models below, and records
+which source supplied each effective field (``config_provenance``).
 """
 
-from typing import ClassVar, Literal
+from __future__ import annotations
+
+import os
+import sys
+import tomllib
+import warnings
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast
 
 from pydantic import ByteSize, Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 from storix.constants import (
     DEFAULT_AZURE_READ_CHUNK_SIZE,
@@ -19,10 +40,333 @@ from storix.constants import (
     DEFAULT_TRANSFER_RANGES,
     DEFAULT_WRITE_CHUNK_SIZE,
 )
+from storix.errors import ConfigurationError
 from storix.types import StorageProvider
 
 
-class StorixSettings(BaseSettings):
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pydantic.fields import FieldInfo
+
+
+type ConfigSource = Literal['override', 'env', 'dotenv', 'project', 'user', 'default']
+"""Where an effective config field came from, strongest first: an explicit
+``get_storage`` keyword or CLI flag (``override``), the process environment
+(``env``), the project ``.env`` (``dotenv``), the project TOML (``project``),
+the XDG user file (``user``), or the model's built-in default (``default``)."""
+
+type _Scope = Literal['project', 'user']
+
+
+# --- config file discovery (shared by provider config and CLI preferences) ---
+
+
+@dataclass(frozen=True)
+class DiscoveredConfig:
+    """A parsed storix config file plus where it came from.
+
+    Args:
+        path: The file on disk (a ``storix.toml``, ``.storix.toml``, a
+            ``pyproject.toml``, or the XDG ``config.toml``).
+        data: The storix table: the whole document for a standalone file,
+            the ``[tool.storix]`` subtree for a ``pyproject.toml``.
+        scope: ``'project'`` for an upward-walked project file, ``'user'``
+            for the XDG user file. Governs relative-path and secret policy.
+    """
+
+    path: Path
+    data: dict[str, Any]
+    scope: _Scope
+
+
+_PROJECT_FILES: Final[tuple[str, ...]] = ('storix.toml', '.storix.toml')
+"""Standalone project files, most-preferred first (``storix.toml`` wins;
+``.storix.toml`` is a compatibility-only read alias, ADR 0031)."""
+
+
+def _read_toml(path: Path) -> dict[str, Any]:
+    """Parse a TOML file; an unreadable file is treated as absent.
+
+    Raises:
+        ConfigurationError: If the file exists but is not valid TOML,
+            naming the file.
+    """
+    try:
+        return tomllib.loads(path.read_text('utf-8'))
+    except tomllib.TOMLDecodeError as exc:
+        msg = f'{path}: invalid TOML ({exc})'
+        raise ConfigurationError(msg) from exc
+    except OSError:
+        return {}
+
+
+def _table(document: object, *keys: str) -> dict[str, Any] | None:
+    """Descend ``keys`` into a parsed TOML document; None when absent."""
+    node: object = document
+    for key in keys:
+        if not isinstance(node, dict):
+            return None
+        section = cast('dict[str, Any]', node)
+        if key not in section:
+            return None
+        node = section[key]
+    return cast('dict[str, Any]', node) if isinstance(node, dict) else None
+
+
+def find_project_config() -> DiscoveredConfig | None:
+    """The nearest project config, ruff-style: walk upward from cwd.
+
+    Per directory, ``storix.toml`` wins over ``.storix.toml``, else a
+    ``pyproject.toml`` carrying a ``[tool.storix]`` table. The first file
+    found anchors the project and stops the walk, even when it holds no
+    settings.
+
+    Raises:
+        ConfigurationError: If the anchored file is malformed or holds an
+            unknown top-level table.
+    """
+    cwd = Path.cwd()
+    for directory in (cwd, *cwd.parents):
+        for name in _PROJECT_FILES:
+            file = directory / name
+            if file.is_file():
+                data = _read_toml(file)
+                _validate_document(file, data)
+                return DiscoveredConfig(file, data, 'project')
+        pyproject = directory / 'pyproject.toml'
+        if pyproject.is_file():
+            tool = _table(_read_toml(pyproject), 'tool', 'storix')
+            if tool is not None:
+                _validate_document(pyproject, tool)
+                return DiscoveredConfig(pyproject, tool, 'project')
+    return None
+
+
+def find_user_config() -> DiscoveredConfig | None:
+    """The personal defaults: ``~/.config/storix/config.toml`` (XDG).
+
+    Raises:
+        ConfigurationError: If the file is malformed or holds an unknown
+            top-level table.
+    """
+    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
+    file = base / 'storix' / 'config.toml'
+    if not file.is_file():
+        return None
+    data = _read_toml(file)
+    _validate_document(file, data)
+    return DiscoveredConfig(file, data, 'user')
+
+
+def _validate_document(path: Path, data: dict[str, Any]) -> None:
+    """Reject unknown top-level tables so a typo never silently does nothing.
+
+    Raises:
+        ConfigurationError: If a top-level key is not a known section, or
+            if a profile key is present (profiles land in a future release).
+    """
+    if 'profiles' in data or 'profile' in data:
+        msg = (
+            f'{path}: profiles are not available in this release; they land '
+            'in a future release (see ADR 0031)'
+        )
+        raise ConfigurationError(msg)
+    unknown = [key for key in data if key not in _KNOWN_TOP_LEVEL]
+    if unknown:
+        known = ', '.join(sorted(_KNOWN_TOP_LEVEL))
+        msg = f'{path}: unknown table {unknown[0]!r}; known: {known}'
+        raise ConfigurationError(msg)
+
+
+# --- per-source value extraction (section, path anchoring, secret policy) ---
+
+
+def _section_values(
+    disc: DiscoveredConfig, settings_cls: type[BaseSettings]
+) -> dict[str, Any]:
+    """Pull a provider section out of a discovered file, applying policy.
+
+    Unknown keys are rejected, path fields are anchored per scope, and
+    secret fields are resolved (``env:`` references) or refused (literal
+    secrets in project scope).
+
+    Raises:
+        ConfigurationError: On an unknown key, a relative user-scope path,
+            a literal project-scope secret, or a missing ``env:`` variable.
+    """
+    section_name: str | None = getattr(settings_cls, 'TOML_SECTION', None)
+    fields = settings_cls.model_fields
+    raw: dict[str, Any]
+    if section_name is None:
+        raw = {k: v for k, v in disc.data.items() if k in fields}
+    else:
+        node: Any = disc.data.get(section_name)
+        raw = cast('dict[str, Any]', node) if isinstance(node, dict) else {}
+
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key not in fields:
+            known = ', '.join(fields)
+            where = f'[{section_name}]' if section_name else 'the top level'
+            msg = f'{disc.path}: unknown key {key!r} in {where}; known: {known}'
+            raise ConfigurationError(msg)
+        if is_secret(settings_cls, key):
+            out[key] = _resolve_secret(disc, key, value)
+        elif is_path(settings_cls, key):
+            out[key] = _anchor_path(disc, key, value)
+        else:
+            out[key] = value
+    return out
+
+
+def _resolve_secret(disc: DiscoveredConfig, field: str, value: object) -> object:
+    """Resolve a secret field's TOML value under the secret policy (D4).
+
+    ``env:VAR`` resolves from the process environment in any scope; a
+    literal is refused in project scope and warned about in user scope.
+
+    Raises:
+        ConfigurationError: On a literal secret in project scope, or an
+            ``env:`` reference whose variable is unset.
+    """
+    if isinstance(value, str) and value.startswith('env:'):
+        var = value[len('env:') :]
+        resolved = os.environ.get(var)
+        if resolved is None:
+            msg = f'{disc.path}: {field} references env:{var}, but {var} is not set'
+            raise ConfigurationError(msg)
+        return resolved
+    if disc.scope == 'project':
+        msg = (
+            f'{disc.path}: {field} is a secret and project files are committed; '
+            f'use env:VAR, the STORIX_* environment, or the user config '
+            f'(~/.config/storix/config.toml)'
+        )
+        raise ConfigurationError(msg)
+    _warn_if_world_readable(disc.path)
+    return value
+
+
+def _anchor_path(disc: DiscoveredConfig, field: str, value: object) -> object:
+    """Anchor a relative path field per scope; ``~`` expands everywhere.
+
+    Project paths resolve against the file's directory (``base = "."`` means
+    this project); user paths must be absolute or ``~``-prefixed.
+
+    Raises:
+        ConfigurationError: On a relative path in the user scope.
+    """
+    if not isinstance(value, str):
+        return value
+    expanded = os.path.expanduser(value)  # noqa: PTH111 - normalize the raw string
+    if Path(expanded).is_absolute():
+        return expanded
+    if disc.scope == 'user':
+        msg = (
+            f'{disc.path}: {field} must be an absolute or ~-prefixed path; a '
+            f'relative user-global path is meaningless'
+        )
+        raise ConfigurationError(msg)
+    return str(disc.path.parent / expanded)
+
+
+def _warn_if_world_readable(path: Path) -> None:
+    """Warn when a secret-bearing user file is group- or world-readable."""
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return
+    if mode & 0o077:
+        warnings.warn(
+            f'{path} holds a secret and is group/world-readable; tighten it '
+            f'with: chmod 600 {path}',
+            stacklevel=2,
+        )
+
+
+# --- secret/path field markers (single source of truth on the models) ---
+
+
+def _field_extra(settings_cls: type[BaseSettings], field: str) -> dict[str, Any]:
+    extra = settings_cls.model_fields[field].json_schema_extra
+    return cast('dict[str, Any]', extra) if isinstance(extra, dict) else {}
+
+
+def is_secret(settings_cls: type[BaseSettings], field: str) -> bool:
+    """Whether ``field`` is a secret (redacted, kept out of project TOML)."""
+    return bool(_field_extra(settings_cls, field).get('secret'))
+
+
+def is_path(settings_cls: type[BaseSettings], field: str) -> bool:
+    """Whether ``field`` is a filesystem path (anchored per scope)."""
+    return bool(_field_extra(settings_cls, field).get('path'))
+
+
+def secret_fields(settings_cls: type[BaseSettings]) -> frozenset[str]:
+    """The secret field names of a provider model."""
+    return frozenset(f for f in settings_cls.model_fields if is_secret(settings_cls, f))
+
+
+# --- pydantic-settings TOML source: sits below env/.env, above defaults ---
+
+
+class _TomlSource(PydanticBaseSettingsSource):
+    """A settings source reading one provider section from a config file.
+
+    Appended after the dotenv source so TOML values sit below the process
+    environment and ``.env`` but above the model defaults (ADR 0031).
+    """
+
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        finder: Callable[[], DiscoveredConfig | None],
+    ) -> None:
+        super().__init__(settings_cls)
+        self._finder = finder
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[object, str, bool]:
+        # unused: __call__ returns the whole section in one pass
+        return None, field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        disc = self._finder()
+        if disc is None:
+            return {}
+        return _section_values(disc, self.settings_cls)
+
+
+class _ConfigBase(BaseSettings):
+    """Base for every storix settings model: env, ``.env``, then TOML.
+
+    Subclasses set ``TOML_SECTION`` to the table they read (``None`` reads
+    matching top-level keys, as ``StorixSettings`` does for ``provider``).
+    """
+
+    TOML_SECTION: ClassVar[str | None] = None
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            _TomlSource(settings_cls, find_project_config),
+            _TomlSource(settings_cls, find_user_config),
+        )
+
+
+class StorixSettings(_ConfigBase):
     """Top-level selection: which backend ``get_storage()`` builds."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -42,7 +386,7 @@ class StorixSettings(BaseSettings):
     transaction-sensitive bill may prefer."""
 
 
-class TransferConfig(BaseSettings):
+class TransferConfig(_ConfigBase):
     """Transfer sizes every provider understands.
 
     Inherited by each provider's settings, so the same two knobs are
@@ -79,17 +423,19 @@ class RemoteTransferConfig(TransferConfig):
 class LocalConfig(TransferConfig):
     """``STORIX_LOCAL_*`` settings for the real-disk backend."""
 
+    TOML_SECTION: ClassVar[str | None] = 'local'
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix='STORIX_LOCAL_', env_file='.env', extra='ignore'
     )
 
-    base: str = '~/.storix'
+    base: str = Field(default='~/.storix', json_schema_extra={'path': True})
     """Base directory anchoring the filesystem (created if missing)."""
 
 
 class S3Config(RemoteTransferConfig):
     """``STORIX_S3_*`` settings for the Amazon S3 backend."""
 
+    TOML_SECTION: ClassVar[str | None] = 's3'
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix='STORIX_S3_', env_file='.env', extra='ignore'
     )
@@ -100,10 +446,12 @@ class S3Config(RemoteTransferConfig):
     region: str | None = None
     """Bucket region; defaults to the standard AWS environment/config chain."""
 
-    access_key_id: str | None = None
+    access_key_id: str | None = Field(default=None, json_schema_extra={'secret': True})
     """Static access key; omitted means the standard AWS credential chain."""
 
-    secret_access_key: str | None = None
+    secret_access_key: str | None = Field(
+        default=None, json_schema_extra={'secret': True}
+    )
     """Secret for ``access_key_id``."""
 
     endpoint: str | None = None
@@ -116,6 +464,7 @@ class S3Config(RemoteTransferConfig):
 class GcsConfig(RemoteTransferConfig):
     """``STORIX_GCS_*`` settings for the Google Cloud Storage backend."""
 
+    TOML_SECTION: ClassVar[str | None] = 'gcs'
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix='STORIX_GCS_', env_file='.env', extra='ignore'
     )
@@ -123,10 +472,10 @@ class GcsConfig(RemoteTransferConfig):
     bucket: str | None = None
     """Bucket anchoring the session; required."""
 
-    credential: str | None = None
+    credential: str | None = Field(default=None, json_schema_extra={'secret': True})
     """Service-account JSON as a string; omitted means Google's default chain."""
 
-    credential_path: str | None = None
+    credential_path: str | None = Field(default=None, json_schema_extra={'path': True})
     """Path to a service-account JSON file."""
 
     endpoint: str | None = None
@@ -147,6 +496,7 @@ class AzureConfig(RemoteTransferConfig):
     for HNS accounts, the blob-endpoint backend for flat ones.
     """
 
+    TOML_SECTION: ClassVar[str | None] = 'azure'
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
         env_prefix='STORIX_AZURE_', env_file='.env', extra='ignore'
     )
@@ -163,7 +513,7 @@ class AzureConfig(RemoteTransferConfig):
     account_name: str | None = None
     """Storage account name; required. The adls kind needs HNS enabled."""
 
-    credential: str | None = None
+    credential: str | None = Field(default=None, json_schema_extra={'secret': True})
     """SAS token or account key; required for adls, optional for blob
     (``None`` means anonymous access to a public container)."""
 
@@ -185,3 +535,124 @@ class AzureConfig(RemoteTransferConfig):
         default=ByteSize(DEFAULT_AZURE_READ_PREFETCH_SIZE), gt=0
     )
     """Initial SDK download request size (8 MiB)."""
+
+
+PROVIDER_MODELS: Final[dict[str, type[_ConfigBase]]] = {
+    'local': LocalConfig,
+    's3': S3Config,
+    'gcs': GcsConfig,
+    'azure': AzureConfig,
+}
+"""Provider name -> its configuration model. ``memory`` takes no config and
+is deliberately absent, so any ``[memory]`` table or memory coordinate flag
+reads as unknown."""
+
+_KNOWN_TOP_LEVEL: Final[frozenset[str]] = frozenset(
+    {
+        'cli',
+        'provider',
+        'alias',
+        'aliases',
+        *PROVIDER_MODELS,
+    }
+)
+"""Legal top-level keys in a storix config document (or ``[tool.storix]``):
+the provider sections, ``provider``, the ``[cli]`` table, and the ``alias`` /
+``aliases`` compatibility spellings."""
+
+
+# --- provenance (which source supplied each effective field) ---
+
+
+def _dotenv_fields(settings_cls: type[BaseSettings]) -> frozenset[str]:
+    """Fields the project ``.env`` provides for this model's prefix."""
+    env_file = Path('.env')
+    if not env_file.is_file():
+        return frozenset()
+    from dotenv import dotenv_values
+
+    prefix = settings_cls.model_config.get('env_prefix', '')
+    present = dotenv_values(env_file)
+    return frozenset(
+        f for f in settings_cls.model_fields if f'{prefix}{f.upper()}' in present
+    )
+
+
+def _env_fields(settings_cls: type[BaseSettings]) -> frozenset[str]:
+    """Fields the process environment provides for this model's prefix."""
+    prefix = settings_cls.model_config.get('env_prefix', '')
+    return frozenset(
+        f for f in settings_cls.model_fields if f'{prefix}{f.upper()}' in os.environ
+    )
+
+
+def config_provenance(provider: str, /, **overrides: Any) -> dict[str, ConfigSource]:
+    """Report which source supplies each effective field of ``provider``.
+
+    Replays the same precedence ``get_storage`` resolves (overrides beat
+    the environment beats ``.env`` beats project TOML beats the user file
+    beats defaults), so diagnostics can explain a value's origin. An
+    unknown provider yields an empty map.
+
+    Args:
+        provider: The provider whose configuration to trace.
+        overrides: The explicit keyword overrides passed to ``get_storage``.
+
+    Raises:
+        ConfigurationError: If a discovered file is malformed or invalid
+            (the same failure ``get_storage`` would raise).
+    """
+    settings_cls = PROVIDER_MODELS.get(provider)
+    if settings_cls is None:
+        return {}
+    project = find_project_config()
+    user = find_user_config()
+    empty: frozenset[str] = frozenset()
+    project_fields = (
+        frozenset(_section_values(project, settings_cls)) if project else empty
+    )
+    user_fields = frozenset(_section_values(user, settings_cls)) if user else empty
+    layers: list[tuple[ConfigSource, frozenset[str]]] = [
+        ('override', frozenset(overrides)),
+        ('env', _env_fields(settings_cls)),
+        ('dotenv', _dotenv_fields(settings_cls)),
+        ('project', project_fields),
+        ('user', user_fields),
+    ]
+    result: dict[str, ConfigSource] = {}
+    for field in settings_cls.model_fields:
+        source: ConfigSource = 'default'
+        for src, present in layers:
+            if field in present:
+                source = src
+                break
+        result[field] = source
+    return result
+
+
+# --- installation remedy (context-aware, D7); shared by the CLI guards ---
+
+
+def _is_uv_tool() -> bool:
+    """Whether ``sx`` runs from a ``uv tool install`` environment.
+
+    uv drops a ``uv-receipt.toml`` in the tool's environment directory
+    (verified against a real ``uv tool`` layout).
+    """
+    prefix = Path(sys.prefix)
+    return (prefix / 'uv-receipt.toml').is_file() or (
+        prefix.parent / 'uv-receipt.toml'
+    ).is_file()
+
+
+def install_hint(extra: str) -> str:
+    """The install command to add a missing optional ``extra``.
+
+    Context-aware (D7): a ``uv tool`` install gets the ``uv tool install``
+    form (which keeps ``sx`` on PATH); everything else gets the ``pip`` /
+    ``uv add`` project forms.
+    """
+    if _is_uv_tool():
+        bundle = 'cli' if extra == 'cli' else f'cli,{extra}'
+        return f'uv tool install "storix[{bundle}]"'
+    return f'pip install "storix[{extra}]" (or uv add "storix[{extra}]")'
