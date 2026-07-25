@@ -105,8 +105,21 @@ less install.sh
 sh install.sh --with azure
 ```
 
-Windows is not covered by the installer; use the `uv tool install` command
-below directly.
+On Windows, the same thing in PowerShell:
+
+```powershell
+powershell -c "irm https://storix.mghalix.com/install.ps1 | iex"
+```
+
+```powershell
+# with options, PowerShell needs the script as a block:
+& ([scriptblock]::Create((irm https://storix.mghalix.com/install.ps1))) -With azure,s3
+```
+
+Both scripts take the same options (`--with`/`-With`, `--all`/`-All`,
+`--version`/`-Version`, `--help`/`-Help`) and are exercised on every change by
+a CI job that installs storix from them on Linux and Windows and runs the
+result.
 
 ### Uninstall
 

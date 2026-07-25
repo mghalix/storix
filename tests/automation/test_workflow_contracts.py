@@ -331,3 +331,39 @@ def test_installer_is_shellcheck_clean() -> None:
     )
 
     assert result.returncode == 0, result.stdout
+
+
+def _windows_installer() -> Path:
+    """The single source of the published Windows installer."""
+    return Path(__file__).resolve().parents[2] / 'website' / 'docs' / 'install.ps1'
+
+
+def test_windows_installer_refuses_to_run_unsafely() -> None:
+    """Given the PowerShell installer, when read, then its rails are in place.
+
+    It cannot be executed here (no PowerShell on Linux CI for this job), so
+    the Windows job in CI runs it for real; these are the invariants that do
+    not need a shell to check.
+    """
+    text = _windows_installer().read_text(encoding='utf-8')
+
+    assert "$ErrorActionPreference = 'Stop'" in text  # no silent continue
+    assert 'uv tool install --force' in text  # idempotent, upgrades on rerun
+    assert 'Start-Process' not in text  # never elevates
+    assert 'uv tool uninstall storix' in text  # the way out is documented
+    # the only remote code it runs is uv's own installer
+    assert text.count('Invoke-Expression') == 1
+    assert 'https://astral.sh/uv/install.ps1 | Invoke-Expression' in text
+
+
+def test_both_installers_offer_the_same_interface() -> None:
+    """Given two installers, when compared, then neither grew a private option.
+
+    A user moving between machines should not have to learn two tools.
+    """
+    posix = _installer().read_text(encoding='utf-8')
+    windows = _windows_installer().read_text(encoding='utf-8')
+
+    for option in ('with', 'all', 'version', 'help'):
+        assert option in posix.lower(), option
+        assert option in windows.lower(), option
