@@ -15,10 +15,13 @@ from pydantic import ValidationError
 from storix import get_storage
 from storix.config import (
     AzureConfig,
+    DiscoveredConfig,
     LocalConfig,
     S3Config,
     StorixSettings,
+    _resolve_secret,
     config_provenance,
+    configured_profile,
     find_project_config,
     is_secret,
     resolve_profile,
@@ -382,3 +385,47 @@ def test_transfer_knobs_are_legal_in_toml(sandbox):
 
     assert StorixSettings().max_transfer_ranges == 2
     assert LocalConfig().read_chunk_size == 262144
+
+
+def test_an_env_reference_falls_back_to_the_project_dotenv(sandbox, monkeypatch):
+    """Given a secret only in .env, when a config references it, then it resolves.
+
+    `.env` is already a first-class source for `STORIX_*`, so the same file
+    must not be invisible to an `env:` reference.
+    """
+    monkeypatch.delenv('MEDIA_SECRET', raising=False)
+    (sandbox / '.env').write_text('MEDIA_SECRET=from-dotenv\n', encoding='utf-8')
+    disc = DiscoveredConfig(sandbox / 'storix.toml', {}, 'project')
+
+    assert _resolve_secret(disc, 'credential', 'env:MEDIA_SECRET') == 'from-dotenv'
+
+
+def test_the_process_environment_beats_the_dotenv(sandbox, monkeypatch):
+    """Given both, when a reference resolves, then the export wins."""
+    (sandbox / '.env').write_text('MEDIA_SECRET=from-dotenv\n', encoding='utf-8')
+    monkeypatch.setenv('MEDIA_SECRET', 'from-environment')
+    disc = DiscoveredConfig(sandbox / 'storix.toml', {}, 'project')
+
+    assert _resolve_secret(disc, 'credential', 'env:MEDIA_SECRET') == 'from-environment'
+
+
+def test_a_reference_set_nowhere_names_both_places(sandbox, monkeypatch):
+    """Given a reference to nothing, when read, then it says where it looked."""
+    monkeypatch.delenv('MEDIA_SECRET', raising=False)
+    disc = DiscoveredConfig(sandbox / 'storix.toml', {}, 'project')
+
+    with pytest.raises(ConfigurationError, match='neither in the environment nor'):
+        _resolve_secret(disc, 'credential', 'env:MEDIA_SECRET')
+
+
+def test_a_config_file_can_pin_a_default_profile(sandbox, tmp_path):
+    """Given a pinned profile, when nothing is selected, then it is used."""
+    (sandbox / 'data').mkdir()
+    (sandbox / 'storix.toml').write_text(
+        'profile = "media"\n\n[profiles.media]\nprovider = "local"\n\n'
+        '[profiles.media.local]\nbase = "data"\n',
+        encoding='utf-8',
+    )
+
+    assert configured_profile() == 'media'
+    assert get_storage().backend.base.name == 'data'

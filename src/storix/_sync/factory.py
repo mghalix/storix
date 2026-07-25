@@ -11,7 +11,6 @@ from typing import (
     Literal,
     TypedDict,
     Unpack,
-    cast,
     overload,
 )
 
@@ -281,31 +280,81 @@ def available_providers() -> tuple[str, ...]:
     return tuple(_BUILDERS)
 
 
+# every overload carries the profile selection: it is not a provider setting,
+# so it stays a named keyword rather than a key in the override TypedDicts,
+# and it is spelled out here so editors offer it (ADR 0031 D8)
 @overload
 def get_storage(
-    provider: Literal['local'], /, **overrides: Unpack[_LocalOverrides]
-) -> Storix: ...
-@overload
-def get_storage(provider: Literal['memory'], /) -> Storix: ...
-@overload
-def get_storage(
-    provider: Literal['azure'], /, **overrides: Unpack[_AzureOverrides]
-) -> Storix: ...
-@overload
-def get_storage(
-    provider: Literal['s3'], /, **overrides: Unpack[_S3Overrides]
+    provider: Literal['local'],
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Unpack[_LocalOverrides],
 ) -> Storix: ...
 @overload
 def get_storage(
-    provider: Literal['gcs'], /, **overrides: Unpack[_GcsOverrides]
+    provider: Literal['memory'],
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
 ) -> Storix: ...
 @overload
-def get_storage(provider: str, /, **overrides: Any) -> Storix: ...  # plugins
+def get_storage(
+    provider: Literal['azure'],
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Unpack[_AzureOverrides],
+) -> Storix: ...
 @overload
-def get_storage(provider: None = None, /) -> Storix: ...  # env-driven, no kwargs
+def get_storage(
+    provider: Literal['s3'],
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Unpack[_S3Overrides],
+) -> Storix: ...
+@overload
+def get_storage(
+    provider: Literal['gcs'],
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Unpack[_GcsOverrides],
+) -> Storix: ...
+@overload
+def get_storage(  # plugins
+    provider: str,
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Any,
+) -> Storix: ...
+@overload
+def get_storage(  # env-driven or profile-driven: the provider is resolved
+    provider: None = None,
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Any,
+) -> Storix: ...
 
 
-def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
+def get_storage(
+    provider: str | None = None,
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Any,
+) -> Storix:
     """Build a Storix session from settings.
 
     ``provider`` overrides ``STORIX_PROVIDER`` (default: local at
@@ -315,10 +364,15 @@ def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
 
     ``profile=`` selects a named profile from a config file, and
     ``environment=`` a stage overlay within it (ADR 0031). A profile
-    supplies the provider, so naming a different one positionally is an
-    error rather than an override; explicit keywords still win over the
-    profile's values. ``STORIX_PROFILE`` is deliberately not honored here:
-    an operator's shell habit must not redirect a service's sessions.
+    already names its provider, so the usual call is
+    ``get_storage(profile='media')`` with no provider at all; naming a
+    different one is a contradiction and raises. Naming the *same* one is
+    allowed and buys typed completion for that provider's override keys,
+    which is the only reason to write it. Explicit keywords still win over
+    the profile's values. ``STORIX_PROFILE`` is deliberately not honored
+    here: an operator's shell habit must not redirect a service's
+    sessions, so library selection is always explicit or pinned by a
+    project's config file.
 
     The provider is positional-only: ``get_storage(provider='azure')``
     would otherwise be silently swallowed as a config override, so it is
@@ -328,8 +382,7 @@ def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
         msg = "pass the provider positionally: get_storage('azure', ...)"
         raise ConfigurationError(msg)
     # an explicit selection, else the one a config file pins for the project
-    profile = cast('str | None', overrides.pop('profile', None)) or configured_profile()
-    environment = cast('str | None', overrides.pop('environment', None))
+    profile = profile or configured_profile()
     if environment is not None and profile is None:
         msg = 'environment= selects a stage of a profile; name one with profile='
         raise ConfigurationError(msg)

@@ -177,9 +177,34 @@ never the provider - stages of one profile share a backend by definition.
 `--env` without a profile, an unknown profile, and an unknown stage each
 exit naming what is available.
 
+#### A default profile
+
+Typing `--profile` every time is not the intended workflow. Pin one, and
+every `sx` invocation uses it with no flag:
+
+```toml
+# ~/.config/storix/config.toml - your personal default
+profile = "media"
+
+[profiles.media]
+provider = "azure"
+...
+```
+
+```toml
+# storix.toml in a project - that project's default, for anyone who works on it
+profile = "media"
+```
+
+Selection order is flag, then `STORIX_PROFILE`, then the pinned key: a
+project's pin beats your personal one, `--profile` beats both for one
+command, and `STORIX_PROFILE=other sx ...` beats both for one shell.
+
 `STORIX_PROFILE` and `STORIX_ENVIRONMENT` are read by `sx` and deliberately
 not by the library: an operator's shell habit should not redirect a
-service's sessions. In code the selection is explicit:
+service's sessions. A pinned `profile` key in a config file *is* honored by
+both, because that is a property of the project rather than of the shell.
+In code the selection is explicit:
 
 ```python
 fs = get_storage(profile="media", environment="prod")

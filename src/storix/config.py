@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast, get_args
 
+from dotenv import dotenv_values
 from pydantic import ByteSize, Field
 from pydantic_settings import (
     BaseSettings,
@@ -216,21 +217,39 @@ def _section_values(
     return out
 
 
+def _dotenv_value(var: str) -> str | None:
+    """Read one variable from the project ``.env``, if there is one.
+
+    ``.env`` is already a first-class source for ``STORIX_*`` settings, so
+    an ``env:`` reference looks there too rather than treating the same
+    file as invisible depending on which spelling the user reached for.
+    The process environment still wins: an explicit export beats a file.
+    """
+    file = Path.cwd() / '.env'
+    if not file.is_file():
+        return None
+    return dotenv_values(file).get(var)
+
+
 def _resolve_secret(disc: DiscoveredConfig, field: str, value: object) -> object:
     """Resolve a secret field's TOML value under the secret policy (D4).
 
-    ``env:VAR`` resolves from the process environment in any scope; a
-    literal is refused in project scope and warned about in user scope.
+    ``env:VAR`` resolves from the process environment, then the project
+    ``.env``, in any scope; a literal is refused in project scope and
+    warned about in user scope.
 
     Raises:
         ConfigurationError: On a literal secret in project scope, or an
-            ``env:`` reference whose variable is unset.
+            ``env:`` reference whose variable is set in neither place.
     """
     if isinstance(value, str) and value.startswith('env:'):
         var = value[len('env:') :]
-        resolved = os.environ.get(var)
+        resolved = os.environ.get(var) or _dotenv_value(var)
         if resolved is None:
-            msg = f'{disc.path}: {field} references env:{var}, but {var} is not set'
+            msg = (
+                f'{disc.path}: {field} references env:{var}, but {var} is set '
+                f'neither in the environment nor in {Path.cwd() / ".env"}'
+            )
             raise ConfigurationError(msg)
         return resolved
     if disc.scope == 'project':

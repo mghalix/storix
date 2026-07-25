@@ -48,6 +48,22 @@ The cached `get_fs()` is a process-level resource. Close it from your
 application's shutdown hook. The [FastAPI recipe](fastapi.md) shows the same
 lifetime explicitly with `lifespan`.
 
+## Secrets in config files
+
+A config file may reference a secret instead of holding one:
+
+```toml
+[azure]
+credential = "env:MEDIA_AZURE_CREDENTIAL"
+```
+
+The reference resolves from the process environment first, then from the
+project `.env` - the same file `STORIX_*` settings already come from, so a
+secret kept there is not invisible to an `env:` reference. A variable set in
+neither place is an error naming both. A literal secret in a project file is
+refused outright (project files get committed); the XDG user file may hold
+one, and warns if it is group- or world-readable.
+
 ## Named profiles
 
 A profile bundles a provider and its settings under a name, with optional
