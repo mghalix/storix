@@ -30,6 +30,9 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path]:
     project.mkdir()
     monkeypatch.chdir(project)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+    # sx keeps one session per process so cwd survives across shell commands;
+    # each test needs its own, or the first one to build wins the file
+    cli._session.fs = None
     yield project
 
 

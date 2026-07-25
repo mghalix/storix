@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from storix import (
@@ -25,8 +26,10 @@ from storix._sync._compat import concurrent
 from storix.config import (
     PROVIDER_MODELS,
     StorixSettings,
+    config_provenance,
     install_hint,
     is_secret,
+    resolve_profile,
 )
 from storix.errors import StorageError
 
@@ -234,10 +237,9 @@ def build_base(
             'drop -p or select a profile on that provider'
         )
         raise SystemExit(message)
+    settings = _with_cwd_default(name, overrides, profile, environment)
     try:
-        return get_storage(
-            name, profile=profile, environment=environment, **(overrides or {})
-        )
+        return get_storage(name, profile=profile, environment=environment, **settings)
     except (StorageError, ValueError, KeyError) as exc:
         # the factory's own error already names the available providers
         message = f'sx: cannot open provider {name!r}: {exc}'
@@ -249,6 +251,42 @@ def build_base(
             f'sx: the {name} extra is not installed. Install it: {install_hint(name)}'
         )
         raise SystemExit(message) from exc
+
+
+def _with_cwd_default(
+    provider: str,
+    overrides: Mapping[str, str] | None,
+    profile: str | None,
+    environment: str | None,
+) -> dict[str, str]:
+    """Anchor a zero-config local session at the invocation cwd (ADR 0031 D14).
+
+    A person running an exploration CLI expects ``sx ls`` to list where they
+    stand, the way ``ls`` does. This applies only when nothing configured a
+    base: not a flag, not ``--set``, not the selected profile or its stage,
+    not the environment, not ``.env``, not a config file. The library keeps
+    ``~/.storix`` (ADR 0009), because library code writing to an
+    application's cwd is a hazard while a human at a prompt is the one case
+    where cwd is the honest default.
+
+    Args:
+        provider: The effective provider.
+        overrides: Flag and ``--set`` overrides.
+        profile: The selected profile, if any.
+        environment: The selected stage, if any.
+
+    Returns:
+        The overrides to pass on, with ``base`` added when it applies.
+    """
+    settings = dict(overrides or {})
+    if provider != 'local' or 'base' in settings:
+        return settings
+    if profile is not None and 'base' in resolve_profile(profile, environment).values:
+        return settings
+    if config_provenance('local').get('base', 'default') != 'default':
+        return settings
+    settings['base'] = str(Path.cwd())
+    return settings
 
 
 def build_session(
