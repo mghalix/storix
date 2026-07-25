@@ -183,3 +183,19 @@ def test_verify_tag_rejects_mismatched_tag(tmp_path: Path) -> None:
     # When / Then
     with pytest.raises(_ReleaseError, match='does not match expected tag'):
         _verify_tag(project, history, 'v', 'v0.2.0')
+
+
+def test_runtime_dependencies_carry_no_development_tooling() -> None:
+    """What `pip install storix` pulls is the library, not the toolchain.
+
+    Everything a contributor needs (the docs site generator, linters, test
+    runners) belongs in a dependency group or an extra. A tool that reaches
+    `[project].dependencies` ships to every user of the package, and the
+    published metadata is immutable once released.
+    """
+    import tomllib
+
+    manifest = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))
+    runtime = manifest['project']['dependencies']
+
+    assert runtime == ['storix[core, local]'], runtime
