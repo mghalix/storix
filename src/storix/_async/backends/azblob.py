@@ -16,6 +16,7 @@ from __future__ import annotations
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Final
 
+from storix.constants import DEFAULT_READ_CHUNK_SIZE, DEFAULT_WRITE_CHUNK_SIZE
 from storix.enums import PathKind
 from storix.errors import IsADirectoryError
 
@@ -71,6 +72,9 @@ class AzureBlobBackend(OpendalBackend):
         credential: str | None = None,
         endpoint: str | None = None,
         root: str = '/',
+        read_chunk_size: int = DEFAULT_READ_CHUNK_SIZE,
+        write_chunk_size: int = DEFAULT_WRITE_CHUNK_SIZE,
+        read_prefetch_size: int | None = None,
     ) -> None:
         """Create an Azure Blob Storage backend.
 
@@ -87,6 +91,13 @@ class AzureBlobBackend(OpendalBackend):
             root: Blob-name prefix anchoring the session's ``/`` inside
                 the container, like ``LocalBackend``'s base directory.
 
+            read_chunk_size: Maximum chunk a read yields, and the size
+                opendal is asked to fetch per request.
+            write_chunk_size: Batch size accumulated before each write
+                request.
+            read_prefetch_size: Size of a stream's opening read; ``None``
+                means the read chunk size. See the Tune transfers recipe.
+
         Raises:
             ConfigurationError: If the configuration is rejected.
         """
@@ -99,6 +110,9 @@ class AzureBlobBackend(OpendalBackend):
             options[kind] = credential
         super().__init__(
             'azblob',
+            read_chunk_size=read_chunk_size,
+            write_chunk_size=write_chunk_size,
+            read_prefetch_size=read_prefetch_size,
             container=container,
             account_name=account_name,
             **options,

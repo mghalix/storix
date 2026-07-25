@@ -15,6 +15,9 @@ from storix.constants import (
     DEFAULT_AZURE_READ_CHUNK_SIZE,
     DEFAULT_AZURE_READ_PREFETCH_SIZE,
     DEFAULT_AZURE_WRITE_CHUNK_SIZE,
+    DEFAULT_READ_CHUNK_SIZE,
+    DEFAULT_TRANSFER_RANGES,
+    DEFAULT_WRITE_CHUNK_SIZE,
 )
 from storix.types import StorageProvider
 
@@ -27,9 +30,46 @@ class StorixSettings(BaseSettings):
     )
 
     provider: StorageProvider = 'local'
+    """Which backend ``get_storage()`` builds when none is named."""
+
+    max_transfer_ranges: int = Field(default=DEFAULT_TRANSFER_RANGES, ge=1)
+    """Ceiling on how many ranges of one file a bulk transfer may open.
+
+    Range parallelism makes a single large file transfer at more than one
+    connection's speed, at the cost of one request per range (ADR 0032).
+    Set ``STORIX_MAX_TRANSFER_RANGES=1`` to keep every transfer on one
+    stream per file, which is what a provider quota or a
+    transaction-sensitive bill may prefer."""
 
 
-class LocalConfig(BaseSettings):
+class TransferConfig(BaseSettings):
+    """Transfer sizes every provider understands.
+
+    Inherited by each provider's settings, so the same two knobs are
+    spelled ``STORIX_LOCAL_READ_CHUNK_SIZE``, ``STORIX_S3_READ_CHUNK_SIZE``,
+    and so on. Sizes are in bytes and must be positive. What they trade
+    against each other (memory per in-flight transfer against requests per
+    byte) is documented in the Tune transfers recipe.
+    """
+
+    read_chunk_size: int = Field(default=DEFAULT_READ_CHUNK_SIZE, gt=0)
+    """Maximum chunk a read yields, and the engine's read request size."""
+
+    write_chunk_size: int = Field(default=DEFAULT_WRITE_CHUNK_SIZE, gt=0)
+    """Batch size a write accumulates before sending a request."""
+
+
+class RemoteTransferConfig(TransferConfig):
+    """Transfer sizes for providers that fetch over the network."""
+
+    read_prefetch_size: int | None = Field(default=None, gt=0)
+    """Size of a stream's opening read, which is the buffer a download holds
+    before it yields anything. ``None`` means the read chunk size, so a
+    stream costs one chunk; a larger value trades resident memory per
+    in-flight transfer for fewer round trips on a lone stream."""
+
+
+class LocalConfig(TransferConfig):
     """``STORIX_LOCAL_*`` settings for the real-disk backend."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -40,7 +80,7 @@ class LocalConfig(BaseSettings):
     """Base directory anchoring the filesystem (created if missing)."""
 
 
-class S3Config(BaseSettings):
+class S3Config(RemoteTransferConfig):
     """``STORIX_S3_*`` settings for the Amazon S3 backend."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -66,7 +106,7 @@ class S3Config(BaseSettings):
     """Key prefix anchoring the session's ``/`` inside the bucket."""
 
 
-class GcsConfig(BaseSettings):
+class GcsConfig(RemoteTransferConfig):
     """``STORIX_GCS_*`` settings for the Google Cloud Storage backend."""
 
     model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
@@ -89,7 +129,7 @@ class GcsConfig(BaseSettings):
     """Key prefix anchoring the session's ``/`` inside the bucket."""
 
 
-class AzureConfig(BaseSettings):
+class AzureConfig(RemoteTransferConfig):
     """``STORIX_AZURE_*`` settings for both Azure backends.
 
     One schema serves both account kinds: container, account name, and
@@ -124,10 +164,13 @@ class AzureConfig(BaseSettings):
     """Custom blob endpoint URL (emulators, sovereign clouds); blob kind only."""
 
     read_chunk_size: int = Field(default=DEFAULT_AZURE_READ_CHUNK_SIZE, gt=0)
-    """Default consumer and SDK range chunk size in bytes."""
+    """Default consumer and SDK range chunk size in bytes (4 MiB, the SDK's
+    own native download chunk)."""
 
     write_chunk_size: int = Field(default=DEFAULT_AZURE_WRITE_CHUNK_SIZE, gt=0)
-    """Default append-request batch size in bytes."""
+    """Default append-request batch size in bytes (4 MiB)."""
 
-    read_prefetch_size: int = Field(default=DEFAULT_AZURE_READ_PREFETCH_SIZE, gt=0)
-    """Initial SDK download request size in bytes."""
+    read_prefetch_size: int | None = Field(
+        default=DEFAULT_AZURE_READ_PREFETCH_SIZE, gt=0
+    )
+    """Initial SDK download request size in bytes (8 MiB)."""

@@ -22,6 +22,7 @@ import aiofiles
 import aiofiles.os as aioos
 
 from storix._async._stream import batch_chunks, resolve_chunk_size, validate_span
+from storix.constants import DEFAULT_READ_CHUNK_SIZE, DEFAULT_WRITE_CHUNK_SIZE
 from storix.enums import PathKind
 from storix.errors import PathNotFoundError, from_os_error
 from storix.models import Capabilities, Entry, RawStat
@@ -57,7 +58,29 @@ class LocalBackend(BackendBase):
     on demand (it does so at construction). ``ranged_reads``: a range is a
     seek. No cloud-only features."""
 
-    def __init__(self, base: StrPathLike) -> None:
+    def __init__(
+        self,
+        base: StrPathLike,
+        *,
+        read_chunk_size: int = DEFAULT_READ_CHUNK_SIZE,
+        write_chunk_size: int = DEFAULT_WRITE_CHUNK_SIZE,
+    ) -> None:
+        """Create a backend anchored at a base directory.
+
+        Args:
+            base: Directory anchoring port path ``/``, created if missing.
+            read_chunk_size: Maximum chunk a read yields.
+            write_chunk_size: Batch size accumulated before each write.
+
+        Raises:
+            ValueError: If either transfer size is not positive.
+        """
+        self.default_read_chunk_size = resolve_chunk_size(
+            read_chunk_size, read_chunk_size
+        )
+        self.default_write_chunk_size = resolve_chunk_size(
+            write_chunk_size, write_chunk_size
+        )
         self._base = Path(base).expanduser().resolve()
         self._base.mkdir(parents=True, exist_ok=True)
 

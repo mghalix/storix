@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from storix.constants import DEFAULT_READ_CHUNK_SIZE, DEFAULT_WRITE_CHUNK_SIZE
+
 
 try:
     from .opendal import OpendalBackend
@@ -33,7 +35,7 @@ class S3Backend(OpendalBackend):
     validated on first I/O.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - one keyword per configuration knob
         self,
         bucket: str,
         *,
@@ -42,6 +44,9 @@ class S3Backend(OpendalBackend):
         secret_access_key: str | None = None,
         endpoint: str | None = None,
         root: str = '/',
+        read_chunk_size: int = DEFAULT_READ_CHUNK_SIZE,
+        write_chunk_size: int = DEFAULT_WRITE_CHUNK_SIZE,
+        read_prefetch_size: int | None = None,
     ) -> None:
         """Create an S3 backend.
 
@@ -58,6 +63,13 @@ class S3Backend(OpendalBackend):
             root: Key prefix anchoring the session's ``/`` inside the
                 bucket, like ``LocalBackend``'s base directory.
 
+            read_chunk_size: Maximum chunk a read yields, and the size
+                opendal is asked to fetch per request.
+            write_chunk_size: Batch size accumulated before each write
+                request.
+            read_prefetch_size: Size of a stream's opening read; ``None``
+                means the read chunk size. See the Tune transfers recipe.
+
         Raises:
             ConfigurationError: If the configuration is rejected.
         """
@@ -70,6 +82,9 @@ class S3Backend(OpendalBackend):
         }
         super().__init__(
             's3',
+            read_chunk_size=read_chunk_size,
+            write_chunk_size=write_chunk_size,
+            read_prefetch_size=read_prefetch_size,
             bucket=bucket,
             **{key: value for key, value in options.items() if value is not None},
         )

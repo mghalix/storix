@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 class _LocalOverrides(TypedDict, total=False):
     base: str
+    read_chunk_size: int
+    write_chunk_size: int
 
 
 class _AzureOverrides(TypedDict, total=False):
@@ -46,6 +48,9 @@ class _S3Overrides(TypedDict, total=False):
     secret_access_key: str
     endpoint: str
     root: str
+    read_chunk_size: int
+    write_chunk_size: int
+    read_prefetch_size: int
 
 
 class _GcsOverrides(TypedDict, total=False):
@@ -54,13 +59,20 @@ class _GcsOverrides(TypedDict, total=False):
     credential_path: str
     endpoint: str
     root: str
+    read_chunk_size: int
+    write_chunk_size: int
+    read_prefetch_size: int
 
 
 def _build_local(**overrides: Any) -> StorageBackend:
     from .backends.local import LocalBackend
 
     cfg = LocalConfig(**overrides)
-    return LocalBackend(cfg.base)
+    return LocalBackend(
+        cfg.base,
+        read_chunk_size=cfg.read_chunk_size,
+        write_chunk_size=cfg.write_chunk_size,
+    )
 
 
 def _build_memory(**overrides: Any) -> StorageBackend:
@@ -192,6 +204,9 @@ def _build_s3(**overrides: Any) -> StorageBackend:
         raise ConfigurationError(msg)
     return S3Backend(
         cfg.bucket,
+        read_chunk_size=cfg.read_chunk_size,
+        write_chunk_size=cfg.write_chunk_size,
+        read_prefetch_size=cfg.read_prefetch_size,
         region=cfg.region,
         access_key_id=cfg.access_key_id,
         secret_access_key=cfg.secret_access_key,
@@ -213,6 +228,9 @@ def _build_gcs(**overrides: Any) -> StorageBackend:
         raise ConfigurationError(msg)
     return GcsBackend(
         cfg.bucket,
+        read_chunk_size=cfg.read_chunk_size,
+        write_chunk_size=cfg.write_chunk_size,
+        read_prefetch_size=cfg.read_prefetch_size,
         credential=cfg.credential,
         credential_path=cfg.credential_path,
         endpoint=cfg.endpoint,

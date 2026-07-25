@@ -137,7 +137,7 @@ class AzureBackend(BackendBase):
         credential: str,
         read_chunk_size: int = DEFAULT_AZURE_READ_CHUNK_SIZE,
         write_chunk_size: int = DEFAULT_AZURE_WRITE_CHUNK_SIZE,
-        read_prefetch_size: int = DEFAULT_AZURE_READ_PREFETCH_SIZE,
+        read_prefetch_size: int | None = None,
     ) -> None:
         """Create an ADLS Gen2 backend.
 
@@ -147,7 +147,8 @@ class AzureBackend(BackendBase):
             credential: SAS token or account key.
             read_chunk_size: Default consumer and SDK range chunk size.
             write_chunk_size: Default ``append_data`` request batch size.
-            read_prefetch_size: Size of the SDK's initial download request.
+            read_prefetch_size: Size of the SDK's initial download request;
+                ``None`` selects the Azure default of 8 MiB.
 
         Raises:
             ValueError: If any configured transfer size is not positive.
@@ -158,7 +159,9 @@ class AzureBackend(BackendBase):
         self.default_write_chunk_size = resolve_chunk_size(
             write_chunk_size, write_chunk_size
         )
-        read_prefetch_size = resolve_chunk_size(read_prefetch_size, read_prefetch_size)
+        read_prefetch_size = resolve_chunk_size(
+            read_prefetch_size, DEFAULT_AZURE_READ_PREFETCH_SIZE
+        )
         self.container = container
         self._account_name = account_name
         self._credential = credential
