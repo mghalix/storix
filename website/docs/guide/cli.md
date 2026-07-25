@@ -66,7 +66,7 @@ write      touch  echo  mkdir
 remove     rm  rmdir
 move       mv  cp
 transfer   push  pull
-session    provider  provision  exists
+session    whereami  provision  exists
 ```
 
 Every command supports `--help`. Familiar flags behave as they do in unix:
@@ -145,6 +145,16 @@ trailing slash so you can walk straight down a tree. Completion sources a
 live listing, so an active cache layer makes repeats instant. `help`,
 `clear`, `refresh` (clear the cache), and `exit` are shell built-ins.
 
+The banner names what the session is connected to, including the profile
+and stage when one is selected, and `whereami` reprints it at any point:
+
+```console
+storix shell
+connected to AzureBackend as media (stage: prod)
+cache ls/stat/du/cat via InMemoryCacheStore * type refresh to clear
+type 'help' for commands, 'whereami' for this session, 'exit' to quit
+```
+
 ## Icons
 
 Listings decorate entries with Nerd Font glyphs, the icon set
@@ -170,28 +180,7 @@ backends that support it.
 
 ### Profiles and stages
 
-A profile is a named connection: the provider plus its settings, written
-once in a config file and selected by name.
-
-```toml
-# storix.toml
-[profiles.media]
-provider = "azure"
-default_environment = "dev"
-account_name = "mediaaccount"
-credential = "env:MEDIA_AZURE_CREDENTIAL"
-
-[profiles.media.environments.dev]
-container = "media-dev"
-
-[profiles.media.environments.prod]
-container = "media-prod"
-```
-
-The provider is named once and its settings sit directly in the profile;
-each stage lists only what it changes. A key that is not a setting of that
-provider is an error naming the provider and its fields, so a block meant
-for another backend cannot sit there unread.
+A profile is a named connection, selected by name instead of spelled out:
 
 ```bash
 sx --profile media ls /                  # the profile's own settings
@@ -199,48 +188,11 @@ sx --profile media --env prod ls /       # with the prod overlay on top
 STORIX_PROFILE=media sx ls /             # the same, for a whole shell session
 ```
 
-A profile names its own provider, so `-p` naming a different one is an
-error rather than a silent override, and an overlay can change settings but
-never the provider - stages of one profile share a backend by definition.
-`--env` without a profile, an unknown profile, and an unknown stage each
-exit naming what is available.
-
-#### A default profile
-
-Typing `--profile` every time is not the intended workflow. Pin one, and
-every `sx` invocation uses it with no flag:
-
-```toml
-# ~/.config/storix/config.toml - your personal default
-profile = "media"
-
-[profiles.media]
-provider = "azure"
-account_name = "mediaaccount"
-container = "media"
-credential = "env:MEDIA_AZURE_CREDENTIAL"
-```
-
-```toml
-# storix.toml in a project - that project's default, for anyone who works on it
-profile = "media"
-```
-
-Selection order is flag, then `STORIX_PROFILE`, then the pinned key: a
-project's pin beats your personal one, `--profile` beats both for one
-command, and `STORIX_PROFILE=other sx ...` beats both for one shell. A
-profile can pin its own usual stage with `default_environment`, so `--env`
-is only needed to step off it.
-
-`STORIX_PROFILE` and `STORIX_ENVIRONMENT` are read by `sx` and deliberately
-not by the library: an operator's shell habit should not redirect a
-service's sessions. A pinned `profile` key in a config file *is* honored by
-both, because that is a property of the project rather than of the shell.
-In code the selection is explicit:
-
-```python
-fs = get_storage(profile="media", environment="prod")
-```
+Pin one in a config file and no flag is needed at all. The same profiles
+drive `get_storage(profile=..., environment=...)`, so a profile a pipeline
+runs on is one you can stand inside and inspect. Written up in full, with
+the selection order and the stage rules, in [Profiles and
+stages](profiles.md).
 
 ### Tuning a transfer
 
@@ -444,7 +396,7 @@ sx config get s3.bucket     # one value, and the file that supplies it
 sx config get --effective azure.read_prefetch_size
                             # the value actually in force, and where it came
                             # from - defaults included
-sx config profiles          # profiles, their stages, and the default (marked *)
+sx config profiles          # every profile as a table, stages as rows
 
 sx config set s3.bucket media           # writes the project file
 sx config set azure.credential X --user   # --user == --scope user
@@ -453,6 +405,28 @@ sx config init              # a commented starter file; --force to overwrite
 sx config validate          # load every file the way storix does
 sx config edit              # $VISUAL, else $EDITOR
 ```
+
+Profiles print as a table rather than as dotted keys, so a stage is a row
+under its profile and `*` marks what this invocation would use:
+
+```console
+$ sx --profile media --env prod config profiles
+profiles /home/you/.config/storix/config.toml
+profile  provider  stage   settings
+media *  azure             container = 'raw'
+                   dev     account_name = 'acctdev'
+                           credential = '***'
+                   prod *  account_name = 'acctprod'
+                           credential = '***'
+* what this invocation would use
+```
+
+Every view follows the selection. `sx --profile media config show` shows
+`media` and names the others rather than printing them, because they are not
+what that command would use. Listing and explaining never resolve a
+credential, so `sx config profiles` and `sx doctor` still work when an `env:`
+reference points at a variable you have not exported - which is exactly when
+you reach for them.
 
 Writes go through a round-trip TOML editor, so **your comments and layout
 survive**; they are validated against the same models a loaded file gets, so

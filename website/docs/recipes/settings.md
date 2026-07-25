@@ -148,6 +148,9 @@ is an error rather than an override; explicit keywords still win over the
 profile's values. A project profile shadows a user profile of the same name
 whole, so the effective profile is always readable from one file.
 
-`STORIX_PROFILE` and `STORIX_ENVIRONMENT` are honored by `sx` only - naming
-a profile in library code is explicit, or pinned per project with a
-top-level `profile = "media"` key in the config file.
+`STORIX_PROFILE`, `STORIX_ENVIRONMENT`, and a `profile = "media"` key pinned
+in a config file are honored by `sx` only. In library code the selection is
+always explicit, so `get_storage("s3")` beside `get_storage("azure")` means
+what it says on every machine.
+
+Profiles have their own page: [Profiles and stages](../guide/profiles.md).

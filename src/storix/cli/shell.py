@@ -27,6 +27,7 @@ from .state import (
     cache_layer,
     current_fs,
     layer_summary,
+    selection,
     use_fs,
 )
 
@@ -234,7 +235,7 @@ def _prompt(fs: Storix) -> FormattedText:
     """The prompt: just where you are, starship-style.
 
     Who you are connected to and what wraps the session are stable facts,
-    not per-line ones: the start banner states them once and ``provider``
+    not per-line ones: the start banner states them once and ``whereami``
     reprints them on demand, rather than prefixing every command with a
     label that grows with each layer.
     """
@@ -271,6 +272,29 @@ def _parse_input(line: str, aliases: dict[str, str]) -> list[str]:
     return expand_alias(argv, aliases) if (argv and aliases) else argv
 
 
+def _banner(fs: Storix) -> None:
+    """State what the session is, once, instead of on every prompt.
+
+    Which profile and stage are in force is the one thing a prompt showing
+    only the cwd cannot tell you, and the thing a wrong answer is most
+    expensive on. ``whereami`` reprints it later.
+    """
+    console.print('[bold blue]storix shell[/bold blue]')
+    where = f'connected to [green]{type(fs.base_backend).__name__}[/green]'
+    profile, environment = selection()
+    if profile:
+        stage = f' (stage: {environment})' if environment else ''
+        where += f' as [green]{profile}[/green]{stage}'
+    console.print(where)
+    summary = layer_summary(fs)
+    if summary:
+        tip = ' · type [cyan]refresh[/cyan] to clear' if cache_layer(fs) else ''
+        console.print(f'[green]{summary}[/green]{tip}')
+    console.print(
+        "type 'help' for commands, 'whereami' for this session, 'exit' to quit\n"
+    )
+
+
 def start_shell(fs: Storix | None = None) -> None:
     """Run the interactive shell over ``fs`` (or the default session)."""
     if fs is not None:
@@ -292,13 +316,7 @@ def start_shell(fs: Storix | None = None) -> None:
         style=_MENU_STYLE,
     )
 
-    console.print('[bold blue]storix shell[/bold blue]')
-    console.print(f'connected to [green]{type(fs.base_backend).__name__}[/green]')
-    summary = layer_summary(fs)
-    if summary:
-        tip = ' · type [cyan]refresh[/cyan] to clear' if cache_layer(fs) else ''
-        console.print(f'[green]{summary}[/green]{tip}')
-    console.print("type 'help' for commands, 'exit' to quit, tab to complete\n")
+    _banner(fs)
 
     while True:
         try:

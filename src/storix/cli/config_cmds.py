@@ -15,6 +15,9 @@ from typing import Annotated, Any, cast
 
 import typer
 
+from rich.markup import escape
+from rich.table import Table
+
 from storix.config import (
     PROVIDER_MODELS,
     DiscoveredConfig,
@@ -34,7 +37,7 @@ from storix.config import (
 from storix.errors import ConfigurationError
 
 from .render import console, err
-from .state import resolve_provider
+from .state import resolve_provider, selection
 
 
 _MISSING = object()
@@ -90,7 +93,7 @@ def _die(exc: ConfigurationError) -> None:
     Raises:
         typer.Exit: Always, with status 1.
     """
-    err.print(f'[red]sx: {exc}[/red]')
+    err.print(f'[red]sx: {escape(str(exc))}[/red]')
     raise typer.Exit(1)
 
 
@@ -153,6 +156,64 @@ def _render(document: dict[str, Any], *, prefix: str = '') -> None:
             console.print(f'[cyan]{path}[/cyan] = {value!r}')
 
 
+def _settings_cell(section: dict[str, Any]) -> str:
+    """One profile's or stage's settings, one ``key = value`` per line."""
+    skip = {'provider', 'environments', 'default_environment'}
+    return '\n'.join(
+        f'[cyan]{key}[/cyan] = {value!r}'
+        for key, value in sorted(section.items())
+        if key not in skip
+    )
+
+
+def _profiles_table(
+    profiles: dict[str, DiscoveredConfig],
+    selected: str | None,
+    stage_selected: str | None = None,
+) -> None:
+    """Print profiles as a table, grouped by the file that defines them.
+
+    Dotted keys flatten a profile into one long line per field
+    (``profiles.NAME.environments.STAGE.account_name``), which is the least
+    readable shape for the thing a user reaches for most. A stage is a row
+    under its profile instead, and the values sit in a column that wraps.
+    """
+    by_source: dict[str, list[tuple[str, DiscoveredConfig]]] = {}
+    for name, disc in sorted(profiles.items()):
+        by_source.setdefault(str(disc.path), []).append((name, disc))
+
+    for path, entries in by_source.items():
+        console.print(f'[bold]profiles[/bold] [dim]{path}[/dim]')
+        table = Table(box=None, pad_edge=False, header_style='dim')
+        table.add_column('profile')
+        table.add_column('provider')
+        table.add_column('stage')
+        table.add_column('settings')
+        for name, disc in entries:
+            profile = _redacted_profile(disc.data['profiles'][name])
+            if not isinstance(profile, dict):
+                continue
+            section = cast('dict[str, Any]', profile)
+            label = f'[cyan]{name}[/cyan]'
+            if name == selected:
+                label += ' [green]*[/green]'
+            provider = str(section.get('provider', '?'))
+            table.add_row(label, provider, '', _settings_cell(section))
+            stages = section.get('environments')
+            if not isinstance(stages, dict):
+                continue
+            in_force = stage_selected if name == selected else None
+            in_force = in_force or section.get('default_environment')
+            for stage, values in sorted(cast('dict[str, Any]', stages).items()):
+                if not isinstance(values, dict):
+                    continue
+                marked = f'{stage} [green]*[/green]' if stage == in_force else stage
+                cell = _settings_cell(cast('dict[str, Any]', values))
+                table.add_row('', '', marked, cell)
+        console.print(table)
+        console.print('[dim]* what this invocation would use[/dim]')
+
+
 @config_app.command('path')
 def config_path() -> None:
     """Print the config files storix reads, and whether they exist."""
@@ -212,9 +273,34 @@ def config_show(
             if disc is None:
                 continue
             console.print(f'[bold]{label}[/bold] [dim]{disc.path}[/dim]')
-            _render(_redacted(disc.data))
+            document = _redacted(disc.data)
+            document.pop('profiles', None)  # shown as a table below, not dotted
+            _render(document)
+        _show_profiles()
     except ConfigurationError as exc:
         _die(exc)
+
+
+def _show_profiles() -> None:
+    """Print the profiles, narrowed to the selected one when there is one.
+
+    A selected profile is the only one this invocation would use, so
+    printing the rest alongside it invites reading the wrong row.
+    """
+    profiles = available_profiles()
+    if not profiles:
+        return
+    profile, stage = selection()
+    if profile is not None and profile in profiles:
+        _profiles_table({profile: profiles[profile]}, profile, stage)
+        others = sorted(set(profiles) - {profile})
+        if others:
+            console.print(
+                f'[dim]{len(others)} more not selected: {", ".join(others)} '
+                '(sx config profiles)[/dim]'
+            )
+        return
+    _profiles_table(profiles, profile, stage)
 
 
 def _show_effective() -> None:
@@ -226,9 +312,9 @@ def _show_effective() -> None:
     """
     from storix.config import StorixSettings, config_provenance
 
-    from .state import resolve_selection
+    from .state import selection
 
-    profile, environment = resolve_selection(None, None)
+    profile, environment = selection()
     provider = resolve_provider(None, profile)
     where = f" [dim](profile '{profile}')[/dim]" if profile else ''
     console.print('[bold]effective[/bold]')
@@ -453,20 +539,8 @@ def config_profiles() -> None:
     if not profiles:
         console.print('[dim]no profiles defined[/dim]')
         return
-    for name, disc in sorted(profiles.items()):
-        _print_profile(name, disc)
-
-
-def _print_profile(name: str, disc: DiscoveredConfig) -> None:
-    """Print one profile's provider, stages, and source file."""
-    table: Any = disc.data['profiles'][name]
-    provider = table.get('provider', '?')
-    stages = sorted(table.get('environments', {}))
-    default = table.get('default_environment')
-    marked = [f'{s}*' if s == default else s for s in stages]
-    suffix = f' [dim]stages:[/dim] {", ".join(marked)}' if marked else ''
-    console.print(f'[cyan]{name}[/cyan] [dim]->[/dim] {provider}{suffix}')
-    console.print(f'         [dim]{disc.path}[/dim]')
+    selected, stage = selection()
+    _profiles_table(profiles, selected, stage)
 
 
 _SKELETON = """\

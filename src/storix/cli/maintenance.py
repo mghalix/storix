@@ -17,11 +17,12 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 
+from rich.markup import escape
+
 from storix.config import (
     PROVIDER_MODELS,
     available_profiles,
     config_provenance,
-    configured_profile,
     find_project_config,
     find_user_config,
     installation_kind,
@@ -32,10 +33,7 @@ from storix.config import (
 from storix.errors import ConfigurationError
 
 from .render import console, err
-from .state import (
-    _session,  # pyright: ignore[reportPrivateUsage]
-    resolve_provider,
-)
+from .state import resolve_provider, selection
 
 
 if TYPE_CHECKING:
@@ -115,7 +113,7 @@ def doctor(
     console.print(f'  installed as {installation_kind()}')
     console.print(f'  python       {sys.version.split()[0]} ({sys.executable})')
 
-    console.print('\n[bold]providers[/bold]')
+    console.print('\n[bold]provider extras[/bold] [dim](importable here)[/dim]')
     for provider in sorted(PROVIDER_MODELS):
         console.print(f'  {provider:8} {_extra_state(provider)}')
 
@@ -139,13 +137,18 @@ def doctor(
 
 
 def _extra_state(provider: str) -> str:
-    """Whether a provider's optional dependency is importable here."""
+    """Whether a provider's optional dependency is importable here.
+
+    Deliberately not "ready": nothing here opens a connection or checks a
+    credential, so a word that implies either would be a diagnosis storix
+    has not made. Credentials show up under ``configuration``.
+    """
     from storix import available_providers
 
     return (
-        '[green]ready[/green]'
+        '[green]installed[/green]'
         if provider in available_providers()
-        else '[dim]extra not installed[/dim]'
+        else '[dim]not installed[/dim]'
     )
 
 
@@ -157,9 +160,9 @@ def _report_config() -> None:
             ('user', find_user_config()),
         ):
             console.print(f'  {label:8} {disc.path if disc else "[dim]none[/dim]"}')
-        profile = _session.profile or configured_profile()
+        profile, environment = selection()
         if profile:
-            resolved = resolve_profile(profile, _session.environment)
+            resolved = resolve_profile(profile, environment)
             stage = resolved.environment or 'none'
             console.print(f'  profile      {profile} (stage: {stage})')
         else:
@@ -167,17 +170,26 @@ def _report_config() -> None:
             console.print(f'  profile      none selected (available: {available})')
         provider = resolve_provider(None, profile)
         console.print(f'  provider     {provider}')
-        _report_fields(provider)
+        _report_fields(provider, profile, environment)
     except ConfigurationError as exc:
-        err.print(f'  [red]{exc}[/red]')
+        err.print(f'  [red]{escape(str(exc))}[/red]')
 
 
-def _report_fields(provider: str) -> None:
-    """Print where each effective field comes from, and what is missing."""
+def _report_fields(
+    provider: str, profile: str | None = None, environment: str | None = None
+) -> None:
+    """Print where each effective field comes from, and what is missing.
+
+    Args:
+        provider: The provider whose fields to report.
+        profile: The selected profile, so its settings are attributed to it
+            rather than reading as untouched defaults.
+        environment: The selected stage overlay, if any.
+    """
     model = PROVIDER_MODELS.get(provider)
     if model is None:
         return
-    provenance = config_provenance(provider)
+    provenance = config_provenance(provider, profile=profile, environment=environment)
     for field, source in sorted(provenance.items()):
         marker = ' [dim](secret)[/dim]' if is_secret(model, field) else ''
         console.print(f'    {field:20} [dim]<- {source}[/dim]{marker}')

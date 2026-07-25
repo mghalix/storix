@@ -11,6 +11,7 @@ import pytest
 from typer.testing import CliRunner
 
 from storix.cli import app as cli
+from storix.cli.state import reset_session
 
 
 runner = CliRunner()
@@ -35,7 +36,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path]:
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
     # sx keeps one session per process so cwd survives across shell commands;
     # each test needs its own, or the first one to build wins the file
-    cli._session.fs = None
+    reset_session()
     for var in [name for name in os.environ if name.startswith('STORIX_')]:
         monkeypatch.delenv(var, raising=False)
     yield project
@@ -144,7 +145,8 @@ def test_profiles_lists_stages_and_marks_the_default(sandbox):
 
     assert result.exit_code == 0
     assert 'media' in result.stdout
-    assert 'dev*' in result.stdout
+    assert 'dev *' in result.stdout  # the stage this profile would use
+    assert 'prod' in result.stdout
 
 
 def test_init_writes_a_skeleton_and_will_not_clobber(sandbox):

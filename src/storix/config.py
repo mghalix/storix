@@ -54,12 +54,21 @@ if TYPE_CHECKING:
 
 
 type ConfigSource = Literal[
-    'override', 'profile', 'env', 'dotenv', 'project', 'user', 'default'
+    'override',
+    'environment',
+    'profile',
+    'env',
+    'dotenv',
+    'project',
+    'user',
+    'default',
 ]
 """Where an effective config field came from, strongest first: an explicit
-``get_storage`` keyword or CLI flag (``override``), the process environment
-(``env``), the project ``.env`` (``dotenv``), the project TOML (``project``),
-the XDG user file (``user``), or the model's built-in default (``default``)."""
+``get_storage`` keyword or CLI flag (``override``), the selected stage
+overlay (``environment``) and the profile under it (``profile``), the
+process environment (``env``), the project ``.env`` (``dotenv``), the
+project TOML (``project``), the user file (``user``), or the model's
+built-in default (``default``)."""
 
 type _Scope = Literal['project', 'user']
 
@@ -604,6 +613,17 @@ naming it carries no provider section."""
 _ENVIRONMENTS: Final[str] = 'environments'
 """Sub-table of a profile holding its stage overlays."""
 
+_NEAR_RESERVED: Final[dict[str, str]] = {
+    'environment': _ENVIRONMENTS,
+    'env': _ENVIRONMENTS,
+    'envs': _ENVIRONMENTS,
+    'stage': _ENVIRONMENTS,
+    'stages': _ENVIRONMENTS,
+}
+"""Names a stage table gets written as by mistake, and what it should be.
+Singular ``[environment]`` is the one users reach for, and the plain
+unknown-key message sends them looking for a provider setting instead."""
+
 _RESERVED_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
     {'provider', 'default_environment', _ENVIRONMENTS}
 )
@@ -699,6 +719,16 @@ def _validate_profile_keys(
     for key in table:
         if key in reserved or key in fields:
             continue
+        # the reserved names are the ones a stage table is spelled with, and
+        # near-misses read as a setting the provider does not have, which
+        # sends the reader looking in the wrong place entirely
+        near = _NEAR_RESERVED.get(key)
+        if near is not None and near in reserved:
+            msg = (
+                f'{path}: profile {name!r} has a [{key}] table; stages are '
+                f'spelled [{near}] (as in [profiles.{name}.{near}.dev])'
+            )
+            raise ConfigurationError(msg)
         known = ', '.join(sorted(fields)) if fields else 'none'
         msg = (
             f'{path}: profile {name!r} is a {provider!r} profile and has no '
@@ -784,6 +814,55 @@ def available_profiles() -> dict[str, DiscoveredConfig]:
             for name in cast('dict[str, Any]', node):
                 found[name] = disc
     return found
+
+
+def _stage_fields(name: str, environment: str | None) -> frozenset[str]:
+    """The field names a profile's stage overlay supplies, if any.
+
+    Args:
+        name: Profile to read.
+        environment: Stage to read, or ``None`` for the profile's own
+            ``default_environment``.
+    """
+    disc = available_profiles().get(name)
+    if disc is None:
+        return frozenset()
+    profile = cast('dict[str, Any]', disc.data['profiles'])[name]
+    table = cast('dict[str, Any]', profile)
+    stage = environment or table.get('default_environment')
+    if not isinstance(stage, str):
+        return frozenset()
+    overlays = table.get(_ENVIRONMENTS)
+    overlay = cast('dict[str, Any]', overlays).get(stage) if overlays else None
+    return frozenset(cast('dict[str, Any]', overlay)) if overlay else frozenset()
+
+
+def profile_provider(name: str) -> str:
+    """The provider a profile declares, without resolving its settings.
+
+    Naming the backend is a question about the file; opening it is a
+    question about credentials. Keeping them apart is what lets ``sx
+    doctor`` and ``sx config`` answer the first one while the second is
+    still broken, which is exactly when they are reached for.
+
+    Args:
+        name: Profile to read.
+
+    Raises:
+        ConfigurationError: If no config file defines that profile, or it
+            does not name a provider.
+    """
+    disc = available_profiles().get(name)
+    if disc is None:
+        known = ', '.join(sorted(available_profiles())) or 'none defined'
+        msg = f'unknown profile {name!r}; defined: {known}'
+        raise ConfigurationError(msg)
+    table = cast('dict[str, Any]', disc.data['profiles'])[name]
+    provider = cast('dict[str, Any]', table).get('provider')
+    if not isinstance(provider, str):
+        msg = f"{disc.path}: profile {name!r} does not name a 'provider'"
+        raise ConfigurationError(msg)
+    return provider
 
 
 def configured_profile() -> str | None:
@@ -935,12 +1014,18 @@ def config_provenance(
         if profile is not None
         else empty
     )
+    # a stage overlay is reported apart from the profile it sits on: "why is
+    # dev pointing at the prod container" is answered by which of the two
+    # supplied the value, not by knowing a profile was involved at all
+    stage_fields = _stage_fields(profile, environment) if profile else empty
+    profile_fields -= stage_fields
     project_fields = (
         frozenset(_section_values(project, settings_cls)) if project else empty
     )
     user_fields = frozenset(_section_values(user, settings_cls)) if user else empty
     layers: list[tuple[ConfigSource, frozenset[str]]] = [
         ('override', frozenset(overrides)),
+        ('environment', stage_fields),
         ('profile', profile_fields),
         ('env', _env_fields(settings_cls)),
         ('dotenv', _dotenv_fields(settings_cls)),

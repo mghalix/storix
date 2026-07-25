@@ -341,16 +341,28 @@ Rules:
   one file).
 - Names match `[A-Za-z0-9][A-Za-z0-9._-]*`. An unknown profile errors
   listing the available names and their source files.
-- Selection: `sx --profile NAME`, or `STORIX_PROFILE` (honored by
-  `sx` only), or a top-level `profile = "NAME"` key in a config file
-  (the project-pins-its-profile case). Flag beats env beats file.
-- A selected profile supplies the provider; `-p` combined with a
-  profile of a different provider is an error, not an override.
-- The library accepts explicit `get_storage(profile=..., environment=...)`
-  keyword selection through the same loader. `STORIX_PROFILE` and
-  `STORIX_ENVIRONMENT` are deliberately CLI-only: an operator's shell
-  habit must not silently redirect a service's library sessions (the
-  ADR 0022 provider argument, same direction).
+- Selection: `sx --profile NAME`, or `STORIX_PROFILE`, or a top-level
+  `profile = "NAME"` key in a config file. Flag beats env beats file.
+  All three are `sx` only.
+- A selected profile supplies the provider. `--profile` and a `-p`
+  naming a different one is an error: the user said two things. A
+  profile that is only *pinned* is a default, so `-p` steps off it
+  rather than being refused; a pin that could veto `-p` would make one
+  line in a personal file a lock on the whole CLI.
+- The library selects a profile only when the call asks:
+  `get_storage(profile=..., environment=...)`, through the same loader.
+  Neither `STORIX_PROFILE` nor a pinned `profile` key reaches it. An
+  operator's shell habit must not redirect a service's sessions (the
+  ADR 0022 provider argument, same direction), and a pin that did would
+  break `get_storage('s3')` beside `get_storage('azure')` - the shape
+  every migration and every composite filesystem takes - on whichever
+  machine happened to carry one. The convenience belongs where the
+  human is.
+- A profile layers over that provider's own table, so settings shared
+  by every profile on a backend are written once under `[s3]` and each
+  profile carries only what distinguishes it. This is why unrelated
+  buckets are separate profiles rather than stages of one: a stage
+  names a deployment, and `default_environment = "media"` would not.
 - No profile inheritance (deferred until a real need appears; no
   inheritance means no cycle detection).
 - Profile fields beyond provider config (default CLI layers, default
@@ -411,6 +423,27 @@ user, project, profile, environment, environment variable, flag).
 Without a value in the output the provenance is unreadable, and a user
 cannot discover a default they never wrote; `sx config get --effective
 azure.read_prefetch_size` is the single-key form of the same question.
+
+Two rules make these views trustworthy rather than merely present.
+
+Every view reports the selection this invocation made, flags included.
+The root callback resolves `--profile` / `--env` once and records the
+answer; a command that re-resolves sees only what it was passed, so it
+reports the pinned profile while the session runs the named one. That
+disagreement reads as "the flag did nothing", which is worse than no
+view at all.
+
+Reading configuration never resolves a credential. Naming the backend a
+profile declares is a question about the file; opening it is a question
+about secrets. Keeping them apart is what lets `sx config` and `sx
+doctor` answer while an `env:` reference is unresolvable, which is when
+they are reached for. For the same reason `doctor` reports an
+importable extra as installed, not as ready: nothing there opens a
+connection, and a word implying one is a diagnosis storix has not made.
+
+Profiles print as a table, a stage as a row under its profile, because
+dotted keys flatten the thing users reach for most into the least
+readable shape (`profiles.NAME.environments.STAGE.account_name`).
 
 Rules: two scopes only (`user`, `project`). Project scope writes the
 nearest existing `storix.toml`; else a `pyproject.toml` already

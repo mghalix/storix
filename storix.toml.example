@@ -18,7 +18,8 @@
 # --- top level: what to open, and how transfers behave -----------------------
 
 provider = "local"          # which backend get_storage() and sx open by default
-profile = "media"           # optional: the profile to select when none is named
+profile = "media"           # optional: the profile sx selects when none is named
+                            # (sx only; get_storage() takes profile= explicitly)
 max_transfer_ranges = 8     # ceiling on parallel ranges per file; 1 disables
 
 # --- per provider: non-secret connection settings ----------------------------
@@ -67,8 +68,11 @@ read_prefetch_size = "8MiB"
 
 # --- profiles: named connections, with optional stages -----------------------
 #
-# A profile names one provider and carries that provider's settings directly.
-# Each stage lists only what it changes; a stage cannot change the provider.
+# A profile names one provider and carries that provider's settings directly,
+# layered over that provider's own table above, so settings shared by every
+# profile on a backend are written once there. Each stage lists only what it
+# changes; a stage cannot change the provider. Different buckets are
+# different profiles, not stages: a stage names a deployment (dev/stg/prod).
 
 [profiles.media]
 provider = "azure"
