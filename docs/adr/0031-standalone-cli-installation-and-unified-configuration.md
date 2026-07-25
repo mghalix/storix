@@ -41,7 +41,8 @@ The gaps:
    are 10 of the 22 packages (roughly 45 percent) of a bare `storix`
    install, pulled from PyPI on every install. It is used only by the
    `just docs` recipes. **Closed ahead of this ADR**: the dependency
-   moved to the `dev` group in #44 (0.4.10), which also removed the
+   moved to the `dev` group in #44 (merged after 0.4.9, so it reaches
+   users in the next release), which also removed the
    unused `mkdocs` and added an automation test pinning
    `[project].dependencies` so the next tool cannot wander in.
 2. `sx --version` does not exist (`Error: No such option: --version`).
@@ -492,10 +493,29 @@ modified: the script prints where `sx` landed and how to add it
 (mentioning `uv tool update-shell`) when it is not on PATH.
 Non-interactive throughout (it runs piped). Uninstall is documented:
 `uv tool uninstall storix`. The download-inspect-execute alternative
-is documented next to the one-liner. Unix shells only; Windows users
-get the documented `uv tool install` command directly (a PowerShell
-installer is deferred). The installer and `sx update` share one model:
-uv tool is the installation mechanism, the receipt is the state.
+is documented next to the one-liner. The installer and `sx update`
+share one model: uv tool is the installation mechanism, the receipt is
+the state.
+
+A second script, `website/docs/install.ps1`, serves Windows over the
+same model and is published the same way:
+
+```powershell
+powershell -c "irm https://storix.mghalix.com/install.ps1 | iex"
+& ([scriptblock]::Create((irm https://storix.mghalix.com/install.ps1))) -With azure,s3
+```
+
+It was originally deferred, and that was wrong for a tool whose
+promise is one command on any machine: telling a Windows user to first
+install uv, then compose an extras string by hand, is a worse first
+five minutes than the one every other platform gets. Same
+requirements, same options (`-With`, `-All`, `-Version`, `-Help`),
+same refusal to touch PATH, credentials, or configuration. Both
+scripts are executed for real in CI on their own operating system,
+each followed by running the installed `sx`, so a broken installer
+fails the merge rather than a user's first command. That check runs
+the published release, so it asserts only that `sx` starts: an
+unreleased flag would test this branch, not the installer.
 
 ### D14. CLI local default becomes the invocation cwd
 
@@ -533,8 +553,9 @@ PR 2  feat(config): named profiles and environment overlays
 PR 3  feat(cli): config introspection and manipulation commands
       D10, tomlkit. PATCH.
 PR 4  docs(site): standalone installer at /install.sh
-      D13 + install/uninstall docs + ShellCheck automation test.
-      Website asset, no package change; `documentation` label.
+      D13 + install.ps1 + install/uninstall docs + ShellCheck
+      automation test + a CI job that really runs each script on its
+      own OS. Website asset, no package change; `documentation` label.
 PR 5  feat(cli): sx update and sx doctor
       D11, D12. PATCH.
 PR 6  feat(cli)!: local sessions default to the invocation cwd
@@ -572,7 +593,6 @@ Deferred, revisit on demonstrated need:
 - Profile-scoped CLI layers and default cwd.
 - `sx update --version` / `--prerelease` flags.
 - A `sx profile` command group beyond `config profiles`.
-- PowerShell installer.
 - OS keyring / external secret manager integration.
 - Connection URI factory (already deferred by ADR 0009).
 

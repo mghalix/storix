@@ -1,10 +1,14 @@
 """Tests for Storix repository workflow contracts."""
 
 import re
+import shutil
+import subprocess
 import tomllib
 
 from pathlib import Path
 from typing import Final
+
+import pytest
 
 
 _ROOT: Final[Path] = Path(__file__).parents[2]
@@ -254,3 +258,115 @@ def test_release_check_is_verification_only_and_complete() -> None:
     assert not re.search(r'(?m)^release(?:\s[^-][^:]*)?:', justfile)
     for forbidden in ('git tag', 'git push', 'uv publish', 'gh release create'):
         assert forbidden not in justfile
+
+
+# --- the standalone installer (ADR 0031 D13) ---
+
+
+def _installer() -> Path:
+    """The single source of the published installer."""
+    return Path(__file__).resolve().parents[2] / 'website' / 'docs' / 'install.sh'
+
+
+def test_installer_is_posix_sh_and_parses() -> None:
+    """Given the installer, when a POSIX shell parses it, then it is valid.
+
+    It is piped into `sh` on a stranger's machine; a syntax error there is
+    a broken install, not a failed test.
+    """
+    result = subprocess.run(  # noqa: S603
+        ['/bin/sh', '-n', str(_installer())],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_installer_refuses_to_run_unsafely() -> None:
+    """Given the installer, when read, then its safety rails are in place."""
+    text = _installer().read_text(encoding='utf-8')
+
+    assert text.startswith('#!/bin/sh')
+    assert 'set -eu' in text  # no unset variable, no ignored failure
+    assert 'sudo' not in text  # never asks for root
+    assert 'uv tool install --force' in text  # idempotent, upgrades on rerun
+
+
+def test_installer_help_needs_no_network_and_exits_clean() -> None:
+    """Given --help, when run, then it prints usage and stops."""
+    result = subprocess.run(  # noqa: S603
+        ['/bin/sh', str(_installer()), '--help'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert 'uv tool uninstall storix' in result.stdout
+
+
+def test_installer_rejects_an_unknown_option() -> None:
+    """Given a typo, when run, then it stops rather than installing something."""
+    result = subprocess.run(  # noqa: S603
+        ['/bin/sh', str(_installer()), '--wtih', 'azure'],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert 'unknown option' in result.stderr
+
+
+@pytest.mark.skipif(shutil.which('shellcheck') is None, reason='shellcheck absent')
+def test_installer_is_shellcheck_clean() -> None:
+    """Given shellcheck, when it lints the installer, then it has nothing to say."""
+    result = subprocess.run(  # noqa: S603
+        ['shellcheck', '--shell=sh', str(_installer())],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout
+
+
+def _windows_installer() -> Path:
+    """The single source of the published Windows installer."""
+    return Path(__file__).resolve().parents[2] / 'website' / 'docs' / 'install.ps1'
+
+
+def test_windows_installer_refuses_to_run_unsafely() -> None:
+    """Given the PowerShell installer, when read, then its rails are in place.
+
+    It cannot be executed here (no PowerShell on Linux CI for this job), so
+    the Windows job in CI runs it for real; these are the invariants that do
+    not need a shell to check.
+    """
+    text = _windows_installer().read_text(encoding='utf-8')
+
+    assert "$ErrorActionPreference = 'Stop'" in text  # no silent continue
+    assert 'uv tool install --force' in text  # idempotent, upgrades on rerun
+    assert 'Start-Process' not in text  # never elevates
+    assert 'uv tool uninstall storix' in text  # the way out is documented
+    # the only remote code it runs is uv's own installer
+    assert text.count('Invoke-Expression') == 1
+    assert 'https://astral.sh/uv/install.ps1 | Invoke-Expression' in text
+    # and it runs in a child shell: uv's installer assigns names this script
+    # declares as params, which PowerShell refuses to overwrite in one scope
+    assert '-NoProfile -ExecutionPolicy Bypass -Command' in text
+
+
+def test_both_installers_offer_the_same_interface() -> None:
+    """Given two installers, when compared, then neither grew a private option.
+
+    A user moving between machines should not have to learn two tools.
+    """
+    posix = _installer().read_text(encoding='utf-8')
+    windows = _windows_installer().read_text(encoding='utf-8')
+
+    for option in ('with', 'all', 'version', 'help'):
+        assert option in posix.lower(), option
+        assert option in windows.lower(), option

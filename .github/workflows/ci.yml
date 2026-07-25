@@ -241,6 +241,45 @@ jobs:
       - name: Build strict documentation
         run: uv run --no-sync just docs-build
 
+  installers:
+    name: Installers (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Show usage (POSIX)
+        if: runner.os == 'Linux'
+        run: sh website/docs/install.sh --help
+
+      - name: Show usage (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./website/docs/install.ps1 -Help
+
+      - name: Install storix from the published script (POSIX)
+        if: runner.os == 'Linux'
+        run: sh website/docs/install.sh
+
+      - name: Install storix from the published script (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./website/docs/install.ps1
+
+      # not `sx --version`: the installer installs the published release, which
+      # lags this branch, so asserting an unreleased flag tests the wrong thing.
+      - name: The installed sx runs
+        run: sx --help
+
   artifacts:
     name: Wheel and sdist
     runs-on: ubuntu-latest
@@ -283,6 +322,7 @@ jobs:
       - typing
       - automation
       - docs
+      - installers
       - artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -294,6 +334,7 @@ jobs:
           AUTOMATION_RESULT: ${{ needs.automation.result }}
           CORE_RESULT: ${{ needs.core.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
+          INSTALLERS_RESULT: ${{ needs.installers.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           LOWER_BOUNDS_RESULT: ${{ needs.lower-bounds.result }}
           TYPING_RESULT: ${{ needs.typing.result }}
@@ -309,6 +350,7 @@ jobs:
             "${TYPING_RESULT}" \
             "${AUTOMATION_RESULT}" \
             "${DOCS_RESULT}" \
+            "${INSTALLERS_RESULT}" \
             "${ARTIFACTS_RESULT}"
           do
             test "${result}" = "success"
