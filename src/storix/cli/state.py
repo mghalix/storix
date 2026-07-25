@@ -48,6 +48,9 @@ class _Session:
     """Holds the one live filesystem so state (cwd) persists across commands."""
 
     fs: Storix | None = None
+    pending: Callable[[], Storix] | None = None
+    """How to build this invocation's session when flags, a profile, or a
+    layer switch changed it; built on first use, not at parse time."""
     icons: bool | None = None
     """Whether listings decorate entries with icons; None = unresolved
     (falls back to the persistent preferences on first use)."""
@@ -253,9 +256,25 @@ def build_session(
     return stack_from_prefs(build_base(provider, overrides, profile, environment))
 
 
+def open_later(build: Callable[[], Storix]) -> None:
+    """Record how to open this invocation's session, without opening it.
+
+    Flags, a profile, or a layer switch change which session a command will
+    use, but only a command that touches storage needs one built. Deferring
+    keeps ``sx config``, ``sx doctor`` and ``--help`` working on a machine
+    whose credentials are wrong, absent, or deliberately fake - diagnostics
+    that require a working connection are no use when the connection is the
+    thing being diagnosed.
+    """
+    _session.fs = None
+    _session.pending = build
+
+
 def _fs() -> Storix:
     if _session.fs is None:
-        _session.fs = build_session()
+        pending = _session.pending
+        _session.fs = pending() if pending is not None else build_session()
+        _session.pending = None
     return _session.fs
 
 

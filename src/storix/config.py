@@ -53,7 +53,9 @@ if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
 
-type ConfigSource = Literal['override', 'env', 'dotenv', 'project', 'user', 'default']
+type ConfigSource = Literal[
+    'override', 'profile', 'env', 'dotenv', 'project', 'user', 'default'
+]
 """Where an effective config field came from, strongest first: an explicit
 ``get_storage`` keyword or CLI flag (``override``), the process environment
 (``env``), the project ``.env`` (``dotenv``), the project TOML (``project``),
@@ -147,14 +149,13 @@ def find_project_config() -> DiscoveredConfig | None:
 
 
 def find_user_config() -> DiscoveredConfig | None:
-    """The personal defaults: ``~/.config/storix/config.toml`` (XDG).
+    """The personal defaults, at this platform's user config location.
 
     Raises:
         ConfigurationError: If the file is malformed or holds an unknown
             top-level table.
     """
-    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
-    file = base / 'storix' / 'config.toml'
+    file = user_config_path()
     if not file.is_file():
         return None
     data = _read_toml(file)
@@ -897,21 +898,31 @@ def _env_fields(settings_cls: type[BaseSettings]) -> frozenset[str]:
     )
 
 
-def config_provenance(provider: str, /, **overrides: Any) -> dict[str, ConfigSource]:
+def config_provenance(
+    provider: str,
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Any,
+) -> dict[str, ConfigSource]:
     """Report which source supplies each effective field of ``provider``.
 
-    Replays the same precedence ``get_storage`` resolves (overrides beat
-    the environment beats ``.env`` beats project TOML beats the user file
-    beats defaults), so diagnostics can explain a value's origin. An
-    unknown provider yields an empty map.
+    Replays the same precedence ``get_storage`` resolves (overrides beat a
+    selected profile and its stage, which beat the environment, ``.env``,
+    project TOML, the user file, and defaults), so diagnostics can explain
+    a value's origin. An unknown provider yields an empty map.
 
     Args:
         provider: The provider whose configuration to trace.
+        profile: A selected profile, whose values sit above the environment.
+        environment: The stage overlay applied to that profile.
         overrides: The explicit keyword overrides passed to ``get_storage``.
 
     Raises:
-        ConfigurationError: If a discovered file is malformed or invalid
-            (the same failure ``get_storage`` would raise).
+        ConfigurationError: If a discovered file is malformed or invalid, or
+            the named profile does not exist (the same failures
+            ``get_storage`` would raise).
     """
     settings_cls = PROVIDER_MODELS.get(provider)
     if settings_cls is None:
@@ -919,12 +930,18 @@ def config_provenance(provider: str, /, **overrides: Any) -> dict[str, ConfigSou
     project = find_project_config()
     user = find_user_config()
     empty: frozenset[str] = frozenset()
+    profile_fields = (
+        frozenset(resolve_profile(profile, environment).values)
+        if profile is not None
+        else empty
+    )
     project_fields = (
         frozenset(_section_values(project, settings_cls)) if project else empty
     )
     user_fields = frozenset(_section_values(user, settings_cls)) if user else empty
     layers: list[tuple[ConfigSource, frozenset[str]]] = [
         ('override', frozenset(overrides)),
+        ('profile', profile_fields),
         ('env', _env_fields(settings_cls)),
         ('dotenv', _dotenv_fields(settings_cls)),
         ('project', project_fields),
@@ -952,8 +969,23 @@ type Scope = Literal['user', 'project']
 
 
 def user_config_path() -> Path:
-    """The XDG user config file, whether or not it exists yet."""
-    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
+    """This platform's user config file, whether or not it exists yet.
+
+    ``XDG_CONFIG_HOME`` wins everywhere when it is set, because a user who
+    exports it means it. Otherwise Windows uses ``%APPDATA%``, where a
+    Windows user expects per-user application data, and every other platform
+    uses ``~/.config``. Anchoring a Windows install under ``~/.config``
+    would work and look foreign, a poor trade for a tool that now installs
+    itself with PowerShell too.
+    """
+    configured = os.environ.get('XDG_CONFIG_HOME')
+    if configured:
+        base = Path(configured)
+    elif sys.platform == 'win32':
+        appdata = os.environ.get('APPDATA')
+        base = Path(appdata) if appdata else Path.home() / 'AppData' / 'Roaming'
+    else:
+        base = Path.home() / '.config'
     return base / 'storix' / 'config.toml'
 
 

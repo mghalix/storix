@@ -51,7 +51,6 @@ from .render import (
 )
 from .state import (
     _fs,  # pyright: ignore[reportPrivateUsage]
-    _session,  # pyright: ignore[reportPrivateUsage]
     apply_layers,
     build_base,
     build_overrides,
@@ -61,6 +60,7 @@ from .state import (
     empty_all,
     icons_enabled,
     layer_summary,
+    open_later,
     resolve_provider,
     resolve_selection,
     set_debug,
@@ -1108,15 +1108,21 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
         or sandbox is not None
     ):
         if cache or sandbox is not None:
-            base_fs = build_base(
-                provider_, overrides, selected_profile, selected_environment
-            )
-            _session.fs = apply_layers(
-                base_fs, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
+            open_later(
+                lambda: apply_layers(
+                    build_base(
+                        provider_, overrides, selected_profile, selected_environment
+                    ),
+                    cache=cache,
+                    cache_ttl=cache_ttl,
+                    sandbox=sandbox,
+                )
             )
         else:
-            _session.fs = build_session(
-                provider_, overrides, selected_profile, selected_environment
+            open_later(
+                lambda: build_session(
+                    provider_, overrides, selected_profile, selected_environment
+                )
             )
 
     if ctx.invoked_subcommand is None or interactive:

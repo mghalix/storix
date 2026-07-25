@@ -388,7 +388,7 @@ place of flags; see [Configure from settings](../recipes/settings.md).
 sx config path              # which files are read, and whether they exist
 sx config sources           # what was found, and the precedence order
 sx config show              # everything as storix reads it, secrets redacted
-sx config show --effective  # plus where each effective value comes from
+sx config show --effective  # what a session would actually use, and from where
 sx config get s3.bucket     # one value, and the file that supplies it
 sx config get --effective azure.read_prefetch_size
                             # the value actually in force, and where it came
@@ -437,10 +437,14 @@ A complete annotated example of every key lives in the repository as
 The three canonical files:
 
 ```
-~/.config/storix/config.toml      # user scope (XDG_CONFIG_HOME honored)
+~/.config/storix/config.toml      # user scope on Linux and macOS
+%APPDATA%\storix\config.toml      # user scope on Windows
 storix.toml                       # project scope, standalone
 pyproject.toml -> [tool.storix]   # project scope, namespaced
 ```
+
+`XDG_CONFIG_HOME` overrides the user location on every platform, including
+Windows: a user who exports it means it.
 
 === "storix.toml"
 

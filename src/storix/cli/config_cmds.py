@@ -24,6 +24,7 @@ from storix.config import (
     find_user_config,
     is_secret,
     project_config_path,
+    resolve_profile,
     scope_path,
     set_setting,
     split_key,
@@ -33,6 +34,7 @@ from storix.config import (
 from storix.errors import ConfigurationError
 
 from .render import console, err
+from .state import resolve_provider
 
 
 _MISSING = object()
@@ -192,13 +194,17 @@ def config_show(
     *,
     effective: Annotated[
         bool,
-        typer.Option('--effective', help='add where each value comes from'),
+        typer.Option(
+            '--effective',
+            help='what a session would actually use, and where each value is from',
+        ),
     ] = False,
 ) -> None:
     """Print the configuration as storix reads it, secrets redacted."""
-    from storix.config import config_provenance
-
     try:
+        if effective:
+            _show_effective()
+            return
         for label, disc in (
             ('project', find_project_config()),
             ('user', find_user_config()),
@@ -207,14 +213,50 @@ def config_show(
                 continue
             console.print(f'[bold]{label}[/bold] [dim]{disc.path}[/dim]')
             _render(_redacted(disc.data))
-        if not effective:
-            return
-        console.print('\n[bold]effective[/bold]')
-        for provider in sorted(PROVIDER_MODELS):
-            for field, source in sorted(config_provenance(provider).items()):
-                console.print(f'[cyan]{provider}.{field}[/cyan] [dim]<- {source}[/dim]')
     except ConfigurationError as exc:
         _die(exc)
+
+
+def _show_effective() -> None:
+    """Print what a session would use: the provider in force and its values.
+
+    Only the effective provider, because the others are not what this
+    invocation would open, and every field with its value, because a source
+    without a value answers half the question.
+    """
+    from storix.config import StorixSettings, config_provenance
+
+    from .state import resolve_selection
+
+    profile, environment = resolve_selection(None, None)
+    provider = resolve_provider(None, profile)
+    where = f" [dim](profile '{profile}')[/dim]" if profile else ''
+    console.print('[bold]effective[/bold]')
+    console.print(f'  provider     [cyan]{provider}[/cyan]{where}')
+
+    settings = StorixSettings()
+    for field in sorted(StorixSettings.model_fields):
+        if field == 'provider':
+            continue  # the headline above already says which one is in force
+        console.print(f'  {field:20} {getattr(settings, field)!r}')
+
+    model = PROVIDER_MODELS.get(provider)
+    if model is None:
+        console.print(f'  [dim]{provider} takes no configuration[/dim]')
+        return
+    resolved = (
+        resolve_profile(profile, environment).values if profile is not None else {}
+    )
+    values = model(**resolved)
+    sources = config_provenance(provider, profile=profile, environment=environment)
+    for field in sorted(model.model_fields):
+        value = getattr(values, field, None)
+        if value is not None and is_secret(model, field):
+            value = REDACTED
+        readable = getattr(value, 'human_readable', None)
+        shown = f'{value!r} ({readable()})' if callable(readable) else repr(value)
+        source = sources.get(field, 'default')
+        console.print(f'  {provider}.{field:20} {shown} [dim]<- {source}[/dim]')
 
 
 @config_app.command('get')
