@@ -1206,3 +1206,60 @@ def test_config_show_renders_profiles_as_rows_not_dotted_keys(tmp_path, monkeypa
     assert 'profiles.media.environments.prod.base' not in text
     assert 'media' in text
     assert 'prod' in text
+
+
+def test_a_shell_command_keeps_the_flags_the_shell_started_with(tmp_path, monkeypatch):
+    """Given a shell started on a profile, when a line runs, then it stays.
+
+    Every line typed in the shell re-enters the root callback carrying no
+    flags. Re-deriving the session there swaps the named profile for
+    whatever a config file pins, one command in.
+    """
+    project = _pinned_and_named(tmp_path)
+    (project / 'pinned' / 'in-pinned.txt').write_text('x')
+    (project / 'other' / 'in-other.txt').write_text('x')
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    run('--profile', 'other', 'ls', '/')  # the shell's first command
+    listing = run('ls', '/').stdout  # a later line, no flags of its own
+
+    assert 'in-other.txt' in listing
+    assert 'in-pinned.txt' not in listing
+
+
+def test_a_later_shell_line_can_still_switch_the_session(tmp_path, monkeypatch):
+    """Given a running session, when a line names a profile, then it moves."""
+    project = _pinned_and_named(tmp_path)
+    (project / 'pinned' / 'in-pinned.txt').write_text('x')
+    (project / 'other' / 'in-other.txt').write_text('x')
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    run('--profile', 'other', 'ls', '/')
+
+    assert 'in-pinned.txt' in run('--profile', 'pinned', 'ls', '/').stdout
+
+
+def test_whereami_names_the_profile_and_stage_in_force(tmp_path, monkeypatch):
+    """Given a session, when asked, then it says what it is connected to."""
+    project = _pinned_and_named(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    text = _plain(run('--profile', 'other', 'whereami').stdout)
+
+    assert 'LocalBackend' in text
+    assert 'profile: other' in text
+    assert 'cwd: /' in text
+
+
+def test_the_old_provider_name_still_answers(tmp_path, monkeypatch):
+    """Given a script calling `sx provider`, when it runs, then it works."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    result = run('provider')
+
+    assert result.exit_code == 0
+    assert 'backend' in _plain(result.stdout)

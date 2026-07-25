@@ -34,7 +34,7 @@ from rich.text import Text
 
 from storix import ObservabilityLayer, TransferEvent
 from storix._sync._compat import concurrent
-from storix.config import StorixSettings
+from storix.config import StorixSettings, resolve_profile
 from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
 from storix.errors import StorageError, TransferStoppedError
@@ -64,6 +64,7 @@ from .state import (
     open_later,
     resolve_provider,
     resolve_selection,
+    selection,
     set_debug,
     set_icons,
     stat_all,
@@ -977,16 +978,31 @@ def push(
 
 
 @app.command(rich_help_panel=_SETUP)
-def provider() -> None:
-    """Show the active backend and where it is anchored."""
+def whereami() -> None:
+    """Show what this session is connected to, and where it stands.
+
+    The one question a session cannot answer from its prompt: which
+    account, which container, under which profile and stage. Cheap by
+    construction - it reads the open session and the loader, and opens no
+    connection of its own.
+    """
     fs = _fs()
-    console.print(f'[green]backend:[/green] {type(fs.base_backend).__name__}')
-    console.print(f'[green]cwd:[/green]     {fs.pwd()}')
-    console.print(f'[green]home:[/green]    {fs.home}')
+    console.print(f'[green]backend:[/green]  {type(fs.base_backend).__name__}')
+    profile, environment = selection()
+    if profile:
+        stage = environment or resolve_profile(profile, environment).environment
+        shown = f'{profile} [dim](stage: {stage or "none"})[/dim]'
+        console.print(f'[green]profile:[/green]  {shown}')
     console.print(f'[green]root uri:[/green] {fs.locate("/")}')
+    console.print(f'[green]cwd:[/green]      {fs.pwd()}')
+    console.print(f'[green]home:[/green]     {fs.home}')
     summary = layer_summary(fs)
     if summary:
-        console.print(f'[green]layers:[/green]  {summary}')
+        console.print(f'[green]layers:[/green]   {summary}')
+
+
+# the old name for the same answer, kept working and out of the help
+app.command('provider', hidden=True)(whereami)
 
 
 @app.command(rich_help_panel=_SETUP)
@@ -1183,50 +1199,64 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
     set_debug(debug)
     if icons is not None:
         set_icons(icons)
-    selected_profile, selected_environment = resolve_selection(profile, environment)
-    _session.profile = selected_profile
-    _session.environment = selected_environment
-    overrides = build_overrides(
-        resolve_provider(provider_, selected_profile),
-        flags={
-            'base': base,
-            'bucket': bucket,
-            'container': container,
-            'account_name': account_name,
-            'region': region,
-            'endpoint': endpoint,
-            'root': root,
-            'kind': kind,
-        },
-        sets=set_ or [],
-    )
-    # rebuild on an explicit --provider, a coordinate override, or any layer
-    # flag, else keep the persistent session (so cwd survives across shell
-    # commands); layer flags replace the configured [[cli.layers]] stack
-    if (
+    coordinates = {
+        'base': base,
+        'bucket': bucket,
+        'container': container,
+        'account_name': account_name,
+        'region': region,
+        'endpoint': endpoint,
+        'root': root,
+        'kind': kind,
+    }
+    # every line typed in the shell re-enters this callback, carrying none of
+    # the flags sx was started with; re-deriving the session there would swap
+    # `sx --profile prod` for whatever the config file pins, one command in
+    said = (
         provider_ is not None
-        or selected_profile is not None
-        or overrides
+        or profile is not None
+        or environment is not None
+        or any(value is not None for value in coordinates.values())
+        or bool(set_)
         or cache
         or sandbox is not None
-    ):
-        if cache or sandbox is not None:
-            open_later(
-                lambda: apply_layers(
-                    build_base(
+    )
+    if said or (_session.fs is None and _session.pending is None):
+        selected_profile, selected_environment = resolve_selection(profile, environment)
+        _session.profile = selected_profile
+        _session.environment = selected_environment
+        overrides = build_overrides(
+            resolve_provider(provider_, selected_profile),
+            flags=coordinates,
+            sets=set_ or [],
+        )
+        # rebuild on an explicit --provider, a coordinate override, or any
+        # layer flag, else keep the persistent session (so cwd survives across
+        # shell commands); layer flags replace the configured [[cli.layers]]
+        if (
+            provider_ is not None
+            or selected_profile is not None
+            or overrides
+            or cache
+            or sandbox is not None
+        ):
+            if cache or sandbox is not None:
+                open_later(
+                    lambda: apply_layers(
+                        build_base(
+                            provider_, overrides, selected_profile, selected_environment
+                        ),
+                        cache=cache,
+                        cache_ttl=cache_ttl,
+                        sandbox=sandbox,
+                    )
+                )
+            else:
+                open_later(
+                    lambda: build_session(
                         provider_, overrides, selected_profile, selected_environment
-                    ),
-                    cache=cache,
-                    cache_ttl=cache_ttl,
-                    sandbox=sandbox,
+                    )
                 )
-            )
-        else:
-            open_later(
-                lambda: build_session(
-                    provider_, overrides, selected_profile, selected_environment
-                )
-            )
 
     if ctx.invoked_subcommand is None or interactive:
         from .shell import start_shell
