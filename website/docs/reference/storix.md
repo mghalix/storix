@@ -147,7 +147,7 @@ bounded; a whole-object custom backend's compatibility fallback does not. See
 ```python
 download(
     path: StrPathLike,
-    dest: BinaryIO,
+    dest: BinarySink,
     /,
     *,
     ranges: int | None = None,
@@ -161,9 +161,18 @@ consumer, `download` writes a destination that accepts out-of-order writes, so
 it can fetch several byte ranges of the same file at once. That is what makes a
 single large file transfer faster than one connection on a high-latency link.
 
-`dest` is a synchronous binary file object open for writing, in both flavors -
-the local write is a syscall the core performs directly, not an operation on the
-storage port. `ranges=None` splits a file at or above 64 MiB into up to eight
+`dest` is anything that accepts bytes - `BinarySink` is structural, so
+`open(path, "wb")`, an `io.BytesIO`, a `gzip.GzipFile`, a `SpooledTemporaryFile`
+and a socket stream all qualify. A **text** stream deliberately does not:
+storage yields bytes, and a parallel download splits a file at byte offsets that
+can fall inside a multi-byte character. The local write is a call the core
+performs directly, not an operation on the storage port.
+
+Ranges are written with `os.pwrite` only when the sink is a standard-library
+file writer, whose contract is that the bytes it is handed reach its descriptor
+unchanged. Any other sink streams sequentially and gets identical bytes - that
+includes sinks that *transform* what they are given, such as `gzip.GzipFile`,
+which reports the underlying file's descriptor as its own. `ranges=None` splits a file at or above 64 MiB into up to eight
 ranges on a backend that advertises `ranged_reads`, and `ranges=1` forces the
 sequential path. A sink without a usable file descriptor (a `BytesIO`, a pipe)
 streams sequentially; the bytes written are identical either way. See

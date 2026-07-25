@@ -1128,3 +1128,28 @@ async def test_download_below_the_range_threshold_stays_sequential(tmp_path):
 
     assert written == 5
     assert (tmp_path / 'out.bin').read_bytes() == b'small'
+
+
+async def test_download_into_a_transforming_sink_stays_sequential(
+    tmp_path, monkeypatch
+):
+    """A sink that transforms bytes must not be written behind its back.
+
+    `gzip.GzipFile` compresses, yet reports the underlying file's descriptor
+    as its own and calls itself seekable, so a fast path that probed those
+    two would write raw bytes at range offsets into a compressed file.
+    """
+    import gzip
+
+    from storix._async import core
+
+    monkeypatch.setattr(core, 'MIN_RANGE_SIZE', 1024)
+    fs = Storix(MemoryBackend())
+    payload = bytes(range(256)) * 64
+    await fs.echo(payload, '/big.bin')
+    archive = tmp_path / 'out.gz'
+
+    with gzip.open(archive, 'wb') as sink:
+        await fs.download('/big.bin', sink, ranges=4)
+
+    assert gzip.decompress(archive.read_bytes()) == payload

@@ -4,7 +4,7 @@ import os
 
 from collections.abc import AsyncIterable, Buffer, Iterable
 from pathlib import PurePosixPath
-from typing import IO, TYPE_CHECKING, Literal, Self
+from typing import IO, TYPE_CHECKING, Literal, Protocol, Self
 
 
 if TYPE_CHECKING:
@@ -75,6 +75,23 @@ type PathKindStr = Literal['file', 'directory']
 that a type checker still guides. Kept in lockstep with the enum by
 ``test_path_kind_str_matches_enum`` - add a ``PathKind`` case and the test
 fails until this Literal lists it too."""
+
+
+class BinarySink(Protocol):
+    """Anything ``download`` can write bytes into.
+
+    Structural on purpose: the requirement is "accepts bytes", not "is an
+    ``IO[bytes]``". A ``gzip.GzipFile``, a ``SpooledTemporaryFile``, a
+    socket stream and a plain ``open(path, 'wb')`` all qualify, and a text
+    stream deliberately does not - storage yields bytes, and a parallel
+    download splits a file at byte offsets that can fall inside a
+    multi-byte character.
+    """
+
+    def write(self, data: bytes, /) -> object:
+        """Consume one chunk of the download."""
+        ...
+
 
 type DataBuffer[AnyStr: (str, bytes)] = (
     AnyStr | Buffer | Iterable[AnyStr | Buffer] | IO[AnyStr]
