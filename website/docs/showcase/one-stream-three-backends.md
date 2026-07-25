@@ -297,6 +297,7 @@ R2 uses Storix's S3 backend because it exposes an S3-compatible API. Cloudflare'
 See:
 
 - [Configure Storix from settings](https://storix.mghalix.com/recipes/settings/)
+- [Profiles and stages](https://storix.mghalix.com/guide/profiles/)
 - [Storix backends](https://storix.mghalix.com/guide/backends/)
 - [Cloudflare R2 S3 SDK configuration](https://developers.cloudflare.com/r2/get-started/s3/#3-use-an-aws-sdk)
 
@@ -339,6 +340,67 @@ fs = get_storage(
 The goal is not to pretend that an Azure account name and an R2 endpoint are the same setting.
 
 The goal is to keep those differences at one configuration boundary so they do not spread into materialization, inference, synchronization, or data-processing logic.
+
+### Name the connection once, select it by name
+
+Since 0.5.0 that boundary has a name. A *profile* is one provider plus its
+settings, written in a config file and selected by name; a *stage* overlays
+what differs between deployments, which in practice is a separate account
+with its own credential:
+
+```toml
+# storix.toml, or ~/.config/storix/config.toml
+[profiles.ingest]
+provider = "azure"
+container = "raw"
+default_environment = "dev"
+
+[profiles.ingest.environments.dev]
+account_name = "acmedevstorage"
+credential = "env:ACME_DEV_CREDENTIAL"
+
+[profiles.ingest.environments.prod]
+account_name = "acmeprdstorage"
+credential = "env:ACME_PRD_CREDENTIAL"
+
+[profiles.archive]
+provider = "s3"
+bucket = "archive"
+region = "auto"
+endpoint = "https://<account-id>.r2.cloudflarestorage.com"
+```
+
+```python
+fs = get_storage(profile="ingest", environment=os.environ["STAGE"])
+```
+
+```bash
+sx --profile ingest --env prod ls /
+```
+
+Non-secret coordinates live in the file; a credential is named, never held -
+`credential = "env:ACME_PRD_CREDENTIAL"` reads that variable at load time, and
+a literal secret in a project file is refused outright. Each stage reads its
+own variable, so a process running against `dev` never has the production
+secret in its environment at all, and an unset one fails at load instead of
+falling back to another stage's.
+
+The profile only reaches the library when a call asks for it. A `profile` key
+pinned in a config file and `STORIX_PROFILE` steer `sx`, deliberately not
+`get_storage()`: a personal file must not be able to point an application's
+session at another account, and
+
+```python
+src = get_storage("azure", container="raw")
+dst = get_storage("s3", bucket="archive")
+```
+
+has to mean what it says on every machine - which is the shape every
+migration between two providers takes.
+
+Profiles do not replace the environment variables above; they sit alongside
+them, and `sx config show --effective` prints which of the two supplied each
+value.
 
 ## Explicit configuration is just as easy
 
@@ -937,6 +999,15 @@ video producer
 -> selected provider
 ```
 
+Reads scale the same way without changing the call. A single stream to an
+object store is bounded by round trips rather than bandwidth, so
+`download()` fetches several byte ranges of one file concurrently and writes
+each at its offset - measured at 2.1x on a 200 MiB pull from Azure over one
+home connection, with peak resident memory at 173 MB. Every range is a
+separate request, so the speed is bought with transaction count;
+`ranges=1`, or `STORIX_MAX_TRANSFER_RANGES=1`, keeps every transfer on one
+stream.
+
 This is important beyond memory usage.
 
 In cloud-hosted web applications and serverless-style deployments, temporary files are often instance-local and ephemeral. They may disappear after a restart, be unavailable to another replica after scale-out, or compete with tightly limited temporary disk.
@@ -1035,17 +1106,28 @@ This is another benefit of basing the public API on standard Python values and f
 
 Storix also ships `sx`, a Unix-flavored command-line interface over the same sessions, providers, layers, and typed storage behavior.
 
-Install it as an isolated command-line tool with only the providers you need:
+One command installs it, on any operating system:
 
 ```bash
-uv tool install "storix[cli,azure,s3]>=0.4.7,<0.5.0"
+curl -LsSf https://storix.mghalix.com/install.sh | sh
 ```
 
-Or install every bundled provider:
+```powershell
+powershell -c "irm https://storix.mghalix.com/install.ps1 | iex"
+```
+
+Both are thin wrappers over `uv tool install`, and take the providers you
+want (`--with azure,s3`, `--all`, `--version`). They need no root, ask for no
+credentials, write no configuration, and edit no shell startup files. If you
+would rather run the package manager yourself:
 
 ```bash
-uv tool install "storix[all]>=0.4.7,<0.5.0"
+uv tool install "storix[cli,azure,s3]>=0.5.0,<0.6.0"
+uv tool install "storix[all]>=0.5.0,<0.6.0"
 ```
+
+`sx update` upgrades through whichever package manager installed it, and
+refuses rather than rewriting an environment it did not create.
 
 `sx` can execute one command:
 
@@ -1060,7 +1142,7 @@ or open an interactive session:
 sx -p azure
 ```
 
-The interactive shell keeps its current directory and tab-completes command names and remote paths. In Storix 0.4.7, completion is context-aware: `push` and `pull` complete local or remote paths based on the active argument position.
+The interactive shell keeps its current directory and tab-completes command names and remote paths. Completion is context-aware: `push` and `pull` complete local or remote paths based on the active argument position.
 
 Transfers stream files or complete directory trees between the host and the configured provider with progress reporting:
 
@@ -1071,13 +1153,35 @@ sx pull /knowledge-base/results ./results
 
 I use `sx` for quick inspection from the project root, navigating remote storage without opening a cloud dashboard, and moving data between local and cloud storage from the terminal.
 
+When a session is not where you expected it to be, `sx` answers rather than
+leaving you to guess:
+
+```console
+$ sx --profile ingest --env prod whereami
+backend:  AzureBackend
+profile:  ingest (stage: prod)
+root uri: abfss://raw@acmeprdstorage.dfs.core.windows.net/
+cwd:      /
+home:     /
+layers:   cache ls/stat/du/cat via InMemoryCacheStore
+```
+
+`sx config show --effective` goes further and prints every field with the
+layer that supplied it - flag, stage, profile, environment variable, `.env`,
+project file, user file, or built-in default - and `sx doctor` reports how
+storix is installed, which extras are importable, and which config files were
+found. None of them opens a connection or resolves a credential, so they
+still answer when the connection is the thing that is broken.
+
 Project or personal configuration can provide a default backend, persistent layers, and aliases.
 
 For `storix.toml`:
 
 ```toml
-icons = true
 provider = "azure"
+
+[cli]
+icons = true
 
 # Every interactive sx session gets a read-through cache.
 # Inside one live shell, repeated ls, du, tree, and path completion
@@ -1086,7 +1190,7 @@ layers = [
     { name = "cache", ttl = 300 },
 ]
 
-[alias]
+[cli.alias]
 l = "ls -l"
 ll = "ls -la"
 lsn = "ls -lr"
@@ -1097,9 +1201,11 @@ lT = "tree --long"
 For `pyproject.toml`:
 
 ```toml
+[tool.storix]
+provider = "azure"
+
 [tool.storix.cli]
 icons = true
-provider = "azure"
 layers = [
     { name = "cache", ttl = 300 },
 ]
@@ -1112,25 +1218,35 @@ lt = "tree --level 2"
 lT = "tree --long"
 ```
 
+An unknown key is an error naming the file, the key, and the legal set, so a
+setting written in the wrong place fails loudly instead of doing nothing.
+`sx config validate` checks every discovered file, and `sx config sources`
+prints which files were found and in what order they win.
+
 The cache is in memory for the lifetime of the `sx` session. It is most useful while navigating repeatedly inside the interactive shell:
 
 ```console
 $ sx -p azure
-AzureBlobBackend / > cd /knowledge-base
-AzureBlobBackend /knowledge-base > lT
-AzureBlobBackend /knowledge-base > lT
+storix shell
+connected to AzureBlobBackend
+cache ls/stat/du/cat via InMemoryCacheStore - type refresh to clear
+type 'help' for commands, 'whereami' for this session, 'exit' to quit
+
+/ > cd /knowledge-base
+/knowledge-base > lT
+/knowledge-base > lT
 ```
 
 The first traversal reaches remote storage. Repeated reads in the same session can reuse cached values until their TTL expires or `refresh` clears the cache.
 
-Storix 0.4.7 also added the full eza icon catalog, richer `ls -l` output, aliases, recursive `push` and `pull`, context-aware shell completion, and monotonic progress across multi-file transfers.
+`sx` also carries the full eza icon catalog, richer `ls -l` output, aliases, recursive `push` and `pull`, and monotonic progress across multi-file transfers. Ctrl+C stops a transfer where it stands: every stream unwinds at its next chunk boundary, queued files never start, and a half-written local file is removed rather than left looking complete.
 
 See:
 
 - [The `sx` CLI](https://storix.mghalix.com/guide/cli/)
 - [Transfers with progress](https://storix.mghalix.com/guide/cli/#transfers-with-progress)
 - [CLI configuration](https://storix.mghalix.com/guide/cli/#configuration)
-- [Storix 0.4.7 release notes](https://storix.mghalix.com/release-notes/#047-2026-07-21)
+- [Storix 0.5.0 release notes](https://storix.mghalix.com/release-notes/#050-2026-07-25)
 
 ## What this demo proves
 
@@ -1153,10 +1269,10 @@ Storix is pre-1.0 and follows a documented versioning convention for its `0.x` r
 - Patch releases contain fixes or backward-compatible features.
 - Minor releases may contain breaking public API changes.
 
-To remain on the compatible `0.4.x` release line:
+To stay on the current release line:
 
 ```bash
-uv add "storix[azure,s3]>=0.4.7,<0.5.0"
+uv add "storix[azure,s3]>=0.5.0,<0.6.0"
 ```
 
 To reproduce the exact environment used for the FFmpeg recording:
@@ -1165,7 +1281,7 @@ To reproduce the exact environment used for the FFmpeg recording:
 uv add "storix[azure,s3]==0.4.6"
 ```
 
-The recording was produced with 0.4.6, while the article includes the `sx` improvements released in 0.4.7.
+The recording was produced with 0.4.6. The article is written against 0.5.0, which added the profiles, configuration files, standalone installers, and parallel range reads described above.
 
 This is Storix's documented pre-1.0 convention: patch releases are intended to be safe within the current minor line, while a minor increment is the breaking-change signal. See the [versioning policy](https://github.com/mghalix/storix/blob/main/docs/adr/0021-versioning-policy.md).
 
@@ -1234,9 +1350,11 @@ Zero storage rewrites.
 
 - [Storix documentation](https://storix.mghalix.com/)
 - [GitHub repository](https://github.com/mghalix/storix)
-- [Storix 0.4.7 release notes](https://storix.mghalix.com/release-notes/#047-2026-07-21)
+- [Storix 0.5.0 release notes](https://storix.mghalix.com/release-notes/#050-2026-07-25)
 - [Reading and writing](https://storix.mghalix.com/guide/reading-and-writing/)
+- [Profiles and stages](https://storix.mghalix.com/guide/profiles/)
 - [Configure from settings](https://storix.mghalix.com/recipes/settings/)
+- [Tune transfers](https://storix.mghalix.com/recipes/transfers/)
 - [Layers and composition](https://storix.mghalix.com/guide/layers/)
 - [Caching with Redis or disk](https://storix.mghalix.com/recipes/caching/#cashews-with-async-storix)
 - [Write a custom backend](https://storix.mghalix.com/recipes/custom-backend/)
