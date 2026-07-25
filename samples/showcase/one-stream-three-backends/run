@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+./clean
+
+if [[ -t 1 ]]; then
+    clear
+fi
+
+STORIX_DEMO_NO_CLEAR=1 ./demo

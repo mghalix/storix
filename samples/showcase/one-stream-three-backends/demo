@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+run_demo() {
+    local provider="$1"
+
+    STORIX_PROVIDER="$provider" uv run --no-sync python demo.py
+}
+
+if [[ -t 1 && "${STORIX_DEMO_NO_CLEAR:-0}" != "1" ]]; then
+    clear
+fi
+
+printf '\nONE STREAM. THREE BACKENDS.\n\n'
+
+run_demo local
+run_demo azure
+run_demo s3
+
+printf '\nSame stream. Same path. Three backends.\n'
