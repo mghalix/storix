@@ -46,6 +46,12 @@ root = "/"
 base = "./data"
 ```
 
+[`storix.toml.example`](https://github.com/mghalix/storix/blob/main/storix.toml.example)
+in the repository is the complete reference: every provider, every setting,
+profiles, and the `[cli]` table, with a comment on each. It is validated
+against the real settings models by the test suite, so it cannot drift out
+of date without failing the build.
+
 storix looks for `storix.toml`, then `.storix.toml`, then a
 `pyproject.toml` carrying `[tool.storix]`, walking upward from the current
 directory ruff-style; the first directory holding any of the three anchors

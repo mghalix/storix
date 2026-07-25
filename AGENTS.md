@@ -256,6 +256,18 @@ config. Run one backend with `just test-integration -k azure`.
 - New backends and layers slot into the conformance suite rather than getting a
   bespoke harness.
 
+## Configuration changes keep `storix.toml.example` in step
+
+`storix.toml.example` at the repository root is the complete, annotated
+reference for every key a config file may carry: top-level settings,
+every provider table, profiles and their stage overlays, and `[cli]`.
+
+A change that adds, renames, or removes a setting updates that file in the
+same pull request. Two tests in `tests/unit/test_config.py` enforce it: one
+loads the example as a real project config, and one fails when a provider
+model has a field the example does not mention. Neither can be satisfied by
+editing the test.
+
 ## Public communication & feature standards
 
 When writing public documentation, READMEs, issue templates, or release notes:

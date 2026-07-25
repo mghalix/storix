@@ -382,6 +382,9 @@ explicit act, and a stale exported variable must not quietly redirect it.
 The same chain applies to the library, with `get_storage()` keywords in
 place of flags; see [Configure from settings](../recipes/settings.md).
 
+A complete annotated example of every key lives in the repository as
+[`storix.toml.example`](https://github.com/mghalix/storix/blob/main/storix.toml.example).
+
 The three canonical files:
 
 ```

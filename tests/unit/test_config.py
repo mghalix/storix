@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from storix import get_storage
 from storix.config import (
+    PROVIDER_MODELS,
     AzureConfig,
     DiscoveredConfig,
     LocalConfig,
@@ -463,3 +464,52 @@ def test_a_default_environment_must_exist(sandbox):
 
     with pytest.raises(ConfigurationError, match='not one of its environments'):
         find_project_config()
+
+
+# --- the tracked example file stays in step with the schema ---
+
+
+def _example_document() -> dict[str, object]:
+    """The repository's storix.toml.example, parsed."""
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    return tomllib.loads((root / 'storix.toml.example').read_text(encoding='utf-8'))
+
+
+def test_the_example_config_is_accepted_by_the_loader(sandbox):
+    """Given the shipped example, when read as a project file, then it loads.
+
+    The example is documentation that rots silently, so it is validated
+    against the real models: a key that storix stopped accepting, or a
+    provider table that grew a field the example never learned, fails here.
+    """
+    source = Path(__file__).resolve().parents[2] / 'storix.toml.example'
+    (sandbox / 'storix.toml').write_text(
+        source.read_text(encoding='utf-8'), encoding='utf-8'
+    )
+
+    discovered = find_project_config()
+
+    assert discovered is not None
+    assert discovered.path == sandbox / 'storix.toml'
+
+
+def test_the_example_config_shows_every_provider_and_setting():
+    """Given a new provider or setting, when it lands, then the example has it.
+
+    Fails the moment a provider model gains a field the example does not
+    mention, which is the point: the next configuration PR updates it.
+    """
+    document = _example_document()
+
+    for provider, model in PROVIDER_MODELS.items():
+        assert provider in document, f'{provider} missing from storix.toml.example'
+        section = document[provider]
+        assert isinstance(section, dict)
+        documented = set(section)
+        missing = set(model.model_fields) - documented
+        assert not missing, f'[{provider}] is missing {sorted(missing)}'
+
+    top_level = set(StorixSettings.model_fields) | {'profile'}
+    assert top_level <= set(document), sorted(top_level - set(document))
