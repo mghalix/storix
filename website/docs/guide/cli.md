@@ -139,6 +139,28 @@ Both stream, so a file larger than memory moves fine. Uploads detect a
 content type (from the extension, else by sniffing the head) and set it on
 backends that support it.
 
+### Stopping a transfer
+
+Ctrl+C asks a running `push` or `pull` to stop, and it actually stops: every
+stream unwinds at its next chunk boundary, the files that had not started
+never start, and no worker keeps running behind your prompt. A half-written
+local file is removed rather than left looking complete, so `pull` never
+leaves a truncated file where a whole one belongs. The command reports it and
+exits `130`, the shell's usual code for an interrupt:
+
+```console
+/ > pull /media/season-1
+stopping...
+pull: stopped
+```
+
+A second Ctrl+C skips the graceful path and interrupts immediately.
+
+One asymmetry to know: a stopped `pull` cleans up after itself, while a
+stopped `push` may leave the file it was uploading partially written on the
+provider, because storix does not delete remote data it did not create.
+Re-running the same `push` overwrites it.
+
 Both ends scaffold their destination: `push` creates missing destination
 parents inside the storage root (directories, or key prefixes on an object
 store), and `pull` creates missing local ones, so this works with no prior
