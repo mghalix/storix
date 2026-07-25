@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+clear
+
+echo -e "\nHI\n"
+
+for provider in local azure s3; do
+  STORIX_PROVIDER="$provider" uv run python demo.py
+  printf '\n'
+done

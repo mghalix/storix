@@ -40,6 +40,9 @@ nav = [
     { "Write a custom backend" = "recipes/custom-backend.md" },
     { "Write a custom layer" = "recipes/custom-layer.md" },
   ] },
+  { "Showcase" = [
+    { "One stream, three backends" = "showcase/one-stream-three-backends.md" },
+  ] },
   { "Reference" = [
     { "Storix session" = "reference/storix.md" },
     { "Backends and factory" = "reference/backends.md" },

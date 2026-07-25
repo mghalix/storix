@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+
+run_clean() {
+    local provider="$1"
+
+    STORIX_PROVIDER="$provider" uv run --no-sync python clean.py
+}
+
+clear
+
+run_clean local
+run_clean azure
+run_clean s3
