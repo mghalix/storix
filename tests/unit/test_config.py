@@ -265,3 +265,19 @@ def test_transfer_ranges_stays_a_count(monkeypatch):
     monkeypatch.setenv('STORIX_MAX_TRANSFER_RANGES', '4')
 
     assert StorixSettings().max_transfer_ranges == 4
+
+
+def test_transfer_knobs_are_legal_in_toml(sandbox):
+    """Given transfer settings in a file, when loaded, then they take effect.
+
+    The knobs shipped as environment-only; ADR 0031's loader is what gives
+    them a file. Top-level keys are derived from ``StorixSettings``, so a
+    new one is legal the day it is added rather than erroring as unknown.
+    """
+    (sandbox / 'storix.toml').write_text(
+        'max_transfer_ranges = 2\n\n[local]\nbase = "."\nread_chunk_size = 262144\n',
+        encoding='utf-8',
+    )
+
+    assert StorixSettings().max_transfer_ranges == 2
+    assert LocalConfig().read_chunk_size == 262144

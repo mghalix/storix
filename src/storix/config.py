@@ -550,15 +550,18 @@ reads as unknown."""
 _KNOWN_TOP_LEVEL: Final[frozenset[str]] = frozenset(
     {
         'cli',
-        'provider',
         'alias',
         'aliases',
         *PROVIDER_MODELS,
+        *StorixSettings.model_fields,
     }
 )
 """Legal top-level keys in a storix config document (or ``[tool.storix]``):
-the provider sections, ``provider``, the ``[cli]`` table, and the ``alias`` /
-``aliases`` compatibility spellings."""
+the provider sections, every field of ``StorixSettings`` (``provider``,
+``max_transfer_ranges``, ...), the ``[cli]`` table, and the ``alias`` /
+``aliases`` compatibility spellings. Derived from the model rather than
+listed by hand, so a new top-level setting is legal in TOML the day it is
+added instead of erroring as unknown."""
 
 
 # --- provenance (which source supplied each effective field) ---
