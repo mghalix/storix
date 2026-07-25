@@ -2,26 +2,221 @@
 
 ## [0.5.0] - 2026-07-25
 
-### What's Changed
-#### Breaking changes
-* feat(cli)!: local sessions default to the invocation cwd (ADR 0031 PR 6) by @mghalix in https://github.com/mghalix/storix/pull/53
-* fix(cli): make every config view report the selection it was given by @mghalix in https://github.com/mghalix/storix/pull/54
-#### Features
-* feat: parallel range reads for single-file transfers by @mghalix in https://github.com/mghalix/storix/pull/40
-* feat(config): give every provider the same transfer knobs by @mghalix in https://github.com/mghalix/storix/pull/43
-* feat(config): accept human-readable transfer sizes by @mghalix in https://github.com/mghalix/storix/pull/46
-* feat(config): unified configuration sources, CLI overrides, and diagnostics (ADR 0031 PR 1) by @mghalix in https://github.com/mghalix/storix/pull/47
-* feat(config): named profiles and environment overlays (ADR 0031 PR 2) by @mghalix in https://github.com/mghalix/storix/pull/48
-* feat(config): flatten the profile schema, type the selection, and track a config example by @mghalix in https://github.com/mghalix/storix/pull/49
-* feat(cli): sx config commands (ADR 0031 PR 3) by @mghalix in https://github.com/mghalix/storix/pull/50
-* feat(cli): sx doctor, sx update, and a grouped help (ADR 0031 PR 5) by @mghalix in https://github.com/mghalix/storix/pull/52
-#### Fixes
-* fix(cli): make Ctrl+C actually stop a transfer by @mghalix in https://github.com/mghalix/storix/pull/42
-* fix(packaging): stop shipping the docs site generator to every user by @mghalix in https://github.com/mghalix/storix/pull/44
-* fix(core): only fast-path a download sink whose bytes reach its descriptor unchanged by @mghalix in https://github.com/mghalix/storix/pull/45
-#### Documentation
-* docs(site): standalone installers for unix and Windows (ADR 0031 PR 4) by @mghalix in https://github.com/mghalix/storix/pull/51
-* docs(config): show the stage pattern deployments actually have by @mghalix in https://github.com/mghalix/storix/pull/55
+`sx` becomes a standalone tool: one command to install it on any operating
+system, configuration it can find without a checkout, named profiles with
+stage overlays shared with the library, and `sx config` / `sx doctor` to see
+what any of it resolves to. Alongside it, a single large file no longer
+transfers at one connection's speed - `download` fetches several byte ranges
+of the same file concurrently, measured at 2.1x on a 200 MiB pull from Azure.
+
+Two breaking changes, both in the zero-configuration path. See ADR 0031 for
+the configuration and installation design, ADR 0032 for ranged reads.
+
+### Changed (breaking)
+
+- **`sx` with no configuration anchors at the directory you ran it from**
+  (#53), instead of `~/.storix`. A unix user running an exploration CLI
+  expects `sx ls` to list where they stand. Only the nothing-configured case
+  changes: a base from a flag, `--set`, a profile or its stage,
+  `STORIX_LOCAL_BASE`, `.env`, or a config file still decides, and the CLI
+  asks the loader's own provenance rather than guessing. **The library
+  default is unchanged**: `get_storage()` with zero configuration is still
+  `~/.storix`, because library code writing into an application's working
+  directory is a hazard, while a human at a prompt is the one case where the
+  cwd is the honest default (ADR 0009 stands).
+
+  ```bash
+  # to keep the old behavior
+  export STORIX_LOCAL_BASE=~/.storix
+  ```
+
+  ```toml
+  # or, per project
+  [local]
+  base = "~/.storix"
+  ```
+
+- **A profile pinned in a config file no longer steers `get_storage()`**
+  (#54). A `profile = "media"` key, and `STORIX_PROFILE`, are `sx`
+  conveniences; honoring them in the library meant a personal file could
+  point an application's session at another account, and that
+  `get_storage("s3")` beside `get_storage("azure")` - the shape every
+  migration and every composite filesystem takes - failed on whichever
+  machine happened to carry a pin. The library selects a profile only when
+  the call asks. Migration is mechanical:
+
+  ```python
+  # was, with `profile = "media"` in a config file
+  fs = get_storage()
+  # now
+  fs = get_storage(profile="media")
+  ```
+
+  This lands in the same release as the pin itself, so no published version
+  ever behaved the other way.
+
+### Added
+
+- **Parallel range reads** (#40, ADR 0032): `Storix.download()` fetches
+  several byte ranges of one file concurrently and writes each at its offset,
+  so a single large file is no longer bounded by one connection's round
+  trips. Measured on a 200 MiB file to Azure over one home connection, sha256
+  verified: 61.53s at one range, 25.51s at eight - **2.1x**, peak RSS 173 MB.
+  New port method `read_range(path, *, offset, length, chunk_size=None)`, with
+  `BackendBase` emulating it over `read_stream` so every backend (including a
+  third-party one) returns correct bytes; local, memory, Azure ADLS, and the
+  opendal-backed stores override it natively and advertise the new
+  `ranged_reads` capability. Like `bulk_listing`, it gates a fast path and
+  never raises. `ranges=1` forces a single stream, per call or globally with
+  `STORIX_MAX_TRANSFER_RANGES=1`; every range is a separate request, so the
+  speed is bought with transaction count.
+- **Provider settings in configuration files** (#47, ADR 0031 D3): one loader,
+  shared by the library and `sx`, reads `~/.config/storix/config.toml`
+  (`%APPDATA%\storix\config.toml` on Windows), a project `storix.toml`, or
+  `[tool.storix]` in `pyproject.toml`, and records which source supplied each
+  effective field. Non-secret coordinates (bucket, container, account name,
+  region, endpoint, base, root) are project facts and now belong in project
+  files; secrets stay out, with `credential = "env:VAR"` naming a variable
+  instead of holding one. `sx` gains coordinate flags (`--base`, `--bucket`,
+  `--container`, ...), a repeatable `--set provider.field=value`, and
+  `--version`.
+- **Named profiles and stage overlays** (#48, #49, ADR 0031 D8/D9): a profile
+  is a named connection - one provider plus its settings - and a stage
+  overlays what differs between deployments, typically a separate account and
+  its own credential per stage. `get_storage(profile="ingest",
+  environment="prod")` and `sx --profile ingest --env prod`. A profile layers
+  over that provider's own table, so settings shared by every profile on a
+  backend are written once. A profile names its own provider; a stage can
+  change settings but never the provider.
+- **`sx config`** (#50, ADR 0031 D10): `path`, `sources`, `show`, `get`,
+  `set`, `unset`, `init`, `validate`, `edit`, `profiles`. Writes round-trip
+  through `tomlkit` (comments and layout survive), validate against the same
+  models a loaded file gets, and land atomically. Secrets are redacted in
+  every read command and refused on write in project scope. `--effective` on
+  `show` and `get` reports the session that would actually run, each field
+  with its value and the layer that supplied it.
+- **`sx doctor` and `sx update`** (#52, ADR 0031 D11/D12): `doctor` reports
+  version, installation method, importable extras, discovered config files,
+  the selected profile and stage, and where each effective field comes from,
+  touching the network only under `--updates`. `update` drives the package
+  manager that installed storix - `uv tool upgrade storix`, extras preserved
+  from uv's receipt - and refuses with exit 2 anywhere else rather than
+  rewriting an environment it did not create.
+- **`sx whereami`** (#54): what this session is connected to - backend,
+  profile and stage, root URI, cwd, home, layers - without opening a
+  connection. The shell banner names the profile too. `sx provider` remains as
+  a hidden alias.
+- **A one-command install, on every operating system** (#51, ADR 0031 D13):
+
+  ```bash
+  curl -LsSf https://storix.mghalix.com/install.sh | sh
+  ```
+
+  ```powershell
+  powershell -c "irm https://storix.mghalix.com/install.ps1 | iex"
+  ```
+
+  Thin wrappers over `uv tool install` (`--with azure,s3`, `--all`,
+  `--version`, `--help`): no root, no credentials, no configuration written,
+  no shell startup files edited. CI runs each script for real on its own
+  operating system.
+- **The same transfer knobs on every provider** (#43): `read_chunk_size` and
+  `write_chunk_size` for all backends, plus `read_prefetch_size` for those
+  that fetch over the network, as `STORIX_<PROVIDER>_*` or config-file keys.
+  Local disk deliberately has no prefetch: a knob that silently does nothing
+  is worse than one that is absent. The opendal-backed stores now pass their
+  sizes to the engine on every streaming read.
+- **Readable transfer sizes** (#46): `STORIX_AZURE_READ_PREFETCH_SIZE=32MiB`,
+  `get_storage("s3", read_chunk_size="8MiB")`. Parsed by `pydantic.ByteSize`,
+  so `8MiB` is 8,388,608 and `8MB` is 8,000,000 - not synonyms. Plain byte
+  counts still work.
+- **`storix.toml.example`** (#49): a complete annotated reference for every
+  key, tracked in the repository and held to the models by a test.
+
+### Fixed
+
+- **Ctrl+C during a transfer stops the transfer** (#42): cancelling returned
+  the prompt but left the workers running, because a thread blocked in a
+  socket read cannot be interrupted and `KeyboardInterrupt` only reaches the
+  main thread. SIGINT now sets an event that the per-chunk progress sink
+  raises on, so every stream unwinds at its next chunk boundary, queued files
+  never start, and a half-written local file is removed rather than left
+  looking complete. The command reports it and exits `130`; a second Ctrl+C
+  restores the default handler.
+- **`zensical` is no longer a runtime dependency** (#44): the documentation
+  site generator sat in `[project].dependencies`, so every `pip install
+  storix` pulled it and its eight transitive packages - 10 of 22 packages in a
+  bare install. Published metadata is immutable, so every release up to 0.4.9
+  keeps it; this fixes it going forward. An automation test now pins
+  `[project].dependencies`.
+- **A download sink is fast-pathed only when its bytes reach its descriptor
+  unchanged** (#45): the `os.pwrite` path was gated on `seekable()` and
+  `fileno()`, and `gzip.GzipFile` answers True and hands back the *underlying*
+  descriptor - so a parallel download would have written raw bytes at range
+  offsets into a compressed file. Now an explicit allowlist. `dest` also
+  widens to a `BinarySink` protocol, so `GzipFile` and `SpooledTemporaryFile`
+  type-check; a text stream still cannot qualify, because a range boundary can
+  fall inside a multi-byte character.
+- **`sx --help` at the declared dependency floor** (#52): typer 0.13 through
+  0.15 call click's `Parameter.make_metavar()` without the `ctx` click 8.2
+  made required, and the `cli` extra already required click 8.2, so at the
+  minimum versions any `--help` raised `TypeError`. The floor is now
+  `typer>=0.16.0`.
+- **The interactive shell keeps the flags it was started with** (#54): every
+  line typed in the shell re-enters the root callback carrying none of them,
+  and the session was re-derived from what it saw - so `sx --profile prod`
+  listed whatever a config file pinned, from the first command onward, and a
+  startup `--base`, `--cache` or `--sandbox` was dropped the same way.
+- **Configuration views report the selection they were given** (#54):
+  `sx config show`, `show --effective` and `doctor` re-resolved the selection
+  instead of reading it, so `--profile` and `--env` were dropped; `doctor`
+  computed provenance without the profile, printing `<- default` for every
+  field a profile supplies. A stage overlay is now reported apart from the
+  profile under it (`<- environment` against `<- profile`).
+- **Reading configuration no longer resolves a credential** (#54): naming a
+  profile's provider went through the full resolution, so an `env:` reference
+  to an unexported variable took down `sx config profiles`, `sx doctor`, and
+  anything else that needed only the backend's name - exactly when those
+  commands are reached for.
+- **`-p` on a merely pinned profile** (#54) no longer errors. A pin is a
+  default, and one line in a personal file should not lock the CLI to one
+  backend. `--profile` and a conflicting `-p` together still refuse: there the
+  user said two things.
+- **Error messages naming a TOML table** (#54): every message went through
+  rich markup, so a `[table]` name in one was parsed as a style tag and
+  printed as nothing - worst in the messages that name the table to go and
+  fix. A `[environment]` table inside a profile now also names the spelling
+  stages take.
+
+### Documentation
+
+- **Profiles and stages** (#54, #55): a guide page of its own, because
+  profiles were written up inside the CLI guide where a reader using storix as
+  a library never looks, and `get_storage(profile=, environment=)` is the same
+  feature. Covers stages carrying a separate account and credential each,
+  selection order, sharing settings between profiles, and how to see what is
+  in force.
+- **Installation** (#51): the `uv tool` matrix, both one-liners, the
+  download-inspect-execute alternative, and `uv tool uninstall storix`.
+- **Configure from settings** and **Tune transfers** gain the config-file
+  sources, the precedence order, the secret policy, the per-provider knob
+  table, and a "turning it off" section for ranged downloads with the request
+  cost stated.
+- `sx --help` groups its commands (navigate, read, write, transfer, session
+  and setup) and its options (connection, profile, session, inspect), and its
+  epilog names the commands that explain a session.
+
+### Internal
+
+- The test suite no longer reads the developer's real `~/.config/storix`: an
+  autouse fixture points `XDG_CONFIG_HOME` at an empty directory and clears
+  `STORIX_*`. This was latent from #47 onward and passed in CI while failing
+  locally.
+- `reset_session()` clears the whole process-wide CLI session between tests,
+  not just its filesystem.
+- CI gains an `Installers` matrix job that runs each installer for real on
+  ubuntu and windows runners, and `zizmor` moves to 1.28.0 (1.27.0 was yanked,
+  GHSA-f42p-wjw5-97qh).
 
 ## [0.4.9] - 2026-07-24
 
