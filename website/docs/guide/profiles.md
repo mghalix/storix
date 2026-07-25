@@ -30,12 +30,64 @@ profile a pipeline uses is a profile you can stand inside and inspect.
 
 A stage (an *environment*) overlays the settings that differ between
 deployments of the same connection. Name the provider and everything stable
-once, then list only what changes:
+once, then list only what changes.
+
+In practice what changes across deployments is not just the container: dev,
+staging and production are usually separate accounts with separate
+credentials. A stage carries both, so the layout of your infrastructure is
+what the file describes:
+
+```toml
+[profiles.ingest]
+provider = "azure"
+container = "raw"
+default_environment = "dev"
+
+[profiles.ingest.environments.dev]
+account_name = "acmedevstorage"
+credential = "env:ACME_DEV_CREDENTIAL"
+
+[profiles.ingest.environments.stg]
+account_name = "acmestgstorage"
+credential = "env:ACME_STG_CREDENTIAL"
+
+[profiles.ingest.environments.prod]
+account_name = "acmeprdstorage"
+credential = "env:ACME_PRD_CREDENTIAL"
+```
+
+One name, one flag, three accounts:
+
+```python
+fs = get_storage(profile="ingest", environment="prod")
+```
+
+```bash
+sx --profile ingest ls /                 # dev, the pinned default
+sx --profile ingest --env prod ls /      # production
+```
+
+A separate credential per stage is the point. Each stage reads its own
+variable, so the process running against `dev` never has the production
+secret in its environment at all - the file describes which one to reach
+for, and an unset variable fails loudly at load rather than silently
+falling back to another stage's.
+
+A stage can change settings but never the provider: stages of one profile
+share a backend by definition. A key that is not a setting of that provider
+is an error naming the provider and its fields, so a block meant for another
+backend cannot sit there unread.
+
+`default_environment` pins the stage a profile usually runs on, so `--env`
+is only needed to step off it - and pinning `dev` means the dangerous one is
+the one you have to type.
+
+A stage can also be as small as one key when that is genuinely all that
+differs:
 
 ```toml
 [profiles.media]
 provider = "azure"
-default_environment = "dev"
 account_name = "mediaaccount"
 credential = "env:MEDIA_AZURE_CREDENTIAL"
 
@@ -45,22 +97,6 @@ container = "media-dev"
 [profiles.media.environments.prod]
 container = "media-prod"
 ```
-
-```python
-fs = get_storage(profile="media", environment="prod")
-```
-
-```bash
-sx --profile media --env prod ls /
-```
-
-A stage can change settings but never the provider: stages of one profile
-share a backend by definition. A key that is not a setting of that provider
-is an error naming the provider and its fields, so a block meant for another
-backend cannot sit there unread.
-
-`default_environment` pins the stage a profile usually runs on, so `--env`
-is only needed to step off it.
 
 ## Why this matters for a pipeline
 
@@ -73,8 +109,13 @@ reads:
 
 ```python
 # one job, three deployments, one line that changes
-fs = get_storage(profile="warehouse", environment=os.environ["STAGE"])
+fs = get_storage(profile="ingest", environment=os.environ["STAGE"])
 ```
+
+That line is the whole difference between a dev run and a production run:
+the account, the credential, and the container come from the stage. A job
+scheduled per environment passes its own `STAGE` and nothing else about it
+varies, so there is no second place where a deployment can be half-switched.
 
 Everything else about the session - layers, transfer tuning, the typed
 errors - is unchanged. The profile decides only which store you are talking
