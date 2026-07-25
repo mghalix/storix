@@ -41,7 +41,8 @@ The gaps:
    are 10 of the 22 packages (roughly 45 percent) of a bare `storix`
    install, pulled from PyPI on every install. It is used only by the
    `just docs` recipes. **Closed ahead of this ADR**: the dependency
-   moved to the `dev` group in #44 (0.4.10), which also removed the
+   moved to the `dev` group in #44 (merged after 0.4.9, so it reaches
+   users in the next release), which also removed the
    unused `mkdocs` and added an automation test pinning
    `[project].dependencies` so the next tool cannot wander in.
 2. `sx --version` does not exist (`Error: No such option: --version`).
