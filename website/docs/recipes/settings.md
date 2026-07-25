@@ -55,8 +55,9 @@ of date without failing the build.
 storix looks for `storix.toml`, then `.storix.toml`, then a
 `pyproject.toml` carrying `[tool.storix]`, walking upward from the current
 directory ruff-style; the first directory holding any of the three anchors
-the project and stops the walk. Personal defaults live in
-`~/.config/storix/config.toml` (`XDG_CONFIG_HOME` is honored).
+the project and stops the walk. Personal defaults live in `~/.config/storix/config.toml` on Linux and macOS,
+and `%APPDATA%\storix\config.toml` on Windows. `XDG_CONFIG_HOME` overrides
+that on any platform.
 
 An unknown key or table is an error naming the file, the key, and the known
 set - a setting that silently does nothing is worse than one that refuses to

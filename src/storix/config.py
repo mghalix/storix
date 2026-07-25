@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 import tomllib
 import warnings
 
@@ -52,7 +53,9 @@ if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
 
 
-type ConfigSource = Literal['override', 'env', 'dotenv', 'project', 'user', 'default']
+type ConfigSource = Literal[
+    'override', 'profile', 'env', 'dotenv', 'project', 'user', 'default'
+]
 """Where an effective config field came from, strongest first: an explicit
 ``get_storage`` keyword or CLI flag (``override``), the process environment
 (``env``), the project ``.env`` (``dotenv``), the project TOML (``project``),
@@ -146,14 +149,13 @@ def find_project_config() -> DiscoveredConfig | None:
 
 
 def find_user_config() -> DiscoveredConfig | None:
-    """The personal defaults: ``~/.config/storix/config.toml`` (XDG).
+    """The personal defaults, at this platform's user config location.
 
     Raises:
         ConfigurationError: If the file is malformed or holds an unknown
             top-level table.
     """
-    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
-    file = base / 'storix' / 'config.toml'
+    file = user_config_path()
     if not file.is_file():
         return None
     data = _read_toml(file)
@@ -304,7 +306,11 @@ def _warn_if_world_readable(path: Path) -> None:
 
 
 def _field_extra(settings_cls: type[BaseSettings], field: str) -> dict[str, Any]:
-    extra = settings_cls.model_fields[field].json_schema_extra
+    """Field policy metadata, empty for a name the model does not have."""
+    info = settings_cls.model_fields.get(field)
+    if info is None:
+        return {}
+    extra = info.json_schema_extra
     return cast('dict[str, Any]', extra) if isinstance(extra, dict) else {}
 
 
@@ -892,21 +898,31 @@ def _env_fields(settings_cls: type[BaseSettings]) -> frozenset[str]:
     )
 
 
-def config_provenance(provider: str, /, **overrides: Any) -> dict[str, ConfigSource]:
+def config_provenance(
+    provider: str,
+    /,
+    *,
+    profile: str | None = None,
+    environment: str | None = None,
+    **overrides: Any,
+) -> dict[str, ConfigSource]:
     """Report which source supplies each effective field of ``provider``.
 
-    Replays the same precedence ``get_storage`` resolves (overrides beat
-    the environment beats ``.env`` beats project TOML beats the user file
-    beats defaults), so diagnostics can explain a value's origin. An
-    unknown provider yields an empty map.
+    Replays the same precedence ``get_storage`` resolves (overrides beat a
+    selected profile and its stage, which beat the environment, ``.env``,
+    project TOML, the user file, and defaults), so diagnostics can explain
+    a value's origin. An unknown provider yields an empty map.
 
     Args:
         provider: The provider whose configuration to trace.
+        profile: A selected profile, whose values sit above the environment.
+        environment: The stage overlay applied to that profile.
         overrides: The explicit keyword overrides passed to ``get_storage``.
 
     Raises:
-        ConfigurationError: If a discovered file is malformed or invalid
-            (the same failure ``get_storage`` would raise).
+        ConfigurationError: If a discovered file is malformed or invalid, or
+            the named profile does not exist (the same failures
+            ``get_storage`` would raise).
     """
     settings_cls = PROVIDER_MODELS.get(provider)
     if settings_cls is None:
@@ -914,12 +930,18 @@ def config_provenance(provider: str, /, **overrides: Any) -> dict[str, ConfigSou
     project = find_project_config()
     user = find_user_config()
     empty: frozenset[str] = frozenset()
+    profile_fields = (
+        frozenset(resolve_profile(profile, environment).values)
+        if profile is not None
+        else empty
+    )
     project_fields = (
         frozenset(_section_values(project, settings_cls)) if project else empty
     )
     user_fields = frozenset(_section_values(user, settings_cls)) if user else empty
     layers: list[tuple[ConfigSource, frozenset[str]]] = [
         ('override', frozenset(overrides)),
+        ('profile', profile_fields),
         ('env', _env_fields(settings_cls)),
         ('dotenv', _dotenv_fields(settings_cls)),
         ('project', project_fields),
@@ -937,6 +959,219 @@ def config_provenance(provider: str, /, **overrides: Any) -> dict[str, ConfigSou
 
 
 # --- installation remedy (context-aware, D7); shared by the CLI guards ---
+
+
+# --- writing: scope resolution and atomic, validated edits (ADR 0031 D10) ---
+
+
+type Scope = Literal['user', 'project']
+"""Where a write lands: the XDG user file, or the project's own."""
+
+
+def user_config_path() -> Path:
+    """This platform's user config file, whether or not it exists yet.
+
+    ``XDG_CONFIG_HOME`` wins everywhere when it is set, because a user who
+    exports it means it. Otherwise Windows uses ``%APPDATA%``, where a
+    Windows user expects per-user application data, and every other platform
+    uses ``~/.config``. Anchoring a Windows install under ``~/.config``
+    would work and look foreign, a poor trade for a tool that now installs
+    itself with PowerShell too.
+    """
+    configured = os.environ.get('XDG_CONFIG_HOME')
+    if configured:
+        base = Path(configured)
+    elif sys.platform == 'win32':
+        appdata = os.environ.get('APPDATA')
+        base = Path(appdata) if appdata else Path.home() / 'AppData' / 'Roaming'
+    else:
+        base = Path.home() / '.config'
+    return base / 'storix' / 'config.toml'
+
+
+def project_config_path() -> tuple[Path, bool]:
+    """Where a project write lands, and whether that file exists yet.
+
+    The nearest ``storix.toml`` walking upward, else a ``pyproject.toml``
+    that already carries ``[tool.storix]``, else ``./storix.toml`` in the
+    current directory - which is reported as not existing so the caller can
+    say it is creating one.
+    """
+    discovered = find_project_config()
+    if discovered is not None:
+        return discovered.path, True
+    return Path.cwd() / 'storix.toml', False
+
+
+def scope_path(scope: Scope) -> tuple[Path, bool]:
+    """The file a write to ``scope`` targets, and whether it exists."""
+    if scope == 'user':
+        path = user_config_path()
+        return path, path.is_file()
+    return project_config_path()
+
+
+def split_key(key: str) -> tuple[str, ...]:
+    """Split a dotted config key into its path.
+
+    Raises:
+        ConfigurationError: If the key is empty or has an empty segment.
+    """
+    parts = tuple(key.split('.'))
+    if not key or any(not part for part in parts):
+        msg = f'{key!r} is not a config key; write section.field, e.g. s3.bucket'
+        raise ConfigurationError(msg)
+    return parts
+
+
+def _document_root(path: Path) -> tuple[Any, tuple[str, ...]]:
+    """Parse ``path`` for editing, plus the prefix a key sits under.
+
+    ``pyproject.toml`` keeps storix config under ``[tool.storix]``; a
+    standalone file has no prefix.
+    """
+    import tomlkit
+
+    text = path.read_text(encoding='utf-8') if path.is_file() else ''
+    document = tomlkit.parse(text)
+    prefix = ('tool', 'storix') if path.name == 'pyproject.toml' else ()
+    return document, prefix
+
+
+def _validate_written(path: Path, document: Any) -> None:
+    """Reject an edit that would leave the file invalid, before writing it.
+
+    Raises:
+        ConfigurationError: If the resulting document fails the same checks
+            a discovered file gets.
+    """
+    import tomllib
+
+    data = tomllib.loads(document.as_string())
+    if path.name == 'pyproject.toml':
+        data = _table(data, 'tool', 'storix') or {}
+    _validate_document(path, data)
+    scope: Scope = 'user' if path == user_config_path() else 'project'
+    disc = DiscoveredConfig(path, data, scope)
+    for model in PROVIDER_MODELS.values():
+        _section_values(disc, model)
+
+
+def _write_atomically(path: Path, text: str, scope: Scope) -> None:
+    """Replace ``path`` in one step, keeping its mode (user files are 600)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if path.is_file() else None
+    with tempfile.NamedTemporaryFile(
+        'w', encoding='utf-8', dir=path.parent, delete=False
+    ) as handle:
+        handle.write(text)
+        temporary = Path(handle.name)
+    temporary.chmod(mode if mode is not None else (0o600 if scope == 'user' else 0o644))
+    temporary.replace(path)
+
+
+def set_setting(key: str, value: str, scope: Scope = 'project') -> Path:
+    """Set one config key, validated, atomically, comments preserved.
+
+    Args:
+        key: Dotted key, e.g. ``s3.bucket`` or ``cli.icons``.
+        value: The value as typed; parsed type-aware by TOML rules.
+        scope: Which file to write.
+
+    Returns:
+        The file that was written.
+
+    Raises:
+        ConfigurationError: If the key is malformed, names a secret in a
+            project file, or would leave the file invalid.
+    """
+    import tomlkit
+
+    parts = split_key(key)
+    path, _ = scope_path(scope)
+    _refuse_secret_write(path, parts, scope)
+    document, prefix = _document_root(path)
+
+    node: Any = document
+    for part in (*prefix, *parts[:-1]):
+        if part not in node:
+            node[part] = tomlkit.table()
+        node = node[part]
+    node[parts[-1]] = _parse_value(value)
+
+    _validate_written(path, document)
+    _write_atomically(path, tomlkit.dumps(document), scope)
+    return path
+
+
+def unset_setting(key: str, scope: Scope = 'project') -> Path:
+    """Remove one config key from ``scope``'s file.
+
+    Returns:
+        The file that was written.
+
+    Raises:
+        ConfigurationError: If the key is malformed or not present.
+    """
+    import tomlkit
+
+    parts = split_key(key)
+    path, exists = scope_path(scope)
+    if not exists:
+        msg = f'{path}: no config file to remove {key!r} from'
+        raise ConfigurationError(msg)
+    document, prefix = _document_root(path)
+
+    node: Any = document
+    for part in (*prefix, *parts[:-1]):
+        if part not in node:
+            msg = f'{path}: {key!r} is not set'
+            raise ConfigurationError(msg)
+        node = node[part]
+    if parts[-1] not in node:
+        msg = f'{path}: {key!r} is not set'
+        raise ConfigurationError(msg)
+    del node[parts[-1]]
+
+    _validate_written(path, document)
+    _write_atomically(path, tomlkit.dumps(document), scope)
+    return path
+
+
+def _parse_value(value: str) -> Any:
+    """Parse a command-line value the way TOML would read it.
+
+    A bare word stays a string, so ``sx config set s3.bucket media`` does
+    not need quoting, while ``true``, ``8``, and ``"8MiB"`` mean what they
+    say.
+    """
+    import tomllib
+
+    try:
+        return tomllib.loads(f'value = {value}')['value']
+    except tomllib.TOMLDecodeError:
+        return value
+
+
+def _refuse_secret_write(path: Path, parts: tuple[str, ...], scope: Scope) -> None:
+    """Apply the secret policy to a write.
+
+    Raises:
+        ConfigurationError: On a literal secret written to a project file.
+    """
+    section_and_field = 2
+    if len(parts) < section_and_field:
+        return
+    model = PROVIDER_MODELS.get(parts[0])
+    if model is None or not is_secret(model, parts[-1]):
+        return
+    if scope == 'project':
+        msg = (
+            f'{path}: {".".join(parts)} is a secret and project files are '
+            f'committed; set STORIX_{parts[0].upper()}_{parts[-1].upper()}, or '
+            f'write env:VAR here, or use --scope user'
+        )
+        raise ConfigurationError(msg)
 
 
 def _is_uv_tool() -> bool:

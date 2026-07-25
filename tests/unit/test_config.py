@@ -5,6 +5,8 @@ config.py is a hand-written top-level module (not a codegen twin), so its
 tests live here as a loose unit file, mirroring test_errors.py.
 """
 
+import sys
+
 from collections.abc import Generator
 from pathlib import Path
 
@@ -27,6 +29,7 @@ from storix.config import (
     is_secret,
     resolve_profile,
     secret_fields,
+    user_config_path,
 )
 from storix.errors import ConfigurationError
 
@@ -513,3 +516,35 @@ def test_the_example_config_shows_every_provider_and_setting():
 
     top_level = set(StorixSettings.model_fields) | {'profile'}
     assert top_level <= set(document), sorted(top_level - set(document))
+
+
+# --- the user config lives where each platform expects it ---
+
+
+def test_the_user_config_follows_xdg_when_it_is_set(monkeypatch, tmp_path):
+    """Given XDG_CONFIG_HOME, when resolved, then it wins on any platform."""
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+
+    assert user_config_path() == tmp_path / 'storix' / 'config.toml'
+
+
+def test_the_user_config_uses_appdata_on_windows(monkeypatch, tmp_path):
+    """Given Windows, when resolved, then it is %APPDATA%, not ~/.config.
+
+    A Windows user expects per-user application data under APPDATA; storix
+    installs itself with PowerShell there, so it should not scatter a unix
+    convention across their home directory.
+    """
+    monkeypatch.delenv('XDG_CONFIG_HOME', raising=False)
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setenv('APPDATA', str(tmp_path / 'Roaming'))
+
+    assert user_config_path() == tmp_path / 'Roaming' / 'storix' / 'config.toml'
+
+
+def test_the_user_config_uses_dot_config_elsewhere(monkeypatch):
+    """Given a unix platform, when resolved, then it is ~/.config."""
+    monkeypatch.delenv('XDG_CONFIG_HOME', raising=False)
+    monkeypatch.setattr(sys, 'platform', 'linux')
+
+    assert user_config_path().parts[-3:] == ('.config', 'storix', 'config.toml')

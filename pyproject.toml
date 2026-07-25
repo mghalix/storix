@@ -77,6 +77,8 @@ gcs = [
     "opendal>=0.47.0",
 ]
 cli = [
+    # round-trip TOML editing for `sx config set/unset` (comments preserved)
+    "tomlkit>=0.13",
     "click>=8.2.0",
     "prompt-toolkit>=3.0.0",
     "rich>=13.0.0",
