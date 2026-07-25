@@ -58,22 +58,31 @@ Raising a size means fewer, larger requests and more memory per in-flight
 transfer. Lowering it means the opposite. There is no universally right
 answer, which is why they are settings.
 
+Sizes take a byte count or a human-readable spelling, so you can write what
+you mean:
+
 ```bash
 # a workstation pulling one large file at a time: prefer round trips saved
-STORIX_AZURE_READ_PREFETCH_SIZE=33554432
+STORIX_AZURE_READ_PREFETCH_SIZE=32MiB
 
 # a small container running many concurrent transfers: prefer the headroom
-STORIX_AZURE_READ_PREFETCH_SIZE=4194304
+STORIX_AZURE_READ_PREFETCH_SIZE=4MiB
 
 # the same knobs, any provider
-STORIX_S3_READ_CHUNK_SIZE=8388608
-STORIX_LOCAL_WRITE_CHUNK_SIZE=4194304
+STORIX_S3_READ_CHUNK_SIZE=8MiB
+STORIX_LOCAL_WRITE_CHUNK_SIZE=4194304        # a plain count still works
 ```
+
+`MiB` and `MB` are **not** synonyms here: `8MiB` is 8388608 bytes and `8MB` is
+8000000, as the units say. `KiB`/`MiB`/`GiB`/`TiB` are powers of two,
+`KB`/`MB`/`GB`/`TB` powers of ten, case does not matter, and a space is
+allowed (`8 MiB`). An unreadable size is rejected at startup naming the unit
+it could not interpret, rather than silently falling back to a default.
 
 ```python
 from storix import get_storage
 
-fs = get_storage("azure", read_prefetch_size=32 * 1024 * 1024)
+fs = get_storage("azure", read_prefetch_size="32MiB")
 fs = get_storage("s3", bucket="media", read_chunk_size=8 * 1024 * 1024)
 ```
 
