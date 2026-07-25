@@ -163,3 +163,72 @@ def test_validate_reports_the_offending_file(sandbox):
 
     assert result.exit_code == 1
     assert 'storix.toml' in unwrapped(result.stderr)
+
+
+# --- self-documenting: the value in force, and a global-config shorthand ---
+
+
+def test_get_effective_reports_a_default_rather_than_not_set(sandbox):
+    """Given nothing configured, when asked for the effective value, then it says.
+
+    `sx config get key` answering "not set in any config file" is true but
+    unhelpful: the question behind it is what storix will actually do.
+    """
+    result = run('config', 'get', '--effective', 'azure.read_prefetch_size')
+
+    assert result.exit_code == 0
+    assert '8388608' in unwrapped(result.stdout)
+    assert 'default' in unwrapped(result.stdout)
+
+
+def test_get_effective_names_the_file_that_supplies_a_value(sandbox):
+    """Given a configured value, when asked, then the source is reported."""
+    (sandbox / 'storix.toml').write_text(
+        '[azure]\nread_prefetch_size = "32MiB"\n', encoding='utf-8'
+    )
+
+    result = run('config', 'get', '--effective', 'azure.read_prefetch_size')
+
+    assert '33554432' in unwrapped(result.stdout)
+    assert 'project' in unwrapped(result.stdout)
+
+
+def test_get_effective_covers_cli_preferences_and_top_level_settings(sandbox):
+    """Given either kind of setting, when asked, then both resolve."""
+    assert run('config', 'get', '--effective', 'cli.icons').exit_code == 0
+    assert run('config', 'get', '--effective', 'max_transfer_ranges').exit_code == 0
+
+
+def test_get_effective_redacts_a_secret_that_is_set(sandbox, monkeypatch):
+    """Given a secret in force, when asked, then its value is not printed."""
+    monkeypatch.setenv('STORIX_AZURE_CREDENTIAL', 'top-secret')
+
+    result = run('config', 'get', '--effective', 'azure.credential')
+
+    assert 'top-secret' not in unwrapped(result.stdout)
+    assert '***' in result.stdout
+
+
+def test_get_effective_rejects_a_key_that_is_not_a_setting(sandbox):
+    """Given a typo, when asked, then it says so rather than inventing a value."""
+    result = run('config', 'get', '--effective', 'azure.nope')
+
+    assert result.exit_code == 1
+    assert 'not a storix setting' in unwrapped(result.stderr)
+
+
+def test_get_points_at_effective_when_a_key_is_unset(sandbox):
+    """Given an unset key, when read from files, then the next step is named."""
+    result = run('config', 'get', 'azure.read_prefetch_size')
+
+    assert result.exit_code == 1
+    assert '--effective' in unwrapped(result.stderr)
+
+
+def test_user_is_shorthand_for_scope_user(sandbox, tmp_path):
+    """Given --user, when setting, then the global config is what changes."""
+    result = run('config', 'set', 's3.bucket', 'media', '--user')
+
+    assert result.exit_code == 0
+    assert (tmp_path / 'xdg' / 'storix' / 'config.toml').is_file()
+    assert not (sandbox / 'storix.toml').exists()

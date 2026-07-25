@@ -35,6 +35,9 @@ from storix.errors import ConfigurationError
 from .render import console, err
 
 
+_MISSING = object()
+"""Sentinel for "this model has no such field", distinct from a None value."""
+
 REDACTED = '***'
 """What a secret's value is shown as, in every read command."""
 
@@ -47,6 +50,24 @@ config_app = typer.Typer(
 _SCOPE = Annotated[
     str, typer.Option('--scope', help='user | project (default: project)')
 ]
+_USER = Annotated[
+    bool,
+    typer.Option('--user', help='shorthand for --scope user (your global config)'),
+]
+
+
+def _target(scope: str, user: bool) -> Scope:  # noqa: FBT001 - a typer flag
+    """The scope a write targets, from ``--scope`` and the ``--user`` shorthand.
+
+    Raises:
+        SystemExit: If both are given and disagree.
+    """
+    if user and scope not in {'project', 'user'}:
+        message = f"sx: --scope must be 'user' or 'project', not {scope!r}"
+        raise SystemExit(message)
+    if user and scope == 'project':
+        return 'user'
+    return _scope(scope)
 
 
 def _scope(value: str) -> Scope:
@@ -197,27 +218,94 @@ def config_show(
 
 
 @config_app.command('get')
-def config_get(key: Annotated[str, typer.Argument(help='e.g. s3.bucket')]) -> None:
-    """Print one value, from the strongest file that sets it."""
+def config_get(
+    key: Annotated[str, typer.Argument(help='e.g. s3.bucket, cli.icons')],
+    *,
+    effective: Annotated[
+        bool,
+        typer.Option(
+            '--effective',
+            help='the value storix would use, including defaults, and its source',
+        ),
+    ] = False,
+) -> None:
+    """Print one value: as written in a file, or as storix would resolve it."""
     try:
-        parts = split_key(key)
+        if effective:
+            _print_effective(key)
+            return
         for disc in (find_project_config(), find_user_config()):
             if disc is None:
                 continue
             node: Any = _redacted(disc.data)
-            for part in parts:
+            for part in split_key(key):
                 if not isinstance(node, dict) or part not in node:
                     node = None
                     break
-                node = node[part]  # pyright: ignore[reportUnknownVariableType]
+                node = cast('dict[str, Any]', node)[part]
             if node is not None:
                 console.print(f'{node!r} [dim]({disc.path})[/dim]')
                 return
     except ConfigurationError as exc:
         _die(exc)
         return
-    err.print(f'[yellow]sx: {key} is not set in any config file[/yellow]')
+    err.print(
+        f'[yellow]sx: {key} is not set in any config file; '
+        f'try `sx config get --effective {key}` for the value in force[/yellow]'
+    )
     raise typer.Exit(1)
+
+
+def _print_effective(key: str) -> None:
+    """Print the value storix would use for ``key``, and where it comes from.
+
+    Reads through the same models a session is built from, so a default is
+    reported as a default rather than as "not set" - the question a user
+    actually has is "what will storix do", not "what did I write down".
+
+    Raises:
+        ConfigurationError: If the key names no known section or field.
+    """
+    from storix.config import StorixSettings, config_provenance
+
+    from .config import load_prefs
+
+    parts = list(split_key(key))
+    section = parts[0] if len(parts) > 1 else ''
+    field = parts[-1]
+
+    if section == 'cli':
+        value = getattr(load_prefs(), field, _MISSING)
+        _report_effective(key, value, 'cli preferences')
+        return
+    if section == '':
+        value = getattr(StorixSettings(), field, _MISSING)
+        _report_effective(key, value, config_provenance('local').get(field, 'default'))
+        return
+
+    model = PROVIDER_MODELS.get(section)
+    if model is None:
+        known = ', '.join([*sorted(PROVIDER_MODELS), 'cli'])
+        msg = f'{section!r} is not a config section; known: {known}'
+        raise ConfigurationError(msg)
+    value = getattr(model(), field, _MISSING)
+    if value is not _MISSING and value is not None and is_secret(model, field):
+        value = REDACTED
+    _report_effective(key, value, config_provenance(section).get(field, 'default'))
+
+
+def _report_effective(key: str, value: object, source: object) -> None:
+    """Print one resolved value with its source, or say the key is unknown.
+
+    Raises:
+        typer.Exit: With status 1 when the field does not exist.
+    """
+    if value is _MISSING:
+        err.print(f'[yellow]sx: {key} is not a storix setting[/yellow]')
+        raise typer.Exit(1)
+    readable = getattr(value, 'human_readable', None)
+    shown = f'{value!r} ({readable()})' if callable(readable) else repr(value)
+    console.print(f'{shown} [dim]<- {source}[/dim]')
 
 
 @config_app.command('set')
@@ -226,10 +314,11 @@ def config_set(
     value: Annotated[str, typer.Argument()],
     *,
     scope: _SCOPE = 'project',
+    user: _USER = False,
 ) -> None:
     """Set one value, validated, keeping the file's comments."""
     try:
-        written = set_setting(key, value, _scope(scope))
+        written = set_setting(key, value, _target(scope, user))
     except ConfigurationError as exc:
         _die(exc)
         return
@@ -241,10 +330,11 @@ def config_unset(
     key: Annotated[str, typer.Argument(help='e.g. s3.bucket')],
     *,
     scope: _SCOPE = 'project',
+    user: _USER = False,
 ) -> None:
     """Remove one value, keeping the rest of the file as it was."""
     try:
-        written = unset_setting(key, _scope(scope))
+        written = unset_setting(key, _target(scope, user))
     except ConfigurationError as exc:
         _die(exc)
         return
@@ -255,18 +345,20 @@ def config_unset(
 def config_init(
     *,
     scope: _SCOPE = 'project',
+    user: _USER = False,
     force: Annotated[
         bool, typer.Option('--force', help='overwrite an existing file')
     ] = False,
 ) -> None:
     """Write a commented starter config, without overwriting one."""
-    path, exists = scope_path(_scope(scope))
+    target = _target(scope, user)
+    path, exists = scope_path(target)
     if exists and not force:
         err.print(f'[yellow]sx: {path} exists; pass --force to overwrite[/yellow]')
         raise typer.Exit(1)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(_SKELETON, encoding='utf-8')
-    if _scope(scope) == 'user':
+    if target == 'user':
         path.chmod(0o600)
     console.print(f'[green]wrote[/green] {path}')
 
@@ -295,9 +387,9 @@ def config_validate() -> None:
 
 
 @config_app.command('edit')
-def config_edit(*, scope: _SCOPE = 'project') -> None:
+def config_edit(*, scope: _SCOPE = 'project', user: _USER = False) -> None:
     """Open the config file in $VISUAL, else $EDITOR."""
-    path, exists = scope_path(_scope(scope))
+    path, exists = scope_path(_target(scope, user))
     editor = os.environ.get('VISUAL') or os.environ.get('EDITOR')
     if editor is None:
         err.print('[red]sx: set $VISUAL or $EDITOR to use sx config edit[/red]')

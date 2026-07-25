@@ -390,10 +390,13 @@ sx config sources           # what was found, and the precedence order
 sx config show              # everything as storix reads it, secrets redacted
 sx config show --effective  # plus where each effective value comes from
 sx config get s3.bucket     # one value, and the file that supplies it
+sx config get --effective azure.read_prefetch_size
+                            # the value actually in force, and where it came
+                            # from - defaults included
 sx config profiles          # profiles, their stages, and the default (marked *)
 
 sx config set s3.bucket media           # writes the project file
-sx config set azure.credential X --scope user
+sx config set azure.credential X --user   # --user == --scope user
 sx config unset s3.region
 sx config init              # a commented starter file; --force to overwrite
 sx config validate          # load every file the way storix does
@@ -407,7 +410,22 @@ an invalid edit is refused before the file changes; and they land atomically
 
 Project scope writes the nearest existing `storix.toml`, else a
 `pyproject.toml` already carrying `[tool.storix]`, else it creates
-`./storix.toml`. The target is always printed.
+`./storix.toml`. The target is always printed. `--user` is shorthand for
+`--scope user` on every write, including `sx config edit --user` to open
+your global config.
+
+`get` without `--effective` answers "what does a file say", and says so when
+no file says anything. `get --effective` answers "what will storix do",
+which is usually the real question:
+
+```console
+$ sx config get azure.read_prefetch_size
+sx: azure.read_prefetch_size is not set in any config file; try
+`sx config get --effective azure.read_prefetch_size` for the value in force
+
+$ sx config get --effective azure.read_prefetch_size
+8388608 (8.0MiB) <- default
+```
 
 Secrets are redacted in every read command, including inside profiles.
 Setting one in project scope is refused, naming the environment variable and
