@@ -194,7 +194,9 @@ profile = "media"
 
 [profiles.media]
 provider = "azure"
-...
+account_name = "mediaaccount"
+container = "media"
+credential = "env:MEDIA_AZURE_CREDENTIAL"
 ```
 
 ```toml
@@ -364,14 +366,21 @@ not retype flags. Three canonical files are read; for any value, the strongest
 source wins:
 
 1. command-line flags and `--set`
-2. `STORIX_*` (provider settings) / `STORIX_CLI_*` (preferences) environment
+2. the selected profile's stage overlay (`--env`)
+3. the selected profile (`--profile`)
+4. `STORIX_*` (provider settings) / `STORIX_CLI_*` (preferences) environment
    variables
-3. a project `.env` (provider settings)
-4. the nearest project config, searching upward from the current directory:
+5. a project `.env` (provider settings)
+6. the nearest project config, searching upward from the current directory:
    `storix.toml` > `.storix.toml` (a compatibility alias) > `pyproject.toml`
    (`[tool.storix]`)
-5. your personal defaults: `~/.config/storix/config.toml`
-6. built-in defaults
+7. your personal defaults: `~/.config/storix/config.toml`
+8. built-in defaults
+
+A profile sits above the environment on purpose: selecting one is an
+explicit act, and a stale exported variable must not quietly redirect it.
+The same chain applies to the library, with `get_storage()` keywords in
+place of flags; see [Configure from settings](../recipes/settings.md).
 
 The three canonical files:
 
@@ -394,6 +403,8 @@ pyproject.toml -> [tool.storix]   # project scope, namespaced
     account_name = "myaccount"
     container = "media"
     credential = "env:AZURE_CREDENTIAL"   # secrets via env: refs, not literals
+                                          # (resolved from the environment,
+                                          #  then the project .env)
 
     [alias]
     lt = "tree"

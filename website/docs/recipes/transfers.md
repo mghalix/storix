@@ -89,17 +89,23 @@ fs = get_storage("s3", bucket="media", read_chunk_size=8 * 1024 * 1024)
 `sx` reads exactly the same environment, so a variable exported for your
 application tunes the CLI too.
 
-!!! note "Environment and keywords, not a config file (yet)"
+Every one of these can also live in a config file, so a project or a
+machine can carry its own transfer tuning without exporting anything:
 
-    Transfer sizes and `STORIX_MAX_TRANSFER_RANGES` are environment
-    settings, `get_storage()` keywords, or backend constructor arguments.
-    They are **not** read from `storix.toml`, `pyproject.toml`, or the XDG
-    user config: those files carry CLI preferences (`icons`, `provider`,
-    `layers`, `alias`) and nothing else today. A transfer key placed in
-    `[cli]` is rejected by name; one placed at the top level of a
-    `storix.toml` is currently ignored. Giving connection and transfer
-    config a home in those files is designed in ADR 0031 and not
-    implemented yet.
+```toml
+# storix.toml
+max_transfer_ranges = 4
+
+[azure]
+read_prefetch_size = "8MiB"
+
+[local]
+read_chunk_size = "1MiB"
+```
+
+Precedence runs flags and `--set`, then the process environment, then
+`.env`, then the nearest project file, then the XDG user file, then the
+built-in defaults. See [Configure from settings](settings.md).
 
 ## Requests cost money, not just time
 
