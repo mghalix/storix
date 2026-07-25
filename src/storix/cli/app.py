@@ -39,7 +39,7 @@ from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
 from storix.errors import StorageError, TransferStoppedError
 
-from . import config_cmds
+from . import config_cmds, maintenance
 from .config import load_prefs
 from .render import (
     console,
@@ -96,6 +96,8 @@ app = typer.Typer(
 
 
 app.add_typer(config_cmds.config_app)
+app.command('update')(maintenance.update)
+app.command('doctor')(maintenance.doctor)
 
 
 def _die(cmd: str, exc: Exception) -> NoReturn:
@@ -1083,6 +1085,8 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
     if icons is not None:
         set_icons(icons)
     selected_profile, selected_environment = resolve_selection(profile, environment)
+    _session.profile = selected_profile
+    _session.environment = selected_environment
     overrides = build_overrides(
         resolve_provider(provider_, selected_profile),
         flags={

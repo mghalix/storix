@@ -1186,6 +1186,33 @@ def _is_uv_tool() -> bool:
     ).is_file()
 
 
+def installation_kind() -> str:
+    """How this storix was installed, as a word fit for a message.
+
+    ``uv-tool`` is the only kind ``sx update`` will drive; the others are
+    reported so the user gets the right manual command instead of a
+    surprise write into someone else's environment.
+    """
+    if _is_uv_tool():
+        return 'uv-tool'
+    if (Path(sys.prefix) / 'pyvenv.cfg').is_file():
+        return 'virtualenv'
+    return 'system'
+
+
+def upgrade_command() -> list[str] | None:
+    """The exact command that upgrades this installation, if one is known.
+
+    A uv tool install is upgraded through uv, whose receipt already holds
+    the extras that were requested, so storix keeps no installation state
+    of its own. Anything else gets the pip form, which the caller prints
+    rather than runs.
+    """
+    if _is_uv_tool():
+        return ['uv', 'tool', 'upgrade', 'storix']
+    return [sys.executable, '-m', 'pip', 'install', '--upgrade', 'storix']
+
+
 def install_hint(extra: str) -> str:
     """The install command to add a missing optional ``extra``.
 

@@ -54,6 +54,11 @@ class _Session:
     icons: bool | None = None
     """Whether listings decorate entries with icons; None = unresolved
     (falls back to the persistent preferences on first use)."""
+    profile: str | None = None
+    """The profile this invocation selected, so ``sx doctor`` reports what is
+    actually in force rather than recomputing part of the selection."""
+    environment: str | None = None
+    """The stage overlay this invocation selected, if any."""
     debug: bool = False
     """Whether failures print the full exception chain (``--debug``);
     reset per invocation by the app callback."""
