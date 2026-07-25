@@ -33,6 +33,9 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path]:
     project.mkdir()
     monkeypatch.chdir(project)
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+    # sx keeps one session per process so cwd survives across shell commands;
+    # each test needs its own, or the first one to build wins the file
+    cli._session.fs = None
     for var in [name for name in os.environ if name.startswith('STORIX_')]:
         monkeypatch.delenv(var, raising=False)
     yield project
@@ -232,3 +235,57 @@ def test_user_is_shorthand_for_scope_user(sandbox, tmp_path):
     assert result.exit_code == 0
     assert (tmp_path / 'xdg' / 'storix' / 'config.toml').is_file()
     assert not (sandbox / 'storix.toml').exists()
+
+
+# --- the local default is the invocation cwd (ADR 0031 D14) ---
+
+
+def test_zero_config_local_session_anchors_at_the_cwd(sandbox):
+    """Given nothing configured, when sx lists /, then it lists where I stand."""
+    (sandbox / 'here.txt').write_text('x', encoding='utf-8')
+
+    result = run('ls', '/')
+
+    assert result.exit_code == 0
+    assert 'here.txt' in unwrapped(result.stdout)
+
+
+def test_a_configured_base_still_wins(sandbox):
+    """Given a base in a config file, when sx runs, then the file decides."""
+    (sandbox / 'elsewhere').mkdir()
+    (sandbox / 'elsewhere' / 'inside.txt').write_text('x', encoding='utf-8')
+    (sandbox / 'outside.txt').write_text('x', encoding='utf-8')
+    (sandbox / 'storix.toml').write_text(
+        '[local]\nbase = "elsewhere"\n', encoding='utf-8'
+    )
+
+    result = run('ls', '/')
+
+    assert 'inside.txt' in unwrapped(result.stdout)
+    assert 'outside.txt' not in unwrapped(result.stdout)
+
+
+def test_a_profile_base_still_wins(sandbox):
+    """Given a profile with a base, when selected, then the profile decides."""
+    (sandbox / 'elsewhere').mkdir()
+    (sandbox / 'elsewhere' / 'inside.txt').write_text('x', encoding='utf-8')
+    (sandbox / 'outside.txt').write_text('x', encoding='utf-8')
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\nbase = "elsewhere"\n', encoding='utf-8'
+    )
+
+    result = run('--profile', 'media', 'ls', '/')
+
+    assert 'inside.txt' in unwrapped(result.stdout)
+    assert 'outside.txt' not in unwrapped(result.stdout)
+
+
+def test_the_library_default_is_unchanged(sandbox):
+    """Given the library, when it builds a session, then it is not the cwd.
+
+    ADR 0009 stands: library code writing to an application's cwd is a
+    hazard. Only the CLI, where a human is at a prompt, changes.
+    """
+    from storix import get_storage
+
+    assert get_storage().backend.base != sandbox

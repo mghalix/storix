@@ -24,7 +24,7 @@ Run it one-shot, or with no command to enter the interactive shell:
 
 ```bash
 sx --version       # print the installed version and exit
-sx                 # interactive shell (defaults to ~/.storix)
+sx                 # interactive shell, anchored where you ran it
 sx ls /            # or run a single command
 sx -p azure ls /   # point it at a configured provider
 ```
@@ -44,6 +44,17 @@ sx config show --effective   # what this session will do, and where each value c
 sx config sources            # which files are read, in which order they win
 sx doctor                    # installation, config, and what it can reach
 ```
+
+!!! info "`sx` with no configuration lists where you stand"
+
+    With nothing configured - no flag, no profile, no environment variable,
+    no config file - a `local` session anchors at the directory you ran `sx`
+    from, the way `ls` does. Any configured base still wins.
+
+    The **library** default is unchanged: `get_storage()` with zero config
+    is still `~/.storix`. Library code writing to an application's working
+    directory is a hazard; a human at a prompt is the one case where the cwd
+    is the honest default.
 
 ## Unix commands, any backend
 

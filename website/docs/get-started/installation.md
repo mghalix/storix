@@ -154,7 +154,7 @@ Inside a project you can instead add it as a dependency:
 
 ```bash
 sx --version       # print the installed version
-sx                 # start the interactive shell (defaults to ~/.storix)
+sx                 # start the interactive shell, anchored where you ran it
 sx ls /            # or run a single command
 sx -p azure ls /   # point it at a configured provider
 ```
