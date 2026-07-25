@@ -341,16 +341,28 @@ Rules:
   one file).
 - Names match `[A-Za-z0-9][A-Za-z0-9._-]*`. An unknown profile errors
   listing the available names and their source files.
-- Selection: `sx --profile NAME`, or `STORIX_PROFILE` (honored by
-  `sx` only), or a top-level `profile = "NAME"` key in a config file
-  (the project-pins-its-profile case). Flag beats env beats file.
-- A selected profile supplies the provider; `-p` combined with a
-  profile of a different provider is an error, not an override.
-- The library accepts explicit `get_storage(profile=..., environment=...)`
-  keyword selection through the same loader. `STORIX_PROFILE` and
-  `STORIX_ENVIRONMENT` are deliberately CLI-only: an operator's shell
-  habit must not silently redirect a service's library sessions (the
-  ADR 0022 provider argument, same direction).
+- Selection: `sx --profile NAME`, or `STORIX_PROFILE`, or a top-level
+  `profile = "NAME"` key in a config file. Flag beats env beats file.
+  All three are `sx` only.
+- A selected profile supplies the provider. `--profile` and a `-p`
+  naming a different one is an error: the user said two things. A
+  profile that is only *pinned* is a default, so `-p` steps off it
+  rather than being refused; a pin that could veto `-p` would make one
+  line in a personal file a lock on the whole CLI.
+- The library selects a profile only when the call asks:
+  `get_storage(profile=..., environment=...)`, through the same loader.
+  Neither `STORIX_PROFILE` nor a pinned `profile` key reaches it. An
+  operator's shell habit must not redirect a service's sessions (the
+  ADR 0022 provider argument, same direction), and a pin that did would
+  break `get_storage('s3')` beside `get_storage('azure')` - the shape
+  every migration and every composite filesystem takes - on whichever
+  machine happened to carry one. The convenience belongs where the
+  human is.
+- A profile layers over that provider's own table, so settings shared
+  by every profile on a backend are written once under `[s3]` and each
+  profile carries only what distinguishes it. This is why unrelated
+  buckets are separate profiles rather than stages of one: a stage
+  names a deployment, and `default_environment = "media"` would not.
 - No profile inheritance (deferred until a real need appears; no
   inheritance means no cycle detection).
 - Profile fields beyond provider config (default CLI layers, default

@@ -421,7 +421,12 @@ def test_a_reference_set_nowhere_names_both_places(sandbox, monkeypatch):
 
 
 def test_a_config_file_can_pin_a_default_profile(sandbox, tmp_path):
-    """Given a pinned profile, when nothing is selected, then it is used."""
+    """Given a pinned profile, when read, then the loader reports it.
+
+    The pin is what ``sx`` selects from. It stops there: a library
+    session is never steered by a file's default, only by an explicit
+    ``profile=``.
+    """
     (sandbox / 'data').mkdir()
     (sandbox / 'storix.toml').write_text(
         'profile = "media"\n\n[profiles.media]\nprovider = "local"\nbase = "data"\n',
@@ -429,7 +434,8 @@ def test_a_config_file_can_pin_a_default_profile(sandbox, tmp_path):
     )
 
     assert configured_profile() == 'media'
-    assert get_storage().backend.base.name == 'data'
+    assert get_storage().backend.base.name != 'data'
+    assert get_storage(profile='media').backend.base.name == 'data'
 
 
 def test_a_profile_refuses_a_setting_from_another_provider(sandbox):
@@ -572,3 +578,112 @@ def test_a_stage_supplied_field_is_reported_apart_from_its_profile(
 
     assert sources['bucket'] == 'environment'
     assert sources['region'] == 'profile'
+
+
+def test_a_pinned_profile_does_not_reach_the_library(tmp_path, monkeypatch):
+    """Given a pinned profile, when get_storage names a provider, then it wins.
+
+    A pin is a person's convenience at a prompt. Letting it steer the
+    library means a personal file can point an application at another
+    account, and that two providers cannot be opened side by side.
+    """
+    from storix import get_storage
+
+    (tmp_path / 'storix.toml').write_text(
+        'profile = "azurish"\n\n[profiles.azurish]\nprovider = "azure"\n'
+        'container = "raw"\naccount_name = "acct"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+    monkeypatch.setenv('STORIX_LOCAL_BASE', str(tmp_path / 'data'))
+
+    fs = get_storage('local')
+
+    assert fs.backend.base == tmp_path / 'data'
+
+
+def test_two_providers_open_side_by_side_under_a_pin(tmp_path, monkeypatch):
+    """Given a pin, when two providers are opened, then neither is redirected.
+
+    The shape every migration takes: read from one store, write to
+    another, in one process.
+    """
+    from storix import get_storage
+
+    (tmp_path / 'storix.toml').write_text(
+        'profile = "azurish"\n\n[profiles.azurish]\nprovider = "azure"\n'
+        'container = "raw"\naccount_name = "acct"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+    monkeypatch.setenv('STORIX_LOCAL_BASE', str(tmp_path / 'data'))
+
+    src = get_storage('memory')
+    dst = get_storage('local')
+
+    assert type(src.backend).__name__ == 'MemoryBackend'
+    assert type(dst.backend).__name__ == 'LocalBackend'
+
+
+def test_the_library_still_selects_a_profile_when_asked(tmp_path, monkeypatch):
+    """Given profile=, when get_storage runs, then the profile applies."""
+    from storix import get_storage
+
+    (tmp_path / 'data').mkdir()
+    (tmp_path / 'storix.toml').write_text(
+        f'[profiles.here]\nprovider = "local"\nbase = "{tmp_path / "data"}"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    fs = get_storage(profile='here')
+
+    assert fs.backend.base == tmp_path / 'data'
+
+
+def test_a_profile_layers_over_the_provider_table(tmp_path, monkeypatch):
+    """Given shared settings in [s3], when a profile is used, then it inherits.
+
+    This is what keeps several buckets on one account from repeating the
+    endpoint and keys, which is the pressure that makes people model
+    unrelated buckets as stages.
+    """
+    from storix.config import config_provenance
+
+    (tmp_path / 'storix.toml').write_text(
+        '[s3]\nregion = "auto"\n\n[profiles.media]\nprovider = "s3"\n'
+        'bucket = "media"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    sources = config_provenance('s3', profile='media')
+
+    assert sources['bucket'] == 'profile'
+    assert sources['region'] == 'project'
+
+
+def test_a_singular_environment_table_names_the_right_spelling(tmp_path, monkeypatch):
+    """Given [environment], when loaded, then the error names [environments].
+
+    The plain unknown-key message sends the reader looking for a provider
+    setting that was never the problem.
+    """
+    from storix.config import find_project_config
+
+    (tmp_path / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "s3"\n\n'
+        '[profiles.media.environment.dev]\nbucket = "media-dev"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        find_project_config()
+
+    assert 'environments' in str(exc_info.value)
+    assert 'profiles.media.environments.dev' in str(exc_info.value)

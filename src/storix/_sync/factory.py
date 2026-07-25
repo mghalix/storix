@@ -20,7 +20,6 @@ from storix.config import (
     LocalConfig,
     S3Config,
     StorixSettings,
-    configured_profile,
     resolve_profile,
 )
 from storix.errors import ConfigurationError
@@ -369,10 +368,17 @@ def get_storage(
     different one is a contradiction and raises. Naming the *same* one is
     allowed and buys typed completion for that provider's override keys,
     which is the only reason to write it. Explicit keywords still win over
-    the profile's values. ``STORIX_PROFILE`` is deliberately not honored
-    here: an operator's shell habit must not redirect a service's
-    sessions, so library selection is always explicit or pinned by a
-    project's config file.
+    the profile's values.
+
+    A profile applies here only when this call asks for one. Neither
+    ``STORIX_PROFILE`` nor a ``profile`` key pinned in a config file
+    reaches the library: both are a person's convenience at a prompt, and
+    letting either steer ``get_storage`` means a personal file can point
+    an application's session at another account, and that
+    ``get_storage('s3')`` beside ``get_storage('azure')`` - the shape
+    every migration and every composite filesystem takes - stops working
+    on whichever machine has a pin. ``sx`` honors both, because there the
+    convenience is the point.
 
     The provider is positional-only: ``get_storage(provider='azure')``
     would otherwise be silently swallowed as a config override, so it is
@@ -381,8 +387,6 @@ def get_storage(
     if 'provider' in overrides:
         msg = "pass the provider positionally: get_storage('azure', ...)"
         raise ConfigurationError(msg)
-    # an explicit selection, else the one a config file pins for the project
-    profile = profile or configured_profile()
     if environment is not None and profile is None:
         msg = 'environment= selects a stage of a profile; name one with profile='
         raise ConfigurationError(msg)

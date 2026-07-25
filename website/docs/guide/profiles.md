@@ -92,12 +92,13 @@ to.
 
 Strongest first:
 
-| what | scope |
-| --- | --- |
-| `--profile` / `get_storage(profile=...)` | one command, one call |
-| `STORIX_PROFILE` | one shell, `sx` only |
-| `profile = "..."` in the project file | everyone working on that project |
-| `profile = "..."` in your user file | you, everywhere |
+| what | applies to | scope |
+| --- | --- | --- |
+| `get_storage(profile=...)` | library | that call |
+| `--profile` | `sx` | that command |
+| `STORIX_PROFILE` | `sx` | that shell |
+| `profile = "..."` in the project file | `sx` | everyone on that project |
+| `profile = "..."` in your user file | `sx` | you, everywhere |
 
 ```toml
 # ~/.config/storix/config.toml - your personal default
@@ -111,15 +112,23 @@ profile = "media"
 
 Typing `--profile` every time is not the intended workflow. Pin one.
 
-`STORIX_PROFILE` and `STORIX_ENVIRONMENT` are read by `sx` and deliberately
-not by the library: an operator's shell habit should not redirect a
-service's sessions. A pinned `profile` key in a config file *is* honored by
-both, because that is a property of the project rather than of the shell. In
-code the selection stays explicit.
+**A profile reaches the library only when a call asks for one.** Neither
+`STORIX_PROFILE` nor a pinned `profile` key steers `get_storage()`. Both are
+a person's convenience at a prompt, and a library that honored them would
+let a personal file point an application's session at another account - and
+would break the shape every migration takes:
 
-A profile names its own provider, so `-p` naming a different one is an error
-rather than a silent override. `--env` without a profile, an unknown
-profile, and an unknown stage each exit naming what is available.
+```python
+src = get_storage("azure", container="raw")
+dst = get_storage("s3", bucket="archive")     # neither is redirected by a pin
+```
+
+`sx` honors all of it, because there the convenience is the point.
+
+A profile names its own provider, so `sx --profile media -p s3` is an error:
+you said two things. A profile that is merely *pinned* is a default, not a
+lock, so `sx -p s3` simply steps off it. `--env` without a profile, an
+unknown profile, and an unknown stage each exit naming what is available.
 
 ## Seeing which one is in force
 
@@ -150,6 +159,34 @@ effective
 
 Neither command opens a connection or resolves a credential, so both still
 answer when the connection is the thing that is broken.
+
+## Sharing settings between profiles
+
+A profile layers on top of that provider's own table, so settings common to
+every profile on a backend are written once:
+
+```toml
+[s3]
+region = "auto"
+endpoint = "https://ACCOUNT.r2.cloudflarestorage.com"
+access_key_id = "env:R2_ACCESS_KEY_ID"
+secret_access_key = "env:R2_SECRET_ACCESS_KEY"
+
+[profiles.media]
+provider = "s3"
+bucket = "media"
+
+[profiles.archive]
+provider = "s3"
+bucket = "archive"
+```
+
+That is the right shape for *different buckets*: they are different
+connections, so they are different profiles. Stages are for one connection
+across deployments - `dev`, `stg`, `prod` - where the name carries meaning
+about which deployment you are touching. Modelling unrelated buckets as
+stages of one profile works mechanically and then reads as a lie:
+`default_environment = "storix"` says a bucket is a deployment stage.
 
 ## What a profile does not do
 

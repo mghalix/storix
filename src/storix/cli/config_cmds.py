@@ -15,6 +15,7 @@ from typing import Annotated, Any, cast
 
 import typer
 
+from rich.markup import escape
 from rich.table import Table
 
 from storix.config import (
@@ -92,7 +93,7 @@ def _die(exc: ConfigurationError) -> None:
     Raises:
         typer.Exit: Always, with status 1.
     """
-    err.print(f'[red]sx: {exc}[/red]')
+    err.print(f'[red]sx: {escape(str(exc))}[/red]')
     raise typer.Exit(1)
 
 

@@ -613,6 +613,17 @@ naming it carries no provider section."""
 _ENVIRONMENTS: Final[str] = 'environments'
 """Sub-table of a profile holding its stage overlays."""
 
+_NEAR_RESERVED: Final[dict[str, str]] = {
+    'environment': _ENVIRONMENTS,
+    'env': _ENVIRONMENTS,
+    'envs': _ENVIRONMENTS,
+    'stage': _ENVIRONMENTS,
+    'stages': _ENVIRONMENTS,
+}
+"""Names a stage table gets written as by mistake, and what it should be.
+Singular ``[environment]`` is the one users reach for, and the plain
+unknown-key message sends them looking for a provider setting instead."""
+
 _RESERVED_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
     {'provider', 'default_environment', _ENVIRONMENTS}
 )
@@ -708,6 +719,16 @@ def _validate_profile_keys(
     for key in table:
         if key in reserved or key in fields:
             continue
+        # the reserved names are the ones a stage table is spelled with, and
+        # near-misses read as a setting the provider does not have, which
+        # sends the reader looking in the wrong place entirely
+        near = _NEAR_RESERVED.get(key)
+        if near is not None and near in reserved:
+            msg = (
+                f'{path}: profile {name!r} has a [{key}] table; stages are '
+                f'spelled [{near}] (as in [profiles.{name}.{near}.dev])'
+            )
+            raise ConfigurationError(msg)
         known = ', '.join(sorted(fields)) if fields else 'none'
         msg = (
             f'{path}: profile {name!r} is a {provider!r} profile and has no '

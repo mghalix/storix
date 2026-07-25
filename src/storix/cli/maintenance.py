@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 
+from rich.markup import escape
+
 from storix.config import (
     PROVIDER_MODELS,
     available_profiles,
@@ -170,7 +172,7 @@ def _report_config() -> None:
         console.print(f'  provider     {provider}')
         _report_fields(provider, profile, environment)
     except ConfigurationError as exc:
-        err.print(f'  [red]{exc}[/red]')
+        err.print(f'  [red]{escape(str(exc))}[/red]')
 
 
 def _report_fields(

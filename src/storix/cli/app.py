@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Annotated, Final, NoReturn
 import typer
 
 from rich.columns import Columns
+from rich.markup import escape
 from rich.progress import (
     BarColumn,
     DownloadColumn,
@@ -140,7 +141,7 @@ def _die(cmd: str, exc: Exception) -> NoReturn:
         err.print(
             ''.join(traceback.format_exception(exc)), markup=False, highlight=False
         )
-    err.print(f'[red]{cmd}: {exc}[/red]')
+    err.print(f'[red]{cmd}: {escape(str(exc))}[/red]')
     raise typer.Exit(1) from exc
 
 
@@ -1222,7 +1223,9 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
         or sandbox is not None
     )
     if said or (_session.fs is None and _session.pending is None):
-        selected_profile, selected_environment = resolve_selection(profile, environment)
+        selected_profile, selected_environment = resolve_selection(
+            profile, environment, provider_
+        )
         _session.profile = selected_profile
         _session.environment = selected_environment
         overrides = build_overrides(
@@ -1295,7 +1298,7 @@ def main() -> None:
         app()
     except ConfigurationError as exc:
         # a malformed or invalid config file: one clean line, no traceback
-        err.print(f'[red]sx: {exc}[/red]')
+        err.print(f'[red]sx: {escape(str(exc))}[/red]')
         code = 1
     except SystemExit as exc:
         # os._exit below skips the interpreter's own SystemExit handling, so
@@ -1308,7 +1311,7 @@ def main() -> None:
             case int() as status:
                 code = status
             case message:
-                err.print(f'[red]{message}[/red]')
+                err.print(f'[red]{escape(message)}[/red]')
                 code = 1
     sys.stdout.flush()
     sys.stderr.flush()

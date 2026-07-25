@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 
+from contextlib import suppress
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -31,7 +32,7 @@ from storix.config import (
     is_secret,
     resolve_profile,
 )
-from storix.errors import StorageError
+from storix.errors import ConfigurationError, StorageError
 
 
 if TYPE_CHECKING:
@@ -187,7 +188,9 @@ def build_overrides(
 
 
 def resolve_selection(
-    profile: str | None = None, environment: str | None = None
+    profile: str | None = None,
+    environment: str | None = None,
+    provider: str | None = None,
 ) -> tuple[str | None, str | None]:
     """The effective profile and environment: flag beats env beats file.
 
@@ -196,17 +199,27 @@ def resolve_selection(
     reach the library would redirect a service's sessions (ADR 0031 D8,
     the ADR 0022 provider argument pointed the same way).
 
+    ``-p`` on a profile that is merely pinned deselects it. A pin is a
+    convenience, and refusing ``sx -p s3`` because a file names an azure
+    profile makes the pin a lock on the whole CLI. Two flags that
+    disagree still conflict: there the user said both things.
+
     Args:
         profile: ``--profile`` as given on the command line, if any.
         environment: ``--environment`` / ``--env``, if any.
+        provider: ``-p/--provider`` as given on the command line, if any.
 
     Raises:
         SystemExit: If an environment is selected without a profile.
     """
-    from storix.config import configured_profile
+    from storix.config import configured_profile, profile_provider
 
     name = profile or os.environ.get('STORIX_PROFILE') or configured_profile()
     stage = environment or os.environ.get('STORIX_ENVIRONMENT')
+    if name is not None and provider is not None and profile is None:
+        with suppress(ConfigurationError):
+            if profile_provider(name) != provider:
+                return None, None
     if stage and not name:
         message = (
             f'sx: --environment {stage!r} selects a stage of a profile; '

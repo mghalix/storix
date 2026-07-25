@@ -1263,3 +1263,57 @@ def test_the_old_provider_name_still_answers(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert 'backend' in _plain(result.stdout)
+
+
+def test_an_explicit_provider_steps_off_a_pinned_profile(tmp_path, monkeypatch):
+    """Given a pin, when -p names another provider, then the flag wins.
+
+    A pin is a default. Refusing `sx -p memory` because a file names an
+    azure profile makes one line in a personal file a lock on the CLI.
+    """
+    (tmp_path / 'storix.toml').write_text(
+        'profile = "azurish"\n\n[profiles.azurish]\nprovider = "azure"\n'
+        'container = "raw"\naccount_name = "acct"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    result = run('-p', 'memory', 'ls', '/')
+
+    assert result.exit_code == 0
+
+
+def test_two_flags_that_disagree_are_still_refused(tmp_path, monkeypatch):
+    """Given --profile and a conflicting -p, when run, then it is an error."""
+    (tmp_path / 'storix.toml').write_text(
+        '[profiles.azurish]\nprovider = "azure"\ncontainer = "raw"\n'
+        'account_name = "acct"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    result = run('--profile', 'azurish', '-p', 'memory', 'ls', '/')
+
+    assert result.exit_code != 0
+
+
+def test_an_error_naming_a_toml_table_survives_rendering(tmp_path, monkeypatch):
+    """Given a message holding [brackets], when printed, then they show.
+
+    Rich reads `[environments]` as a style tag and prints nothing where
+    the name should be, which is worst in exactly the messages that name
+    a table the reader has to go and fix.
+    """
+    (tmp_path / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "s3"\n\n'
+        '[profiles.media.environment.dev]\nbucket = "media-dev"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    result = run('config', 'validate')
+
+    assert '[environments]' in _plain(result.stdout + result.stderr)
