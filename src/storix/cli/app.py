@@ -61,6 +61,7 @@ from .state import (
     icons_enabled,
     layer_summary,
     resolve_provider,
+    resolve_selection,
     set_debug,
     set_icons,
     stat_all,
@@ -1027,6 +1028,18 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
     kind: Annotated[
         str | None, typer.Option('--kind', help='azure surface: auto | adls | blob')
     ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option('--profile', help='named profile from a config file'),
+    ] = None,
+    environment: Annotated[
+        str | None,
+        typer.Option(
+            '--environment',
+            '--env',
+            help='stage overlay within the selected profile',
+        ),
+    ] = None,
     set_: Annotated[
         list[str] | None,
         typer.Option(
@@ -1065,8 +1078,9 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
     set_debug(debug)
     if icons is not None:
         set_icons(icons)
+    selected_profile, selected_environment = resolve_selection(profile, environment)
     overrides = build_overrides(
-        resolve_provider(provider_),
+        resolve_provider(provider_, selected_profile),
         flags={
             'base': base,
             'bucket': bucket,
@@ -1082,14 +1096,24 @@ def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
     # rebuild on an explicit --provider, a coordinate override, or any layer
     # flag, else keep the persistent session (so cwd survives across shell
     # commands); layer flags replace the configured [[cli.layers]] stack
-    if provider_ is not None or overrides or cache or sandbox is not None:
+    if (
+        provider_ is not None
+        or selected_profile is not None
+        or overrides
+        or cache
+        or sandbox is not None
+    ):
         if cache or sandbox is not None:
-            base_fs = build_base(provider_, overrides)
+            base_fs = build_base(
+                provider_, overrides, selected_profile, selected_environment
+            )
             _session.fs = apply_layers(
                 base_fs, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
             )
         else:
-            _session.fs = build_session(provider_, overrides)
+            _session.fs = build_session(
+                provider_, overrides, selected_profile, selected_environment
+            )
 
     if ctx.invoked_subcommand is None or interactive:
         from .shell import start_shell

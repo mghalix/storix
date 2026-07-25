@@ -47,3 +47,34 @@ positive. Defaults and what they trade against each other are in
 The cached `get_fs()` is a process-level resource. Close it from your
 application's shutdown hook. The [FastAPI recipe](fastapi.md) shows the same
 lifetime explicitly with `lifespan`.
+
+## Named profiles
+
+A profile bundles a provider and its settings under a name, with optional
+stage overlays:
+
+```toml
+[profiles.media]
+provider = "s3"
+
+[profiles.media.s3]
+bucket = "media"
+region = "auto"
+
+[profiles.media.environments.prod.s3]
+bucket = "media-prod"
+```
+
+```python
+fs = get_storage(profile="media")
+fs = get_storage(profile="media", environment="prod")
+```
+
+The profile supplies the provider, so `get_storage("gcs", profile="media")`
+is an error rather than an override; explicit keywords still win over the
+profile's values. A project profile shadows a user profile of the same name
+whole, so the effective profile is always readable from one file.
+
+`STORIX_PROFILE` and `STORIX_ENVIRONMENT` are honored by `sx` only - naming
+a profile in library code is explicit, or pinned per project with a
+top-level `profile = "media"` key in the config file.

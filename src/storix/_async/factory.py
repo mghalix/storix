@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Final, Literal, TypedDict, Unpack, overload
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Final,
+    Literal,
+    TypedDict,
+    Unpack,
+    cast,
+    overload,
+)
 
 from storix.config import (
     AzureConfig,
@@ -10,6 +19,8 @@ from storix.config import (
     LocalConfig,
     S3Config,
     StorixSettings,
+    configured_profile,
+    resolve_profile,
 )
 from storix.errors import ConfigurationError
 
@@ -300,6 +311,13 @@ def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
     ``STORIX_<PROVIDER>_*`` environment values. Passing a literal
     provider name gets fully typed keyword completion.
 
+    ``profile=`` selects a named profile from a config file, and
+    ``environment=`` a stage overlay within it (ADR 0031). A profile
+    supplies the provider, so naming a different one positionally is an
+    error rather than an override; explicit keywords still win over the
+    profile's values. ``STORIX_PROFILE`` is deliberately not honored here:
+    an operator's shell habit must not redirect a service's sessions.
+
     The provider is positional-only: ``get_storage(provider='azure')``
     would otherwise be silently swallowed as a config override, so it is
     rejected both statically (no overload accepts it) and at runtime.
@@ -307,6 +325,26 @@ def get_storage(provider: str | None = None, /, **overrides: Any) -> Storix:
     if 'provider' in overrides:
         msg = "pass the provider positionally: get_storage('azure', ...)"
         raise ConfigurationError(msg)
+    # an explicit selection, else the one a config file pins for the project
+    profile = cast('str | None', overrides.pop('profile', None)) or configured_profile()
+    environment = cast('str | None', overrides.pop('environment', None))
+    if environment is not None and profile is None:
+        msg = 'environment= selects a stage of a profile; name one with profile='
+        raise ConfigurationError(msg)
+
+    if profile is not None:
+        resolved = resolve_profile(profile, environment)
+        if provider is not None and provider != resolved.provider:
+            msg = (
+                f'profile {resolved.name!r} connects to {resolved.provider!r}, '
+                f'not {provider!r} ({resolved.source}); a profile names its own '
+                'provider'
+            )
+            raise ConfigurationError(msg)
+        # explicit keywords still win: the profile is a source, not a lock
+        overrides = {**resolved.values, **overrides}
+        provider = resolved.provider
+
     name = provider or StorixSettings().provider
     builder = _BUILDERS.get(name)
     if builder is None:
