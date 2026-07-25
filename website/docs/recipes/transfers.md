@@ -80,6 +80,18 @@ fs = get_storage("s3", bucket="media", read_chunk_size=8 * 1024 * 1024)
 `sx` reads exactly the same environment, so a variable exported for your
 application tunes the CLI too.
 
+!!! note "Environment and keywords, not a config file (yet)"
+
+    Transfer sizes and `STORIX_MAX_TRANSFER_RANGES` are environment
+    settings, `get_storage()` keywords, or backend constructor arguments.
+    They are **not** read from `storix.toml`, `pyproject.toml`, or the XDG
+    user config: those files carry CLI preferences (`icons`, `provider`,
+    `layers`, `alias`) and nothing else today. A transfer key placed in
+    `[cli]` is rejected by name; one placed at the top level of a
+    `storix.toml` is currently ignored. Giving connection and transfer
+    config a home in those files is designed in ADR 0031 and not
+    implemented yet.
+
 ## Requests cost money, not just time
 
 Smaller chunks mean more requests for the same bytes, and object stores bill

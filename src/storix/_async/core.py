@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import fnmatch
+import io
 import os
 import re
 
@@ -38,11 +39,11 @@ from storix.types import StorixPath
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterable, Mapping, Sequence
     from contextlib import AbstractAsyncContextManager
-    from typing import BinaryIO
 
     from storix._async.backends import StorageBackend
     from storix.types import (
         AsyncDataBuffer,
+        BinarySink,
         EchoMode,
         PathKindStr,
         StrPathLike,
@@ -70,17 +71,29 @@ class LayerFactory(Protocol[P]):
 type BoundLayer = Callable[[StorageBackend], StorageBackend]
 
 
-def _writable_fd(dest: BinaryIO) -> int | None:
-    """The sink's file descriptor, or None when it cannot be written by offset.
+def _direct_fd(dest: BinarySink) -> int | None:
+    """The sink's descriptor, when bytes written to it land there unchanged.
 
-    A sink qualifies only if it is seekable and exposes a real descriptor:
-    an in-memory buffer or a pipe is neither, and gets the sequential path.
+    A parallel download writes behind the sink's back, with ``os.pwrite`` at
+    each range's offset, so the fast path is limited to the standard
+    library's raw and buffered file writers - objects whose whole contract
+    is that the bytes handed to them reach that descriptor as given.
+
+    Everything else takes the sequential path and produces identical
+    output: a sink with no descriptor (``io.BytesIO``, a socket, a pipe),
+    and, importantly, a sink that *transforms* what it is given.
+    ``gzip.GzipFile`` is the cautionary one: it compresses, yet reports the
+    underlying file's descriptor as its own and calls itself seekable, so
+    probing those two would happily corrupt a compressed file with raw
+    bytes written at the wrong offsets.
     """
+    if not isinstance(dest, io.FileIO | io.BufferedWriter | io.BufferedRandom):
+        return None
     try:
-        if not dest.seekable():
-            return None
+        # our writes bypass this buffer; it must not land on top of them
+        dest.flush()
         return dest.fileno()
-    except (AttributeError, OSError, UnsupportedOperation):
+    except (OSError, UnsupportedOperation):
         return None
 
 
@@ -978,7 +991,7 @@ class Storix:
     async def download(
         self,
         path: StrPathLike,
-        dest: BinaryIO,
+        dest: BinarySink,
         /,
         *,
         ranges: int | None = None,
@@ -993,12 +1006,14 @@ class Storix:
         high-latency link that is the difference between one connection's
         throughput and the link's (ADR 0032).
 
-        ``dest`` is a synchronous binary file object open for writing, in
-        both flavors: the write is a local syscall the core performs
-        directly (``os.pwrite`` at each range's offset), not an operation on
-        the storage port. A sink without a usable file descriptor, or a
-        backend that cannot fetch a range cheaply, streams sequentially
-        instead - the result is identical either way.
+        ``dest`` is any synchronous sink that accepts bytes, in both
+        flavors: the write is a local call the core performs directly, not
+        an operation on the storage port. Ranges are written with
+        ``os.pwrite`` when the sink is a standard-library file writer whose
+        bytes reach its descriptor unchanged; every other sink (an
+        ``io.BytesIO``, a socket, a compressing wrapper), and any backend
+        that cannot fetch a range cheaply, streams sequentially instead -
+        the result is identical either way.
 
         Args:
             path: The file to read.
@@ -1030,7 +1045,7 @@ class Storix:
         if raw.kind is PathKind.DIRECTORY:
             raise IsADirectoryError(target)
 
-        fd = _writable_fd(dest)
+        fd = _direct_fd(dest)
         count = 1 if fd is None else self._range_count(raw.size, ranges=ranges)
         if fd is None or count == 1:
             written = 0
@@ -1039,7 +1054,6 @@ class Storix:
                 written += len(chunk)
             return written
 
-        dest.flush()
         span = -(-raw.size // count)
         spans = [
             (offset, min(span, raw.size - offset))
