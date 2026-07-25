@@ -511,8 +511,10 @@ five minutes than the one every other platform gets. Same
 requirements, same options (`-With`, `-All`, `-Version`, `-Help`),
 same refusal to touch PATH, credentials, or configuration. Both
 scripts are executed for real in CI on their own operating system,
-each followed by `sx --version`, so a broken installer fails the merge
-rather than a user's first command.
+each followed by running the installed `sx`, so a broken installer
+fails the merge rather than a user's first command. That check runs
+the published release, so it asserts only that `sx` starts: an
+unreleased flag would test this branch, not the installer.
 
 ### D14. CLI local default becomes the invocation cwd
 

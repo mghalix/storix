@@ -57,7 +57,15 @@ if ($Version) {
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     Write-Output 'uv is not installed; storix installs through it.'
     Write-Output 'Running the official uv installer from https://astral.sh/uv/install.ps1'
-    Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
+    # in a child shell, not this scope: uv's installer assigns variables of its
+    # own, and a name this script declares as a param (-Help) cannot be
+    # overwritten once PowerShell has optimized the scope holding it.
+    $shell = if (Get-Command pwsh -ErrorAction SilentlyContinue) { 'pwsh' } else { 'powershell' }
+    & $shell -NoProfile -ExecutionPolicy Bypass -Command 'Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error 'the uv installer failed'
+        exit 1
+    }
     $uvBin = Join-Path $env:USERPROFILE '.local\bin'
     $env:Path = "$uvBin;$env:Path"
     if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {

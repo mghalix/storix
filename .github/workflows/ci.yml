@@ -275,8 +275,10 @@ jobs:
         shell: pwsh
         run: ./website/docs/install.ps1
 
+      # not `sx --version`: the installer installs the published release, which
+      # lags this branch, so asserting an unreleased flag tests the wrong thing.
       - name: The installed sx runs
-        run: sx --version
+        run: sx --help
 
   artifacts:
     name: Wheel and sdist

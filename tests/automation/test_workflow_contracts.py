@@ -354,6 +354,9 @@ def test_windows_installer_refuses_to_run_unsafely() -> None:
     # the only remote code it runs is uv's own installer
     assert text.count('Invoke-Expression') == 1
     assert 'https://astral.sh/uv/install.ps1 | Invoke-Expression' in text
+    # and it runs in a child shell: uv's installer assigns names this script
+    # declares as params, which PowerShell refuses to overwrite in one scope
+    assert '-NoProfile -ExecutionPolicy Bypass -Command' in text
 
 
 def test_both_installers_offer_the_same_interface() -> None:
