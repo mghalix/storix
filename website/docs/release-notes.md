@@ -1,5 +1,28 @@
 # Release Notes
 
+## [0.5.0] - 2026-07-25
+
+### What's Changed
+#### Breaking changes
+* feat(cli)!: local sessions default to the invocation cwd (ADR 0031 PR 6) by @mghalix in https://github.com/mghalix/storix/pull/53
+* fix(cli): make every config view report the selection it was given by @mghalix in https://github.com/mghalix/storix/pull/54
+#### Features
+* feat: parallel range reads for single-file transfers by @mghalix in https://github.com/mghalix/storix/pull/40
+* feat(config): give every provider the same transfer knobs by @mghalix in https://github.com/mghalix/storix/pull/43
+* feat(config): accept human-readable transfer sizes by @mghalix in https://github.com/mghalix/storix/pull/46
+* feat(config): unified configuration sources, CLI overrides, and diagnostics (ADR 0031 PR 1) by @mghalix in https://github.com/mghalix/storix/pull/47
+* feat(config): named profiles and environment overlays (ADR 0031 PR 2) by @mghalix in https://github.com/mghalix/storix/pull/48
+* feat(config): flatten the profile schema, type the selection, and track a config example by @mghalix in https://github.com/mghalix/storix/pull/49
+* feat(cli): sx config commands (ADR 0031 PR 3) by @mghalix in https://github.com/mghalix/storix/pull/50
+* feat(cli): sx doctor, sx update, and a grouped help (ADR 0031 PR 5) by @mghalix in https://github.com/mghalix/storix/pull/52
+#### Fixes
+* fix(cli): make Ctrl+C actually stop a transfer by @mghalix in https://github.com/mghalix/storix/pull/42
+* fix(packaging): stop shipping the docs site generator to every user by @mghalix in https://github.com/mghalix/storix/pull/44
+* fix(core): only fast-path a download sink whose bytes reach its descriptor unchanged by @mghalix in https://github.com/mghalix/storix/pull/45
+#### Documentation
+* docs(site): standalone installers for unix and Windows (ADR 0031 PR 4) by @mghalix in https://github.com/mghalix/storix/pull/51
+* docs(config): show the stage pattern deployments actually have by @mghalix in https://github.com/mghalix/storix/pull/55
+
 ## [0.4.9] - 2026-07-24
 
 A transfer correctness and cost release. Cancelling a bulk `push`/`pull` now
