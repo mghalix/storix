@@ -40,7 +40,10 @@ The gaps:
    unconditional runtime dependency. It and its 9 transitive packages
    are 10 of the 22 packages (roughly 45 percent) of a bare `storix`
    install, pulled from PyPI on every install. It is used only by the
-   `just docs` recipes.
+   `just docs` recipes. **Closed ahead of this ADR**: the dependency
+   moved to the `dev` group in #44 (0.4.10), which also removed the
+   unused `mkdocs` and added an automation test pinning
+   `[project].dependencies` so the next tool cannot wander in.
 2. `sx --version` does not exist (`Error: No such option: --version`).
 3. Non-secret provider coordinates cannot come from flags or TOML:
    `sx -p local --base .` fails (`No such option`), and per ADR 0015 /
@@ -87,11 +90,15 @@ and the commands themselves.
 ### D1. Packaging: zensical leaves the runtime dependencies
 
 `zensical==0.0.50` moves from `[project].dependencies` to the `dev`
-dependency group (next to `mkdocs`), where the `just docs` recipes
+dependency group, where the `just docs` recipes
 (`uv run --project .. --no-sync zensical ...`) still find it. A bare
 `storix` install drops from 22 packages to 12. No public API changes;
-published versions are immutable, so 0.4.8 keeps the bloat and the fix
-ships with the next release.
+published versions are immutable, so every release up to 0.4.9 keeps
+the bloat.
+
+Shipped in #44 ahead of the rest of this ADR, together with the removal
+of `mkdocs` (referenced nowhere) and an automation test that pins
+`[project].dependencies` to the library's own extras.
 
 ### D2. Supported installation methods
 
@@ -144,7 +151,7 @@ Top-level schema of a project `storix.toml` (identical under
 
 ```toml
 provider = "s3"          # default provider
-profile = "rera"         # optional default profile (D8)
+profile = "media"        # optional default profile (D8)
 
 [local]
 base = "."
@@ -197,7 +204,7 @@ CLI-only):
 
 Profile values beat the process environment deliberately: a profile is
 an explicit per-invocation selection, and a leftover exported
-`STORIX_AZURE_CONTAINER` must not silently corrupt `sx --profile rera`.
+`STORIX_AZURE_CONTAINER` must not silently corrupt `sx --profile media`.
 Explicit beats ambient; ambient env still beats files, as today.
 
 Relative path rules (for `local.base`, `gcs.credential_path`, and any
@@ -288,27 +295,27 @@ provider config plus optional environment overlays. Profiles reuse the
 canonical provider models; the profile parser owns no field schema.
 
 ```toml
-[profiles.rera]
+[profiles.media]
 provider = "azure"
 
-[profiles.rera.azure]
+[profiles.media.azure]
 kind = "auto"
-account_name = "rera-account"
-credential = "env:RERA_AZURE_CREDENTIAL"
+account_name = "mediaaccount"
+credential = "env:MEDIA_AZURE_CREDENTIAL"
 
-[profiles.rera.environments.dev.azure]
-container = "rera-dev"
+[profiles.media.environments.dev.azure]
+container = "media-dev"
 
-[profiles.rera.environments.prod.azure]
-container = "rera-prod"
+[profiles.media.environments.prod.azure]
+container = "media-prod"
 
-[profiles.islamweb]
+[profiles.archive]
 provider = "azure"
 
-[profiles.islamweb.azure]
+[profiles.archive.azure]
 kind = "adls"
-account_name = "islamweb-account"
-credential = "env:ISLAMWEB_AZURE_CREDENTIAL"
+account_name = "archiveaccount"
+credential = "env:ARCHIVE_AZURE_CREDENTIAL"
 ```
 
 Rules:

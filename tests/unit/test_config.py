@@ -127,7 +127,7 @@ def test_unknown_top_level_table_errors(sandbox):
 
 
 def test_profiles_are_rejected_with_a_clear_message(sandbox):
-    (sandbox / 'storix.toml').write_text('[profiles.rera]\nprovider = "azure"\n')
+    (sandbox / 'storix.toml').write_text('[profiles.media]\nprovider = "azure"\n')
     with pytest.raises(ConfigurationError) as exc:
         find_project_config()
     assert 'profiles' in str(exc.value)
