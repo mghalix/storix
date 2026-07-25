@@ -134,8 +134,8 @@ def test_a_profile_supplies_its_provider_and_settings(sandbox):
     """Given a profile, when selected, then it decides provider and settings."""
     (sandbox / 'data').mkdir()
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "data"\nread_chunk_size = "2MiB"\n',
+        '[profiles.media]\nprovider = "local"\nbase = "data"\n'
+        'read_chunk_size = "2MiB"\n',
         encoding='utf-8',
     )
 
@@ -150,9 +150,8 @@ def test_an_environment_overlays_the_profile(sandbox):
     (sandbox / 'dev').mkdir()
     (sandbox / 'prod').mkdir()
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "dev"\n\n'
-        '[profiles.media.environments.prod.local]\nbase = "prod"\n',
+        '[profiles.media]\nprovider = "local"\nbase = "dev"\n\n'
+        '[profiles.media.environments.prod]\nbase = "prod"\n',
         encoding='utf-8',
     )
 
@@ -173,8 +172,8 @@ def test_an_unknown_profile_lists_what_exists(sandbox):
 def test_an_unknown_environment_lists_the_profile_stages(sandbox):
     """Given a stage that is not defined, when selected, then it says which are."""
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.environments.prod.local]\nbase = "."\n',
+        '[profiles.media]\nprovider = "local"\nbase = "."\n\n'
+        '[profiles.media.environments.prod]\nbase = "."\n',
         encoding='utf-8',
     )
 
@@ -191,7 +190,7 @@ def test_an_environment_without_a_profile_is_an_error(sandbox):
 def test_a_profile_refuses_a_conflicting_provider(sandbox):
     """Given a profile, when another provider is named, then it is an error."""
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n[profiles.media.local]\nbase = "."\n',
+        '[profiles.media]\nprovider = "local"\nbase = "."\n',
         encoding='utf-8',
     )
 
@@ -226,8 +225,7 @@ def test_a_project_profile_shadows_a_user_profile_of_the_same_name(sandbox, tmp_
     (sandbox / 'project').mkdir()
     _user_config(tmp_path, '[profiles.media]\nprovider = "memory"\n')
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "project"\n',
+        '[profiles.media]\nprovider = "local"\nbase = "project"\n',
         encoding='utf-8',
     )
 
@@ -422,10 +420,46 @@ def test_a_config_file_can_pin_a_default_profile(sandbox, tmp_path):
     """Given a pinned profile, when nothing is selected, then it is used."""
     (sandbox / 'data').mkdir()
     (sandbox / 'storix.toml').write_text(
-        'profile = "media"\n\n[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "data"\n',
+        'profile = "media"\n\n[profiles.media]\nprovider = "local"\nbase = "data"\n',
         encoding='utf-8',
     )
 
     assert configured_profile() == 'media'
     assert get_storage().backend.base.name == 'data'
+
+
+def test_a_profile_refuses_a_setting_from_another_provider(sandbox):
+    """Given a stray provider table, when read, then it is named, not ignored."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "azure"\nlocal = { base = "." }\n',
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ConfigurationError, match="has no setting 'local'"):
+        find_project_config()
+
+
+def test_a_default_environment_applies_without_a_flag(sandbox):
+    """Given a default stage, when none is selected, then it is applied."""
+    (sandbox / 'dev').mkdir()
+    (sandbox / 'prod').mkdir()
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\ndefault_environment = "dev"\n\n'
+        '[profiles.media.environments.dev]\nbase = "dev"\n\n'
+        '[profiles.media.environments.prod]\nbase = "prod"\n',
+        encoding='utf-8',
+    )
+
+    assert get_storage(profile='media').backend.base.name == 'dev'
+    assert get_storage(profile='media', environment='prod').backend.base.name == 'prod'
+
+
+def test_a_default_environment_must_exist(sandbox):
+    """Given a default naming nothing, when read, then the file is refused."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\ndefault_environment = "nope"\n',
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ConfigurationError, match='not one of its environments'):
+        find_project_config()

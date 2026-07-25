@@ -155,15 +155,21 @@ once in a config file and selected by name.
 # storix.toml
 [profiles.media]
 provider = "azure"
-
-[profiles.media.azure]
+default_environment = "dev"
 account_name = "mediaaccount"
-container = "media"
 credential = "env:MEDIA_AZURE_CREDENTIAL"
 
-[profiles.media.environments.prod.azure]
+[profiles.media.environments.dev]
+container = "media-dev"
+
+[profiles.media.environments.prod]
 container = "media-prod"
 ```
+
+The provider is named once and its settings sit directly in the profile;
+each stage lists only what it changes. A key that is not a setting of that
+provider is an error naming the provider and its fields, so a block meant
+for another backend cannot sit there unread.
 
 ```bash
 sx --profile media ls /                  # the profile's own settings
@@ -198,7 +204,9 @@ profile = "media"
 
 Selection order is flag, then `STORIX_PROFILE`, then the pinned key: a
 project's pin beats your personal one, `--profile` beats both for one
-command, and `STORIX_PROFILE=other sx ...` beats both for one shell.
+command, and `STORIX_PROFILE=other sx ...` beats both for one shell. A
+profile can pin its own usual stage with `default_environment`, so `--env`
+is only needed to step off it.
 
 `STORIX_PROFILE` and `STORIX_ENVIRONMENT` are read by `sx` and deliberately
 not by the library: an operator's shell habit should not redirect a

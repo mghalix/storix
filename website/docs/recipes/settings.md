@@ -72,12 +72,13 @@ stage overlays:
 ```toml
 [profiles.media]
 provider = "s3"
-
-[profiles.media.s3]
-bucket = "media"
+default_environment = "dev"
 region = "auto"
 
-[profiles.media.environments.prod.s3]
+[profiles.media.environments.dev]
+bucket = "media-dev"
+
+[profiles.media.environments.prod]
 bucket = "media-prod"
 ```
 

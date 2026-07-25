@@ -1047,9 +1047,8 @@ def test_profile_and_environment_select_the_session(tmp_path, monkeypatch):
     (project / 'dev' / 'in-dev.txt').write_text('x')
     (project / 'prod' / 'in-prod.txt').write_text('x')
     (project / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "dev"\n\n'
-        '[profiles.media.environments.prod.local]\nbase = "prod"\n',
+        '[profiles.media]\nprovider = "local"\nbase = "dev"\n\n'
+        '[profiles.media.environments.prod]\nbase = "prod"\n',
         encoding='utf-8',
     )
     monkeypatch.chdir(project)
