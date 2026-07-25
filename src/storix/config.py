@@ -8,7 +8,7 @@ read from the environment and a local ``.env`` file.
 
 from typing import ClassVar, Literal
 
-from pydantic import Field
+from pydantic import ByteSize, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from storix.constants import (
@@ -52,21 +52,28 @@ class TransferConfig(BaseSettings):
     byte) is documented in the Tune transfers recipe.
     """
 
-    read_chunk_size: int = Field(default=DEFAULT_READ_CHUNK_SIZE, gt=0)
-    """Maximum chunk a read yields, and the engine's read request size."""
+    read_chunk_size: ByteSize = Field(default=ByteSize(DEFAULT_READ_CHUNK_SIZE), gt=0)
+    """Maximum chunk a read yields, and the engine's read request size.
 
-    write_chunk_size: int = Field(default=DEFAULT_WRITE_CHUNK_SIZE, gt=0)
-    """Batch size a write accumulates before sending a request."""
+    Accepts a plain byte count or a human-readable size: ``8MiB`` is
+    8388608, ``8MB`` is 8000000, and the IEC and SI spellings mean what
+    they say rather than being treated as synonyms."""
+
+    write_chunk_size: ByteSize = Field(default=ByteSize(DEFAULT_WRITE_CHUNK_SIZE), gt=0)
+    """Batch size a write accumulates before sending a request.
+
+    Accepts a plain byte count or a human-readable size (``4MiB``)."""
 
 
 class RemoteTransferConfig(TransferConfig):
     """Transfer sizes for providers that fetch over the network."""
 
-    read_prefetch_size: int | None = Field(default=None, gt=0)
+    read_prefetch_size: ByteSize | None = Field(default=None, gt=0)
     """Size of a stream's opening read, which is the buffer a download holds
     before it yields anything. ``None`` means the read chunk size, so a
     stream costs one chunk; a larger value trades resident memory per
-    in-flight transfer for fewer round trips on a lone stream."""
+    in-flight transfer for fewer round trips on a lone stream. Accepts a
+    plain byte count or a human-readable size (``32MiB``)."""
 
 
 class LocalConfig(TransferConfig):
@@ -163,14 +170,18 @@ class AzureConfig(RemoteTransferConfig):
     endpoint: str | None = None
     """Custom blob endpoint URL (emulators, sovereign clouds); blob kind only."""
 
-    read_chunk_size: int = Field(default=DEFAULT_AZURE_READ_CHUNK_SIZE, gt=0)
-    """Default consumer and SDK range chunk size in bytes (4 MiB, the SDK's
-    own native download chunk)."""
-
-    write_chunk_size: int = Field(default=DEFAULT_AZURE_WRITE_CHUNK_SIZE, gt=0)
-    """Default append-request batch size in bytes (4 MiB)."""
-
-    read_prefetch_size: int | None = Field(
-        default=DEFAULT_AZURE_READ_PREFETCH_SIZE, gt=0
+    read_chunk_size: ByteSize = Field(
+        default=ByteSize(DEFAULT_AZURE_READ_CHUNK_SIZE), gt=0
     )
-    """Initial SDK download request size in bytes (8 MiB)."""
+    """Default consumer and SDK range chunk size (4 MiB, the SDK's own
+    native download chunk). Accepts ``4MiB`` as readily as 4194304."""
+
+    write_chunk_size: ByteSize = Field(
+        default=ByteSize(DEFAULT_AZURE_WRITE_CHUNK_SIZE), gt=0
+    )
+    """Default append-request batch size (4 MiB)."""
+
+    read_prefetch_size: ByteSize | None = Field(
+        default=ByteSize(DEFAULT_AZURE_READ_PREFETCH_SIZE), gt=0
+    )
+    """Initial SDK download request size (8 MiB)."""

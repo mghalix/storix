@@ -11,10 +11,11 @@ STORIX_PROVIDER=azure
 STORIX_AZURE_CONTAINER=raw
 STORIX_AZURE_ACCOUNT_NAME=myaccount
 STORIX_AZURE_CREDENTIAL=...
-# Optional transfer sizes, in bytes (every provider takes the first two):
-STORIX_AZURE_READ_CHUNK_SIZE=4194304
-STORIX_AZURE_WRITE_CHUNK_SIZE=4194304
-STORIX_AZURE_READ_PREFETCH_SIZE=8388608
+# Optional transfer sizes (every provider takes the first two). A byte count
+# or a readable size: 4MiB is 4194304, 4MB is 4000000 - not synonyms.
+STORIX_AZURE_READ_CHUNK_SIZE=4MiB
+STORIX_AZURE_WRITE_CHUNK_SIZE=4MiB
+STORIX_AZURE_READ_PREFETCH_SIZE=8MiB
 # Optional, any provider: ceiling on parallel ranges per file (1 disables)
 STORIX_MAX_TRANSFER_RANGES=8
 ```
