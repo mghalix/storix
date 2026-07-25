@@ -786,6 +786,34 @@ def available_profiles() -> dict[str, DiscoveredConfig]:
     return found
 
 
+def profile_provider(name: str) -> str:
+    """The provider a profile declares, without resolving its settings.
+
+    Naming the backend is a question about the file; opening it is a
+    question about credentials. Keeping them apart is what lets ``sx
+    doctor`` and ``sx config`` answer the first one while the second is
+    still broken, which is exactly when they are reached for.
+
+    Args:
+        name: Profile to read.
+
+    Raises:
+        ConfigurationError: If no config file defines that profile, or it
+            does not name a provider.
+    """
+    disc = available_profiles().get(name)
+    if disc is None:
+        known = ', '.join(sorted(available_profiles())) or 'none defined'
+        msg = f'unknown profile {name!r}; defined: {known}'
+        raise ConfigurationError(msg)
+    table = cast('dict[str, Any]', disc.data['profiles'])[name]
+    provider = cast('dict[str, Any]', table).get('provider')
+    if not isinstance(provider, str):
+        msg = f"{disc.path}: profile {name!r} does not name a 'provider'"
+        raise ConfigurationError(msg)
+    return provider
+
+
 def configured_profile() -> str | None:
     """The profile a config file pins with a top-level ``profile`` key."""
     for disc in (find_project_config(), find_user_config()):

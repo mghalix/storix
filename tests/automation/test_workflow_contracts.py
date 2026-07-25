@@ -200,7 +200,7 @@ def test_reviewed_tool_floors_and_typing_scope_are_locked() -> None:
         'rust-just>=1.56.0',
         'twine>=6.2.0',
         'vulture>=2.16',
-        'zizmor>=1.27.0',
+        'zizmor>=1.28.0',  # 1.27.0 was yanked: GHSA-f42p-wjw5-97qh
     ):
         assert any(item.startswith(requirement) for item in development)
     assert project['build-system']['requires'] == ['uv_build>=0.10.0,<0.12.0']

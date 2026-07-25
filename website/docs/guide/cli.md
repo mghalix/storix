@@ -444,7 +444,7 @@ sx config get s3.bucket     # one value, and the file that supplies it
 sx config get --effective azure.read_prefetch_size
                             # the value actually in force, and where it came
                             # from - defaults included
-sx config profiles          # profiles, their stages, and the default (marked *)
+sx config profiles          # every profile as a table, stages as rows
 
 sx config set s3.bucket media           # writes the project file
 sx config set azure.credential X --user   # --user == --scope user
@@ -453,6 +453,28 @@ sx config init              # a commented starter file; --force to overwrite
 sx config validate          # load every file the way storix does
 sx config edit              # $VISUAL, else $EDITOR
 ```
+
+Profiles print as a table rather than as dotted keys, so a stage is a row
+under its profile and `*` marks what this invocation would use:
+
+```console
+$ sx --profile media --env prod config profiles
+profiles /home/you/.config/storix/config.toml
+profile  provider  stage   settings
+media *  azure             container = 'raw'
+                   dev     account_name = 'acctdev'
+                           credential = '***'
+                   prod *  account_name = 'acctprod'
+                           credential = '***'
+* what this invocation would use
+```
+
+Every view follows the selection. `sx --profile media config show` shows
+`media` and names the others rather than printing them, because they are not
+what that command would use. Listing and explaining never resolve a
+credential, so `sx config profiles` and `sx doctor` still work when an `env:`
+reference points at a variable you have not exported - which is exactly when
+you reach for them.
 
 Writes go through a round-trip TOML editor, so **your comments and layout
 survive**; they are validated against the same models a loaded file gets, so

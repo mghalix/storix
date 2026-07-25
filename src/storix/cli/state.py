@@ -70,6 +70,18 @@ class _Session:
 _session = _Session()
 
 
+def reset_session() -> None:
+    """Forget everything this process decided about the session.
+
+    One process holds one session so the shell's cwd survives across
+    commands, which makes every field here leak between tests. Clearing
+    ``fs`` alone is not enough now that the selection is read back from
+    here: a stale profile changes what the next invocation reports.
+    """
+    for field in _Session.__annotations__:
+        setattr(_session, field, getattr(_Session, field))
+
+
 _FLAG_TO_FIELD: Final[dict[str, str]] = {
     'base': 'base',
     'bucket': 'bucket',
@@ -98,12 +110,12 @@ def resolve_provider(explicit: str | None = None, profile: str | None = None) ->
     Raises:
         ConfigurationError: If the named profile does not exist.
     """
-    from storix.config import resolve_profile
+    from storix.config import profile_provider
 
     from .config import load_prefs
 
     if profile is not None:
-        return resolve_profile(profile).provider
+        return profile_provider(profile)
     return explicit or load_prefs().provider or StorixSettings().provider
 
 
@@ -202,6 +214,18 @@ def resolve_selection(
         )
         raise SystemExit(message)
     return name, stage
+
+
+def selection() -> tuple[str | None, str | None]:
+    """What this invocation selected, flags included.
+
+    The root callback resolves ``--profile`` / ``--env`` once and records
+    the answer. A command that re-resolves instead would silently drop the
+    flags, since ``resolve_selection`` only sees what it is passed.
+    """
+    if _session.profile is not None:
+        return _session.profile, _session.environment
+    return resolve_selection(None, None)
 
 
 def build_base(

@@ -412,6 +412,27 @@ Without a value in the output the provenance is unreadable, and a user
 cannot discover a default they never wrote; `sx config get --effective
 azure.read_prefetch_size` is the single-key form of the same question.
 
+Two rules make these views trustworthy rather than merely present.
+
+Every view reports the selection this invocation made, flags included.
+The root callback resolves `--profile` / `--env` once and records the
+answer; a command that re-resolves sees only what it was passed, so it
+reports the pinned profile while the session runs the named one. That
+disagreement reads as "the flag did nothing", which is worse than no
+view at all.
+
+Reading configuration never resolves a credential. Naming the backend a
+profile declares is a question about the file; opening it is a question
+about secrets. Keeping them apart is what lets `sx config` and `sx
+doctor` answer while an `env:` reference is unresolvable, which is when
+they are reached for. For the same reason `doctor` reports an
+importable extra as installed, not as ready: nothing there opens a
+connection, and a word implying one is a diagnosis storix has not made.
+
+Profiles print as a table, a stage as a row under its profile, because
+dotted keys flatten the thing users reach for most into the least
+readable shape (`profiles.NAME.environments.STAGE.account_name`).
+
 Rules: two scopes only (`user`, `project`). Project scope writes the
 nearest existing `storix.toml`; else a `pyproject.toml` already
 carrying `[tool.storix]`; else it creates `./storix.toml` and says so.

@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from storix.cli import app as cli, maintenance
+from storix.cli.state import reset_session
 
 
 runner = CliRunner()
@@ -32,7 +33,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[Path]:
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
     # sx keeps one session per process so cwd survives across shell commands;
     # each test needs its own, or the first one to build wins the file
-    cli._session.fs = None
+    reset_session()
     yield project
 
 

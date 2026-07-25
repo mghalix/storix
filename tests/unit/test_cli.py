@@ -11,6 +11,7 @@ import storix.cli as cli_entry
 from storix import Storix
 from storix.backends import MemoryBackend
 from storix.cli import app as cli
+from storix.cli.state import reset_session
 
 
 runner = CliRunner()
@@ -30,6 +31,7 @@ def fresh_session(tmp_path, monkeypatch) -> Generator[None]:
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
     monkeypatch.delenv('STORIX_CLI_ICONS', raising=False)
     load_prefs.cache_clear()
+    reset_session()
     cli.use_fs(Storix(MemoryBackend()))
     yield
     load_prefs.cache_clear()
@@ -1101,3 +1103,106 @@ def test_help_points_at_the_commands_that_explain_the_session():
 
     assert 'sx config show --effective' in text
     assert 'sx doctor' in text
+
+
+def _pinned_and_named(tmp_path) -> object:
+    """A project with a pinned profile and a second one to override it with."""
+    project = tmp_path / 'project'
+    (project / 'pinned').mkdir(parents=True)
+    (project / 'other').mkdir(parents=True)
+    (project / 'storix.toml').write_text(
+        'profile = "pinned"\n\n'
+        '[profiles.pinned]\nprovider = "local"\nbase = "pinned"\n\n'
+        '[profiles.other]\nprovider = "local"\nbase = "other"\n',
+        encoding='utf-8',
+    )
+    return project
+
+
+def test_the_flag_overrides_a_pinned_profile_in_every_view(tmp_path, monkeypatch):
+    """Given a pinned profile, when --profile names another, then views follow.
+
+    A command that re-resolves the selection instead of reading what the
+    root callback decided reports the pin while the session uses the flag,
+    which reads as "the flag did nothing".
+    """
+    project = _pinned_and_named(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    effective = run('--profile', 'other', 'config', 'show', '--effective').stdout
+    assert "profile 'other'" in _plain(effective)
+    assert 'other' in _plain(effective).split('local.base')[1].split('<-')[0]
+
+
+def test_doctor_attributes_a_field_to_the_profile_that_supplies_it(
+    tmp_path, monkeypatch
+):
+    """Given a profile that sets base, when doctor runs, then it says so."""
+    project = _pinned_and_named(tmp_path)
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    text = _plain(run('--profile', 'other', 'doctor').stdout)
+
+    assert 'profile other' in text
+    assert 'base <- profile' in text
+
+
+def test_doctor_does_not_call_an_importable_extra_ready(tmp_path, monkeypatch):
+    """Given an installed extra, when doctor runs, then it claims no more.
+
+    Nothing here opens a connection, so "ready" would be a diagnosis
+    storix has not made.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    text = _plain(run('doctor').stdout)
+
+    assert 'provider extras' in text
+    assert 'ready' not in text
+
+
+def test_listing_profiles_survives_an_unresolvable_credential(tmp_path, monkeypatch):
+    """Given a profile whose env: secret is unset, when listed, then it prints.
+
+    Naming the backend is a question about the file; opening it is a
+    question about credentials. A broken credential is exactly when a user
+    reaches for the listing.
+    """
+    project = tmp_path / 'project'
+    project.mkdir()
+    (project / 'storix.toml').write_text(
+        'profile = "media"\n\n[profiles.media]\nprovider = "azure"\n'
+        'account_name = "acct"\ncontainer = "raw"\n'
+        'credential = "env:NOT_SET_ANYWHERE"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+    monkeypatch.delenv('NOT_SET_ANYWHERE', raising=False)
+
+    result = run('config', 'profiles')
+
+    assert result.exit_code == 0
+    assert 'media' in _plain(result.stdout)
+
+
+def test_config_show_renders_profiles_as_rows_not_dotted_keys(tmp_path, monkeypatch):
+    """Given a profile with stages, when shown, then no key names a stage."""
+    project = tmp_path / 'project'
+    project.mkdir()
+    (project / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\nbase = "."\n\n'
+        '[profiles.media.environments.prod]\nbase = "."\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    text = _plain(run('config', 'show').stdout)
+
+    assert 'profiles.media.environments.prod.base' not in text
+    assert 'media' in text
+    assert 'prod' in text
