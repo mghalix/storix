@@ -51,6 +51,7 @@ from .render import (
 )
 from .state import (
     _fs,  # pyright: ignore[reportPrivateUsage]
+    _session,  # pyright: ignore[reportPrivateUsage]
     apply_layers,
     build_base,
     build_overrides,
