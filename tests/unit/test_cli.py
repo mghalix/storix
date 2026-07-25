@@ -1037,3 +1037,34 @@ def test_a_message_carrying_exit_still_reaches_the_user(capsys, monkeypatch):
 
     assert exit_info.value.code == 1
     assert any('sx: boom' in text for text in printed)
+
+
+def test_profile_and_environment_select_the_session(tmp_path, monkeypatch):
+    """Given a profile and a stage, when sx runs, then the overlay is in force."""
+    project = tmp_path / 'project'
+    (project / 'dev').mkdir(parents=True)
+    (project / 'prod').mkdir(parents=True)
+    (project / 'dev' / 'in-dev.txt').write_text('x')
+    (project / 'prod' / 'in-prod.txt').write_text('x')
+    (project / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n\n'
+        '[profiles.media.local]\nbase = "dev"\n\n'
+        '[profiles.media.environments.prod.local]\nbase = "prod"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(project)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    assert 'in-dev.txt' in run('--profile', 'media', 'ls', '/').stdout
+    assert 'in-prod.txt' in run('--profile', 'media', '--env', 'prod', 'ls', '/').stdout
+
+
+def test_an_environment_without_a_profile_is_refused(tmp_path, monkeypatch):
+    """Given no profile, when a stage is named, then sx says which flag to add."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    result = run('--env', 'prod', 'ls', '/')
+
+    assert result.exit_code != 0
+    assert 'name one with --profile' in str(result.exception) + result.stdout

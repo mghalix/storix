@@ -8,6 +8,8 @@ presentation-related lives in ``render``; the typer surface in ``app``.
 
 from __future__ import annotations
 
+import os
+
 from functools import partial
 from typing import TYPE_CHECKING, Final
 
@@ -71,15 +73,26 @@ _FLAG_TO_FIELD: Final[dict[str, str]] = {
 field is not on the effective provider's model is rejected as foreign."""
 
 
-def resolve_provider(explicit: str | None = None) -> str:
-    """The effective provider: ``-p`` beats the CLI config beats the env.
+def resolve_provider(explicit: str | None = None, profile: str | None = None) -> str:
+    """The effective provider: a profile beats ``-p`` beats config beats env.
 
-    Precedence: an explicit ``-p/--provider``, then the config file's
-    ``provider`` (``STORIX_CLI_PROVIDER`` / project TOML), then
-    ``STORIX_PROVIDER`` and the factory default.
+    A profile names its own provider, so when one is selected it decides,
+    and a conflicting ``-p`` is reported as an error when the session is
+    built rather than silently overriding the profile (ADR 0031 D8).
+
+    Args:
+        explicit: The provider named with ``-p/--provider``, if any.
+        profile: The selected profile, if any.
+
+    Raises:
+        ConfigurationError: If the named profile does not exist.
     """
+    from storix.config import resolve_profile
+
     from .config import load_prefs
 
+    if profile is not None:
+        return resolve_profile(profile).provider
     return explicit or load_prefs().provider or StorixSettings().provider
 
 
@@ -150,27 +163,72 @@ def build_overrides(
     return overrides
 
 
+def resolve_selection(
+    profile: str | None = None, environment: str | None = None
+) -> tuple[str | None, str | None]:
+    """The effective profile and environment: flag beats env beats file.
+
+    ``STORIX_PROFILE`` and ``STORIX_ENVIRONMENT`` are honored here and
+    nowhere else: they are an operator's shell habit, and letting them
+    reach the library would redirect a service's sessions (ADR 0031 D8,
+    the ADR 0022 provider argument pointed the same way).
+
+    Args:
+        profile: ``--profile`` as given on the command line, if any.
+        environment: ``--environment`` / ``--env``, if any.
+
+    Raises:
+        SystemExit: If an environment is selected without a profile.
+    """
+    from storix.config import configured_profile
+
+    name = profile or os.environ.get('STORIX_PROFILE') or configured_profile()
+    stage = environment or os.environ.get('STORIX_ENVIRONMENT')
+    if stage and not name:
+        message = (
+            f'sx: --environment {stage!r} selects a stage of a profile; '
+            'name one with --profile'
+        )
+        raise SystemExit(message)
+    return name, stage
+
+
 def build_base(
-    provider: str | None = None, overrides: Mapping[str, str] | None = None
+    provider: str | None = None,
+    overrides: Mapping[str, str] | None = None,
+    profile: str | None = None,
+    environment: str | None = None,
 ) -> Storix:
     """Open a bare session on ``provider``, else the configured default.
 
     Precedence: an explicit ``-p/--provider``, then the config file's
-    ``provider``, then ``STORIX_PROVIDER`` / the factory default. No
-    layers - see ``build_session`` for the configured stack.
+    ``provider``, then ``STORIX_PROVIDER`` / the factory default. A
+    selected profile supplies the provider itself. No layers - see
+    ``build_session`` for the configured stack.
 
     Args:
         provider: The provider named on the command line, if any.
         overrides: Coordinate flag / ``--set`` overrides (strongest source).
+        profile: Profile to select, if any.
+        environment: Stage overlay within that profile, if any.
 
     Raises:
         SystemExit: If the provider is unknown (naming the available ones),
             its configuration is invalid, or its optional extra is missing
             (with a context-aware install remedy, D7).
     """
-    name = resolve_provider(provider)
+    selected: dict[str, str] = {}
+    if profile is not None:
+        selected['profile'] = profile
+    if environment is not None:
+        selected['environment'] = environment
+    name = resolve_provider(provider, profile)
+    # with a profile selected, the factory is handed whatever -p said (usually
+    # nothing) so that a conflicting one is reported rather than overridden;
+    # `name` stays the effective provider, for flag validation and messages
+    positional = provider if profile is not None else name
     try:
-        return get_storage(name, **(overrides or {}))
+        return get_storage(positional, **selected, **(overrides or {}))
     except (StorageError, ValueError, KeyError) as exc:
         # the factory's own error already names the available providers
         message = f'sx: cannot open provider {name!r}: {exc}'
@@ -185,10 +243,13 @@ def build_base(
 
 
 def build_session(
-    provider: str | None = None, overrides: Mapping[str, str] | None = None
+    provider: str | None = None,
+    overrides: Mapping[str, str] | None = None,
+    profile: str | None = None,
+    environment: str | None = None,
 ) -> Storix:
     """A session on the resolved provider, wrapped in the configured stack."""
-    return stack_from_prefs(build_base(provider, overrides))
+    return stack_from_prefs(build_base(provider, overrides, profile, environment))
 
 
 def _fs() -> Storix:

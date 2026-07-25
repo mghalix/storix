@@ -146,6 +146,45 @@ Both stream, so a file larger than memory moves fine. Uploads detect a
 content type (from the extension, else by sniffing the head) and set it on
 backends that support it.
 
+### Profiles and stages
+
+A profile is a named connection: the provider plus its settings, written
+once in a config file and selected by name.
+
+```toml
+# storix.toml
+[profiles.media]
+provider = "azure"
+
+[profiles.media.azure]
+account_name = "mediaaccount"
+container = "media"
+credential = "env:MEDIA_AZURE_CREDENTIAL"
+
+[profiles.media.environments.prod.azure]
+container = "media-prod"
+```
+
+```bash
+sx --profile media ls /                  # the profile's own settings
+sx --profile media --env prod ls /       # with the prod overlay on top
+STORIX_PROFILE=media sx ls /             # the same, for a whole shell session
+```
+
+A profile names its own provider, so `-p` naming a different one is an
+error rather than a silent override, and an overlay can change settings but
+never the provider - stages of one profile share a backend by definition.
+`--env` without a profile, an unknown profile, and an unknown stage each
+exit naming what is available.
+
+`STORIX_PROFILE` and `STORIX_ENVIRONMENT` are read by `sx` and deliberately
+not by the library: an operator's shell habit should not redirect a
+service's sessions. In code the selection is explicit:
+
+```python
+fs = get_storage(profile="media", environment="prod")
+```
+
 ### Tuning a transfer
 
 `sx` reads the same `STORIX_*` environment your application does, so the

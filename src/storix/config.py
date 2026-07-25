@@ -17,13 +17,14 @@ which source supplied each effective field (``config_provenance``).
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
 import warnings
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast, get_args
 
 from pydantic import ByteSize, Field
 from pydantic_settings import (
@@ -163,15 +164,10 @@ def _validate_document(path: Path, data: dict[str, Any]) -> None:
     """Reject unknown top-level tables so a typo never silently does nothing.
 
     Raises:
-        ConfigurationError: If a top-level key is not a known section, or
-            if a profile key is present (profiles land in a future release).
+        ConfigurationError: If a top-level key is not a known section, or if
+            the ``[profiles]`` table is malformed.
     """
-    if 'profiles' in data or 'profile' in data:
-        msg = (
-            f'{path}: profiles are not available in this release; they land '
-            'in a future release (see ADR 0031)'
-        )
-        raise ConfigurationError(msg)
+    _validate_profiles(path, data)
     unknown = [key for key in data if key not in _KNOWN_TOP_LEVEL]
     if unknown:
         known = ', '.join(sorted(_KNOWN_TOP_LEVEL))
@@ -552,16 +548,233 @@ _KNOWN_TOP_LEVEL: Final[frozenset[str]] = frozenset(
         'cli',
         'alias',
         'aliases',
+        'profile',
+        'profiles',
         *PROVIDER_MODELS,
         *StorixSettings.model_fields,
     }
 )
 """Legal top-level keys in a storix config document (or ``[tool.storix]``):
 the provider sections, every field of ``StorixSettings`` (``provider``,
-``max_transfer_ranges``, ...), the ``[cli]`` table, and the ``alias`` /
-``aliases`` compatibility spellings. Derived from the model rather than
+``max_transfer_ranges``, ...), the ``[cli]`` table, the ``profile``
+selection and its ``[profiles]`` table, and the ``alias`` / ``aliases``
+compatibility spellings. Derived from the model rather than
 listed by hand, so a new top-level setting is legal in TOML the day it is
 added instead of erroring as unknown."""
+
+
+# --- profiles and environment overlays (ADR 0031 D8, D9) ---
+
+
+_PROFILE_NAME: Final[re.Pattern[str]] = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]*')
+"""Legal profile and environment names, per ADR 0031 D8."""
+
+_PROFILE_PROVIDERS: Final[frozenset[str]] = frozenset(
+    get_args(StorageProvider.__value__)
+)
+"""Providers a profile may name: every one the factory builds, not only the
+ones with a settings model. ``memory`` takes no configuration, so a profile
+naming it carries no provider section."""
+
+_ENVIRONMENTS: Final[str] = 'environments'
+"""Sub-table of a profile holding its stage overlays."""
+
+
+@dataclass(frozen=True)
+class ResolvedProfile:
+    """A profile selection resolved into one provider and its settings."""
+
+    name: str
+    """The selected profile."""
+
+    provider: str
+    """The provider the profile connects to; a profile always names one."""
+
+    values: dict[str, Any]
+    """Provider settings, overlay applied, ready as ``get_storage`` keywords."""
+
+    source: Path
+    """The file the profile was read from, for diagnostics."""
+
+    environment: str | None = None
+    """The applied stage overlay, when one was selected."""
+
+
+def _validate_profiles(path: Path, data: dict[str, Any]) -> None:
+    """Check the shape of a ``[profiles]`` table before anything reads it.
+
+    Raises:
+        ConfigurationError: If ``profiles`` is not a table, a profile is not
+            a table, a name is illegal, a profile names no provider or an
+            unknown one, or an overlay tries to switch the provider.
+    """
+    node = data.get('profiles')
+    if node is None:
+        return
+    if not isinstance(node, dict):
+        msg = f'{path}: [profiles] must be a table of named profiles'
+        raise ConfigurationError(msg)
+
+    for name, profile in cast('dict[str, Any]', node).items():
+        if not _PROFILE_NAME.fullmatch(name):
+            msg = (
+                f'{path}: profile name {name!r} is not allowed; use letters, '
+                'digits, dot, dash, or underscore, starting alphanumeric'
+            )
+            raise ConfigurationError(msg)
+        if not isinstance(profile, dict):
+            msg = f'{path}: profile {name!r} must be a table'
+            raise ConfigurationError(msg)
+        provider = cast('dict[str, Any]', profile).get('provider')
+        if not isinstance(provider, str):
+            msg = f'{path}: profile {name!r} must name a provider'
+            raise ConfigurationError(msg)
+        if provider not in _PROFILE_PROVIDERS:
+            known = ', '.join(sorted(_PROFILE_PROVIDERS))
+            msg = (
+                f'{path}: profile {name!r} names unknown provider '
+                f'{provider!r}; known: {known}'
+            )
+            raise ConfigurationError(msg)
+        _validate_environments(path, name, cast('dict[str, Any]', profile))
+
+
+def _validate_environments(path: Path, name: str, profile: dict[str, Any]) -> None:
+    """Check one profile's overlays.
+
+    Raises:
+        ConfigurationError: If the overlays are not a table, an environment
+            name is illegal, or an overlay declares its own provider.
+    """
+    node = profile.get(_ENVIRONMENTS)
+    if node is None:
+        return
+    if not isinstance(node, dict):
+        msg = f'{path}: profile {name!r}: [{_ENVIRONMENTS}] must be a table'
+        raise ConfigurationError(msg)
+    for env_name, overlay in cast('dict[str, Any]', node).items():
+        if not _PROFILE_NAME.fullmatch(env_name):
+            msg = (
+                f'{path}: profile {name!r}: environment name {env_name!r} '
+                'is not allowed'
+            )
+            raise ConfigurationError(msg)
+        if not isinstance(overlay, dict):
+            msg = f'{path}: profile {name!r}: environment {env_name!r} must be a table'
+            raise ConfigurationError(msg)
+        if 'provider' in cast('dict[str, Any]', overlay):
+            msg = (
+                f'{path}: profile {name!r}: environment {env_name!r} cannot change '
+                'the provider; stages of one profile share a backend'
+            )
+            raise ConfigurationError(msg)
+
+
+def available_profiles() -> dict[str, DiscoveredConfig]:
+    """Every profile that can be selected, mapped to the file defining it.
+
+    A project profile shadows a user profile of the same name whole: the
+    effective profile is always readable from one file, with no cross-scope
+    field merging to reason about (ADR 0031 D8).
+    """
+    found: dict[str, DiscoveredConfig] = {}
+    for disc in (find_user_config(), find_project_config()):
+        if disc is None:
+            continue
+        node = disc.data.get('profiles')
+        if isinstance(node, dict):
+            for name in cast('dict[str, Any]', node):
+                found[name] = disc
+    return found
+
+
+def configured_profile() -> str | None:
+    """The profile a config file pins with a top-level ``profile`` key."""
+    for disc in (find_project_config(), find_user_config()):
+        if disc is None:
+            continue
+        name = disc.data.get('profile')
+        if isinstance(name, str):
+            return name
+    return None
+
+
+def resolve_profile(name: str, environment: str | None = None) -> ResolvedProfile:
+    """Resolve a profile (and optional overlay) into provider settings.
+
+    The profile's provider section and the overlay are merged and then run
+    through the same extraction every config file gets, so unknown keys,
+    secret policy, and path anchoring behave identically inside a profile.
+
+    Args:
+        name: Profile to select.
+        environment: Stage overlay to apply on top of it, if any.
+
+    Returns:
+        The provider and its settings, ready as ``get_storage`` keywords.
+
+    Raises:
+        ConfigurationError: If the profile or environment does not exist, or
+            the profile's settings fail the config-file policy.
+    """
+    profiles = available_profiles()
+    disc = profiles.get(name)
+    if disc is None:
+        known = (
+            ', '.join(f'{n} ({p.path})' for n, p in sorted(profiles.items()))
+            or 'none defined'
+        )
+        msg = f'unknown profile {name!r}; available: {known}'
+        raise ConfigurationError(msg)
+
+    profile = cast(
+        'dict[str, Any]', cast('dict[str, Any]', disc.data['profiles'])[name]
+    )
+    provider = cast('str', profile['provider'])
+    model = PROVIDER_MODELS.get(provider)
+    if model is None:
+        # a provider with no settings model (memory) configures nothing
+        extra = sorted(k for k in profile if k not in {'provider', _ENVIRONMENTS})
+        if extra:
+            msg = (
+                f'{disc.path}: profile {name!r} names provider {provider!r}, '
+                f'which takes no configuration; remove {extra[0]!r}'
+            )
+            raise ConfigurationError(msg)
+        return ResolvedProfile(
+            name=name,
+            provider=provider,
+            values={},
+            source=disc.path,
+            environment=environment,
+        )
+    section = str(getattr(model, 'TOML_SECTION', provider))
+    merged: dict[str, Any] = dict(cast('dict[str, Any]', profile.get(section, {})))
+
+    if environment is not None:
+        overlays = cast('dict[str, Any]', profile.get(_ENVIRONMENTS, {}))
+        overlay = overlays.get(environment)
+        if overlay is None:
+            known = ', '.join(sorted(overlays)) or 'none defined'
+            msg = (
+                f'profile {name!r} has no environment {environment!r} '
+                f'({disc.path}); available: {known}'
+            )
+            raise ConfigurationError(msg)
+        merged |= cast(
+            'dict[str, Any]', cast('dict[str, Any]', overlay).get(section, {})
+        )
+
+    # reuse the file policy wholesale: unknown keys, env: secrets, anchoring
+    view = DiscoveredConfig(disc.path, {section: merged}, disc.scope)
+    values = _section_values(view, model)
+    return ResolvedProfile(
+        name=name,
+        provider=provider,
+        values=values,
+        source=disc.path,
+        environment=environment,
+    )
 
 
 # --- provenance (which source supplied each effective field) ---

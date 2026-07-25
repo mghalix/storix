@@ -21,6 +21,7 @@ from storix.config import (
     config_provenance,
     find_project_config,
     is_secret,
+    resolve_profile,
     secret_fields,
 )
 from storix.errors import ConfigurationError
@@ -126,11 +127,111 @@ def test_unknown_top_level_table_errors(sandbox):
     assert 'known' in str(exc.value)
 
 
-def test_profiles_are_rejected_with_a_clear_message(sandbox):
-    (sandbox / 'storix.toml').write_text('[profiles.media]\nprovider = "azure"\n')
-    with pytest.raises(ConfigurationError) as exc:
+def test_a_profile_supplies_its_provider_and_settings(sandbox):
+    """Given a profile, when selected, then it decides provider and settings."""
+    (sandbox / 'data').mkdir()
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n\n'
+        '[profiles.media.local]\nbase = "data"\nread_chunk_size = "2MiB"\n',
+        encoding='utf-8',
+    )
+
+    fs = get_storage(profile='media')
+
+    assert fs.backend.base.name == 'data'
+    assert fs.backend.default_read_chunk_size == 2 * 1024 * 1024
+
+
+def test_an_environment_overlays_the_profile(sandbox):
+    """Given a stage overlay, when selected, then it wins over the base."""
+    (sandbox / 'dev').mkdir()
+    (sandbox / 'prod').mkdir()
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n\n'
+        '[profiles.media.local]\nbase = "dev"\n\n'
+        '[profiles.media.environments.prod.local]\nbase = "prod"\n',
+        encoding='utf-8',
+    )
+
+    assert get_storage(profile='media').backend.base.name == 'dev'
+    assert get_storage(profile='media', environment='prod').backend.base.name == 'prod'
+
+
+def test_an_unknown_profile_lists_what_exists(sandbox):
+    """Given a name that is not defined, when selected, then it says what is."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n', encoding='utf-8'
+    )
+
+    with pytest.raises(ConfigurationError, match='unknown profile'):
+        get_storage(profile='archive')
+
+
+def test_an_unknown_environment_lists_the_profile_stages(sandbox):
+    """Given a stage that is not defined, when selected, then it says which are."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n\n'
+        '[profiles.media.environments.prod.local]\nbase = "."\n',
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ConfigurationError, match='available: prod'):
+        get_storage(profile='media', environment='staging')
+
+
+def test_an_environment_without_a_profile_is_an_error(sandbox):
+    """Given no profile, when a stage is selected, then it is refused."""
+    with pytest.raises(ConfigurationError, match='name one with profile='):
+        get_storage(environment='prod')
+
+
+def test_a_profile_refuses_a_conflicting_provider(sandbox):
+    """Given a profile, when another provider is named, then it is an error."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n\n[profiles.media.local]\nbase = "."\n',
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ConfigurationError, match='names its own provider'):
+        get_storage('memory', profile='media')
+
+
+def test_an_overlay_cannot_switch_the_provider(sandbox):
+    """Given an overlay naming a provider, when read, then the file is refused."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n\n'
+        '[profiles.media.environments.prod]\nprovider = "memory"\n',
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ConfigurationError, match='cannot change'):
         find_project_config()
-    assert 'profiles' in str(exc.value)
+
+
+def test_a_profile_must_name_a_known_provider(sandbox):
+    """Given a profile without a usable provider, when read, then it is refused."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "nope"\n', encoding='utf-8'
+    )
+
+    with pytest.raises(ConfigurationError, match='unknown provider'):
+        find_project_config()
+
+
+def test_a_project_profile_shadows_a_user_profile_of_the_same_name(sandbox, tmp_path):
+    """Given both scopes define a name, when resolved, then the project wins."""
+    (sandbox / 'project').mkdir()
+    _user_config(tmp_path, '[profiles.media]\nprovider = "memory"\n')
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\n\n'
+        '[profiles.media.local]\nbase = "project"\n',
+        encoding='utf-8',
+    )
+
+    resolved = resolve_profile('media')
+
+    assert resolved.provider == 'local'
+    assert resolved.source == sandbox / 'storix.toml'
 
 
 def test_malformed_toml_names_the_file(sandbox):
