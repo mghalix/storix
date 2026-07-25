@@ -15,30 +15,29 @@ from __future__ import annotations
 
 import os
 import shlex
-import tomllib
 
 from functools import cache
-from pathlib import Path
 from typing import Any, Final, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from storix.config import find_project_config, find_user_config
 
-_MISPLACED: Final[dict[str, str]] = {
-    'home': 'STORIX_LOCAL_BASE / the provider settings (env or .env)',
-    'base': 'STORIX_LOCAL_BASE (env or .env)',
-    'account_name': 'STORIX_AZURE_* (env or .env)',
-    'connection_string': 'STORIX_AZURE_* (env or .env)',
-}
-"""Credentials and anchors users reach for here. How to *connect* is
-shared with the library (ADR 0015), so name their real home instead of
-ignoring them. ``provider`` is the deliberate exception: see CliPrefs."""
 
 _GLOBAL_VALUE_OPTIONS: Final[set[str]] = {
     '-p',
     '--provider',
     '--cache-ttl',
     '--sandbox',
+    '--base',
+    '--bucket',
+    '--container',
+    '--account-name',
+    '--region',
+    '--endpoint',
+    '--root',
+    '--kind',
+    '--set',
 }
 
 
@@ -76,31 +75,6 @@ class CliPrefs(BaseModel):
     subcommand matches an alias key."""
 
 
-def _section(document: Any, *keys: str) -> dict[str, Any] | None:
-    """Descend ``keys`` into a parsed TOML document; None when absent."""
-    node: object = document
-    for key in keys:
-        if not isinstance(node, dict) or key not in node:
-            return None
-        node = cast('dict[str, Any]', node)[key]
-    return cast('dict[str, Any]', node) if isinstance(node, dict) else None
-
-
-def _read(file: Path) -> dict[str, Any]:
-    """Parse a TOML file, dying with a readable message on bad syntax.
-
-    Raises:
-        SystemExit: If the file exists but is not valid TOML.
-    """
-    try:
-        return tomllib.loads(file.read_text('utf-8'))
-    except tomllib.TOMLDecodeError as exc:
-        message = f'sx: invalid config {file}: {exc}'
-        raise SystemExit(message) from exc
-    except OSError:
-        return {}
-
-
 def _normalize_prefs(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalize alias/aliases key variations in preferences dict."""
     data = dict(raw)
@@ -115,15 +89,18 @@ def _normalize_prefs(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_file_prefs(doc: dict[str, Any]) -> dict[str, Any]:
-    """Extract CLI preferences from a standalone config file document.
+    """Extract CLI preferences from a discovered config document.
 
-    Checks ``[cli]`` table first; if absent, extracts top-level CLI fields.
-    Top-level ``[alias]`` or ``[aliases]`` tables in standalone files (e.g.
-    ``storix.toml``) are also merged in.
+    Checks the ``[cli]`` table first; if absent, extracts top-level CLI
+    fields (leaving provider sections to the library loader). Top-level
+    ``[alias]`` / ``[aliases]`` tables are merged in as compatibility
+    spellings. Provider tables (``[local]``, ``[s3]``, ...) are ignored
+    here: they are connection config the library loader owns.
     """
-    cli_table = _section(doc, 'cli')
-    if cli_table is not None:
-        prefs = dict(cli_table)
+    cli_table = doc.get('cli')
+    prefs: dict[str, Any]
+    if isinstance(cli_table, dict):
+        prefs = cast('dict[str, Any]', cli_table)
     else:
         prefs = {
             k: v
@@ -132,45 +109,28 @@ def _extract_file_prefs(doc: dict[str, Any]) -> dict[str, Any]:
         }
 
     for key in ('alias', 'aliases'):
-        if key in doc and isinstance(doc[key], dict):
+        node = doc.get(key)
+        if isinstance(node, dict):
+            table = cast('dict[str, Any]', node)
             existing = prefs.get(key)
             if isinstance(existing, dict):
-                prefs[key] = {**doc[key], **existing}
+                prefs[key] = {**table, **cast('dict[str, Any]', existing)}
             else:
-                prefs[key] = dict(doc[key])
+                prefs[key] = dict(table)
 
     return _normalize_prefs(prefs)
 
 
 def _project_prefs() -> dict[str, Any]:
-    """The nearest project config, ruff-style: walk upward from cwd.
-
-    Per directory, ``storix.toml`` wins over ``.storix.toml``, else a
-    ``pyproject.toml`` carrying ``[tool.storix.cli]``. The first file found
-    anchors the project and stops the walk, even when it holds no CLI
-    preferences.
-    """
-    cwd = Path.cwd()
-    for directory in (cwd, *cwd.parents):
-        for name in ('storix.toml', '.storix.toml'):
-            file = directory / name
-            if file.is_file():
-                return _extract_file_prefs(_read(file))
-        pyproject = directory / 'pyproject.toml'
-        if pyproject.is_file():
-            found = _section(_read(pyproject), 'tool', 'storix', 'cli')
-            if found is not None:
-                return _normalize_prefs(found)
-    return {}
+    """The ``[cli]`` slice of the nearest project config (shared discovery)."""
+    disc = find_project_config()
+    return _extract_file_prefs(disc.data) if disc is not None else {}
 
 
 def _user_prefs() -> dict[str, Any]:
-    """The personal defaults: ``~/.config/storix/config.toml`` (XDG)."""
-    base = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config')
-    file = base / 'storix' / 'config.toml'
-    if not file.is_file():
-        return {}
-    return _extract_file_prefs(_read(file))
+    """The ``[cli]`` slice of the XDG user config (shared discovery)."""
+    disc = find_user_config()
+    return _extract_file_prefs(disc.data) if disc is not None else {}
 
 
 def _env_prefs() -> dict[str, Any]:
@@ -190,20 +150,18 @@ def _env_prefs() -> dict[str, Any]:
 def load_prefs() -> CliPrefs:
     """Load and merge the persistent preferences (cached per process).
 
+    Provider tables (``[local]``, ``[s3]``, ...) are now legal config the
+    library loader owns, so an unknown key inside ``[cli]`` is simply an
+    unknown preference (``extra='forbid'``): connection settings belong in
+    a provider table or the ``STORIX_*`` environment.
+
     Raises:
-        SystemExit: If a config file is malformed, holds an unknown key,
-            or a value has the wrong type. Connection settings that do not
-            belong here are rejected naming where they do belong, so a
-            misplaced key never silently does nothing.
+        SystemExit: If a config file holds an unknown ``[cli]`` key or a
+            value has the wrong type.
+        ConfigurationError: If a discovered file is malformed or holds an
+            unknown top-level table (raised by the shared loader).
     """
     merged: dict[str, Any] = {**_user_prefs(), **_env_prefs(), **_project_prefs()}
-    for key, home in _MISPLACED.items():
-        if key in merged:
-            message = (
-                f'sx: {key!r} is not a CLI preference - it is connection config, '
-                f'shared with the library. Set it via {home}.'
-            )
-            raise SystemExit(message)
     try:
         return CliPrefs(**merged)
     except ValidationError as exc:

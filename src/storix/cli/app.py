@@ -53,12 +53,14 @@ from .state import (
     _session,  # pyright: ignore[reportPrivateUsage]
     apply_layers,
     build_base,
+    build_overrides,
     build_session,
     current_fs,
     debug_enabled,
     empty_all,
     icons_enabled,
     layer_summary,
+    resolve_provider,
     set_debug,
     set_icons,
     stat_all,
@@ -976,13 +978,61 @@ def shell() -> None:
     start_shell(_fs())
 
 
+def _version_callback(value: bool) -> None:  # noqa: FBT001 - typer eager callback
+    """Print ``sx <version>`` and exit, building no backend (D6)."""
+    if not value:
+        return
+    from importlib.metadata import version
+
+    console.print(f'sx {version("storix")}')
+    raise typer.Exit
+
+
 @app.callback(invoke_without_command=True)
-def _main(  # pyright: ignore[reportUnusedFunction]
+def _main(  # noqa: PLR0913  # pyright: ignore[reportUnusedFunction]
     ctx: typer.Context,
     *,
+    version: Annotated[
+        bool,
+        typer.Option(
+            '--version',
+            callback=_version_callback,
+            is_eager=True,
+            help='show the sx version and exit',
+        ),
+    ] = False,
     provider_: Annotated[
         str | None,
         typer.Option('-p', '--provider', help='local | memory | azure | ...'),
+    ] = None,
+    base: Annotated[
+        str | None, typer.Option('--base', help='local base directory')
+    ] = None,
+    bucket: Annotated[
+        str | None, typer.Option('--bucket', help='s3 / gcs bucket')
+    ] = None,
+    container: Annotated[
+        str | None, typer.Option('--container', help='azure container')
+    ] = None,
+    account_name: Annotated[
+        str | None, typer.Option('--account-name', help='azure storage account')
+    ] = None,
+    region: Annotated[str | None, typer.Option('--region', help='s3 region')] = None,
+    endpoint: Annotated[
+        str | None, typer.Option('--endpoint', help='custom endpoint URL')
+    ] = None,
+    root: Annotated[
+        str | None, typer.Option('--root', help='key prefix anchoring "/"')
+    ] = None,
+    kind: Annotated[
+        str | None, typer.Option('--kind', help='azure surface: auto | adls | blob')
+    ] = None,
+    set_: Annotated[
+        list[str] | None,
+        typer.Option(
+            '--set',
+            help='provider.field=value override, repeatable (e.g. --set s3.root=/x)',
+        ),
     ] = None,
     cache: Annotated[
         bool, typer.Option('--cache', help='read-through cache: du/ls/stat/cat')
@@ -1005,6 +1055,7 @@ def _main(  # pyright: ignore[reportUnusedFunction]
         bool,
         typer.Option(
             '--debug',
+            '--traceback',
             help='print the full provider traceback when a command fails',
         ),
     ] = False,
@@ -1014,17 +1065,31 @@ def _main(  # pyright: ignore[reportUnusedFunction]
     set_debug(debug)
     if icons is not None:
         set_icons(icons)
-    # rebuild on an explicit --provider or any layer flag, else keep the
-    # persistent session (so cwd survives across shell commands); layer
-    # flags replace the configured [[cli.layers]] stack for the invocation
-    if provider_ is not None or cache or sandbox is not None:
+    overrides = build_overrides(
+        resolve_provider(provider_),
+        flags={
+            'base': base,
+            'bucket': bucket,
+            'container': container,
+            'account_name': account_name,
+            'region': region,
+            'endpoint': endpoint,
+            'root': root,
+            'kind': kind,
+        },
+        sets=set_ or [],
+    )
+    # rebuild on an explicit --provider, a coordinate override, or any layer
+    # flag, else keep the persistent session (so cwd survives across shell
+    # commands); layer flags replace the configured [[cli.layers]] stack
+    if provider_ is not None or overrides or cache or sandbox is not None:
         if cache or sandbox is not None:
-            base = build_base(provider_)
+            base_fs = build_base(provider_, overrides)
             _session.fs = apply_layers(
-                base, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
+                base_fs, cache=cache, cache_ttl=cache_ttl, sandbox=sandbox
             )
         else:
-            _session.fs = build_session(provider_)
+            _session.fs = build_session(provider_, overrides)
 
     if ctx.invoked_subcommand is None or interactive:
         from .shell import start_shell
@@ -1050,17 +1115,34 @@ def _keep_transfer_buffers_returnable() -> None:
 
 def main() -> None:
     """Console-script entry point (`sx`); exits hard, without joining threads."""
+    from storix.errors import ConfigurationError
+
     from .config import expand_alias, load_prefs
 
     _keep_transfer_buffers_returnable()
-    prefs = load_prefs()
-    if prefs.alias and len(sys.argv) > 1:
-        sys.argv = [sys.argv[0], *expand_alias(sys.argv[1:], prefs.alias)]
     code = 0
     try:
+        prefs = load_prefs()
+        if prefs.alias and len(sys.argv) > 1:
+            sys.argv = [sys.argv[0], *expand_alias(sys.argv[1:], prefs.alias)]
         app()
+    except ConfigurationError as exc:
+        # a malformed or invalid config file: one clean line, no traceback
+        err.print(f'[red]sx: {exc}[/red]')
+        code = 1
     except SystemExit as exc:
-        code = exc.code if isinstance(exc.code, int) else int(exc.code is not None)
+        # os._exit below skips the interpreter's own SystemExit handling, so
+        # a message-carrying exit (SystemExit('sx: ...'), which the config
+        # loader and the override validator both raise) has to be printed
+        # here or it would vanish and leave a bare exit status
+        match exc.code:
+            case None:
+                code = 0
+            case int() as status:
+                code = status
+            case message:
+                err.print(f'[red]{message}[/red]')
+                code = 1
     sys.stdout.flush()
     sys.stderr.flush()
     # a cancelled push/pull leaves worker threads mid-upload that the

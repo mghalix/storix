@@ -47,9 +47,9 @@ def test_entrypoint_reports_missing_cli_extra(monkeypatch):
     with pytest.raises(SystemExit) as exc_info:
         cli_entry.main()
 
-    assert str(exc_info.value) == (
-        "cli extra not installed. Install it by running `uv add 'storix[cli]'`."
-    )
+    message = str(exc_info.value)
+    assert 'cli extra not installed' in message
+    assert 'storix[cli]' in message  # the install remedy names the extra
 
 
 def test_entrypoint_does_not_mask_application_import_errors(monkeypatch):
@@ -389,15 +389,17 @@ def test_config_layers_unknown_name_dies_with_the_known_set(prefs_from):
     assert 'cache' in str(exc_info.value)  # the error names the known layers
 
 
-def test_credentials_in_the_cli_table_are_rejected_not_ignored(prefs_from):
+def test_connection_key_in_the_cli_table_is_rejected_as_unknown(prefs_from):
     from storix.cli.config import load_prefs
 
-    prefs_from("[cli]\naccount_name = 'acme'\n")  # shared config, belongs in env
+    # provider tables are now the home for connection config (ADR 0031); an
+    # account_name inside [cli] is simply an unknown preference now.
+    prefs_from("[cli]\naccount_name = 'acme'\n")
 
     with pytest.raises(SystemExit) as exc_info:
         load_prefs()
 
-    assert 'STORIX_AZURE' in str(exc_info.value)  # names where it belongs
+    assert 'account_name' in str(exc_info.value)  # names the offending key
 
 
 def test_configured_provider_opens_that_backend(prefs_from):
@@ -910,3 +912,128 @@ def test_stop_survives_a_broad_exception_handler() -> None:
             pytest.fail('a stop request was swallowed by a broad handler')
 
     assert not issubclass(TransferStoppedError, StorageError)
+
+
+# --- unified configuration: --version, coordinate flags, --set (ADR 0031) ---
+
+
+def test_version_prints_the_metadata_version():
+    from importlib.metadata import version
+
+    result = run('--version')
+    assert result.exit_code == 0
+    assert f'sx {version("storix")}' in result.stdout
+
+
+def test_base_flag_anchors_a_local_session_at_cwd(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / 'marker.txt').write_text('x')
+
+    result = run('-p', 'local', '--base', '.', 'ls', '-a')
+
+    assert result.exit_code == 0
+    assert 'marker.txt' in result.stdout  # listed cwd, not ~/.storix
+
+
+def test_foreign_flag_names_the_provider_and_its_accepted_flags():
+    from storix.cli.state import build_overrides
+
+    with pytest.raises(SystemExit) as exc:
+        build_overrides('local', flags={'bucket': 'x'}, sets=[])
+
+    message = str(exc.value)
+    assert "provider 'local'" in message
+    assert '--bucket' in message
+    assert '--base' in message  # names what local does accept
+
+
+def test_set_parses_type_aware_and_rejects_unknown_fields():
+    from storix.cli.state import build_overrides
+
+    overrides = build_overrides(
+        's3', flags={'bucket': 'b'}, sets=['s3.root=/tenants/a']
+    )
+    assert overrides == {'bucket': 'b', 'root': '/tenants/a'}
+
+    with pytest.raises(SystemExit) as exc:
+        build_overrides('s3', flags={}, sets=['s3.nope=1'])
+    assert 'nope' in str(exc.value)
+
+
+def test_set_of_a_secret_field_is_refused():
+    from storix.cli.state import build_overrides
+
+    with pytest.raises(SystemExit) as exc:
+        build_overrides('s3', flags={}, sets=['s3.access_key_id=AKIA'])
+
+    message = str(exc.value)
+    assert 'access_key_id' in message
+    assert 'STORIX_S3_ACCESS_KEY_ID' in message  # points at the safe home
+
+
+def test_set_targeting_another_provider_is_rejected():
+    from storix.cli.state import build_overrides
+
+    with pytest.raises(SystemExit) as exc:
+        build_overrides('s3', flags={}, sets=['azure.container=x'])
+    assert 'azure' in str(exc.value)
+
+
+def test_missing_extra_gives_one_line_error_not_a_traceback(monkeypatch):
+    from storix.cli import state
+
+    def missing_extra(*_args, **_kwargs):
+        msg = 'opendal missing'
+        raise ImportError(msg)
+
+    monkeypatch.setattr(state, 'get_storage', missing_extra)
+    state.set_debug(False)
+
+    with pytest.raises(SystemExit) as exc:
+        state.build_base('s3')
+
+    message = str(exc.value)
+    assert 's3 extra' in message
+    assert 'storix[s3]' in message  # the install remedy
+    assert 'Traceback' not in message  # one line, no traceback
+
+
+def test_missing_extra_reraises_under_traceback(monkeypatch):
+    from storix.cli import state
+
+    def missing_extra(*_args, **_kwargs):
+        msg = 'opendal missing'
+        raise ImportError(msg)
+
+    monkeypatch.setattr(state, 'get_storage', missing_extra)
+    state.set_debug(True)  # --traceback/--debug reveals everything
+    try:
+        with pytest.raises(ImportError):
+            state.build_base('s3')
+    finally:
+        state.set_debug(False)
+
+
+def test_a_message_carrying_exit_still_reaches_the_user(capsys, monkeypatch):
+    """Given an exit that carries a message, when sx exits hard, then it prints.
+
+    `main` ends in `os._exit`, which skips the interpreter's own SystemExit
+    handling, so a `SystemExit('sx: ...')` raised by the config loader or the
+    override validator would otherwise vanish into a bare exit status.
+    """
+    import storix.cli.app as app_module
+
+    printed: list[str] = []
+    monkeypatch.setattr(app_module.err, 'print', lambda text: printed.append(text))
+    monkeypatch.setattr(
+        app_module, 'app', lambda: (_ for _ in ()).throw(SystemExit('sx: boom'))
+    )
+    monkeypatch.setattr(
+        app_module.os, '_exit', lambda code: (_ for _ in ()).throw(SystemExit(code))
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        app_module.main()
+
+    assert exit_info.value.code == 1
+    assert any('sx: boom' in text for text in printed)

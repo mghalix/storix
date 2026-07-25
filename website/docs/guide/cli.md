@@ -1,9 +1,14 @@
 # The sx CLI
 
 `sx` is the storix core behind a command line: the same session, cwd, layers,
-and typed errors, driven from your terminal. It ships in the `cli` extra.
+and typed errors, driven from your terminal. It ships in the `cli` extra, and
+installs standalone with `uv tool`:
 
-=== "uv"
+```bash
+uv tool install "storix[cli]"          # + provider extras: [cli,s3], [cli,azure], [all]
+```
+
+=== "uv (in a project)"
 
     ```bash
     uv add "storix[cli]"
@@ -18,14 +23,16 @@ and typed errors, driven from your terminal. It ships in the `cli` extra.
 Run it one-shot, or with no command to enter the interactive shell:
 
 ```bash
+sx --version       # print the installed version and exit
 sx                 # interactive shell (defaults to ~/.storix)
 sx ls /            # or run a single command
 sx -p azure ls /   # point it at a configured provider
 ```
 
-Connection settings are the same `STORIX_*` environment variables the library
-reads, so `sx -p azure` talks to the account your code already talks to. See
-[Configure from settings](../recipes/settings.md).
+Connection settings come from the same sources the library reads: the
+`STORIX_*` environment variables, and now the provider sections of a config
+file (`[s3]`, `[azure]`, ...). So `sx -p azure` talks to the account your code
+already talks to. See [Configure from settings](../recipes/settings.md).
 
 ## Unix commands, any backend
 
@@ -223,6 +230,36 @@ Pass `--debug` to any invocation to get the full provider traceback
 sx --debug -p s3 ls
 ```
 
+## Provider settings on the command line
+
+Non-secret provider coordinates can be set for one invocation, without touching
+the environment or a file. Direct flags cover the common ones:
+
+```bash
+sx -p local --base .                       # local base at the current directory
+sx -p s3 --bucket media --region auto ls   # bucket + region
+sx -p azure --account-name acct --container media --kind adls ls
+sx -p s3 --endpoint https://ACCOUNT.r2.cloudflarestorage.com --bucket media ls
+```
+
+`--base` (local), `--bucket`, `--container`, `--account-name`, `--region`,
+`--endpoint`, `--root`, and `--kind` are validated against the effective
+provider: a flag that does not belong to it exits naming the provider and the
+flags it does accept, so `-p local --bucket x` never silently does nothing.
+
+For any other field, `--set provider.field=value` is the repeatable escape
+hatch (values are parsed type-aware through the same models):
+
+```bash
+sx -p azure --set azure.read_chunk_size=1048576 cat /big.bin
+sx -p s3 --set s3.root=/tenants/a ls
+```
+
+A relative `--base` (or `--set`) path resolves against the directory you run
+`sx` from, exactly like `ls`. Secrets are refused on the command line
+(`--set s3.access_key_id=...` exits pointing at the environment), because a
+flag lands in shell history.
+
 ## Layers
 
 Two flags wrap the session for one invocation:
@@ -249,16 +286,28 @@ first, or point --sandbox / the config layer elsewhere)
 
 ## Configuration
 
-Preferences and an always-on layer stack persist in a config file, so you do
-not retype flags. Sources, strongest first:
+CLI preferences (icons, aliases, the layer stack) and non-secret provider
+settings (bucket, base, region, ...) live in the same config files, so you do
+not retype flags. Three canonical files are read; for any value, the strongest
+source wins:
 
-1. command-line flags
-2. the nearest project config, searching upward from the current directory:
-   `storix.toml` > `.storix.toml` (a `[cli]` table) > `pyproject.toml`
-   (`[tool.storix.cli]`)
-3. `STORIX_CLI_*` environment variables
-4. your personal defaults: `~/.config/storix/config.toml`
-5. built-in defaults
+1. command-line flags and `--set`
+2. `STORIX_*` (provider settings) / `STORIX_CLI_*` (preferences) environment
+   variables
+3. a project `.env` (provider settings)
+4. the nearest project config, searching upward from the current directory:
+   `storix.toml` > `.storix.toml` (a compatibility alias) > `pyproject.toml`
+   (`[tool.storix]`)
+5. your personal defaults: `~/.config/storix/config.toml`
+6. built-in defaults
+
+The three canonical files:
+
+```
+~/.config/storix/config.toml      # user scope (XDG_CONFIG_HOME honored)
+storix.toml                       # project scope, standalone
+pyproject.toml -> [tool.storix]   # project scope, namespaced
+```
 
 === "storix.toml"
 
@@ -268,6 +317,11 @@ not retype flags. Sources, strongest first:
     # every sx session gets the read-through cache - handy against cloud
     # providers, where a repeated ls or du is a real round trip
     layers = [{ name = "cache", ttl = 300 }]
+
+    [azure]               # non-secret connection coordinates live here too
+    account_name = "myaccount"
+    container = "media"
+    credential = "env:AZURE_CREDENTIAL"   # secrets via env: refs, not literals
 
     [alias]
     lt = "tree"
@@ -326,22 +380,27 @@ cwd:     /
 layers:  cache ls/stat/du/cat via InMemoryCacheStore
 ```
 
-`provider` is the one connection key that lives here, because "which
-backend do I explore by default" is a habit of yours, not of your code:
-setting `STORIX_PROVIDER` would drag your application's library sessions
-onto the same backend. *How* to connect (credentials, account names, base
-directories) stays shared with the library at `STORIX_*` / `[tool.storix]`,
-and the library never auto-applies a layer stack: in code you opt in
-explicitly with `with_layer()`.
+Non-secret connection coordinates (bucket, container, account name, region,
+endpoint, base) are project facts, so the same provider sections the library
+reads live here too: `sx` and your code load them through one loader and
+cannot drift. Only secrets stay out of a committed file. `provider` picks the
+default backend for `sx`; setting `STORIX_PROVIDER` would drag your
+application's library sessions onto the same backend, so it is a CLI habit
+here, not a shared one. The library still never auto-applies a layer stack: in
+code you opt in explicitly with `with_layer()`.
 
-That split is enforced, not assumed. An unknown key, or a credential put
-here by mistake, exits with the fix named rather than being silently
-ignored:
+That contract is enforced, not assumed. An unknown key or table, or a literal
+secret, exits with the fix named rather than being silently ignored:
 
 ```console
 $ sx ls
-sx: 'account_name' is not a CLI preference - it is connection config,
-shared with the library. Set it via STORIX_AZURE_* (env or .env).
+sx: /home/you/proj/storix.toml: unknown table 'databse'; known: alias,
+aliases, azure, cli, gcs, local, provider, s3
+
+$ sx ls
+sx: /home/you/proj/storix.toml: credential is a secret and project files are
+committed; use env:VAR, the STORIX_* environment, or the user config
+(~/.config/storix/config.toml)
 ```
 
 ### Preferences

@@ -170,7 +170,7 @@ tag_format = "v$version"
 
 [tool.vulture]
 # Names imposed by prompt-toolkit and pydantic callback protocols.
-ignore_names = ["complete_event", "source_type"]
+ignore_names = ["complete_event", "source_type", "file_secret_settings"]
 min_confidence = 100
 
 [tool.mypy]
