@@ -151,3 +151,5 @@ whole, so the effective profile is always readable from one file.
 `STORIX_PROFILE` and `STORIX_ENVIRONMENT` are honored by `sx` only - naming
 a profile in library code is explicit, or pinned per project with a
 top-level `profile = "media"` key in the config file.
+
+Profiles have their own page: [Profiles and stages](../guide/profiles.md).

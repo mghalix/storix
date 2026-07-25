@@ -54,12 +54,21 @@ if TYPE_CHECKING:
 
 
 type ConfigSource = Literal[
-    'override', 'profile', 'env', 'dotenv', 'project', 'user', 'default'
+    'override',
+    'environment',
+    'profile',
+    'env',
+    'dotenv',
+    'project',
+    'user',
+    'default',
 ]
 """Where an effective config field came from, strongest first: an explicit
-``get_storage`` keyword or CLI flag (``override``), the process environment
-(``env``), the project ``.env`` (``dotenv``), the project TOML (``project``),
-the XDG user file (``user``), or the model's built-in default (``default``)."""
+``get_storage`` keyword or CLI flag (``override``), the selected stage
+overlay (``environment``) and the profile under it (``profile``), the
+process environment (``env``), the project ``.env`` (``dotenv``), the
+project TOML (``project``), the user file (``user``), or the model's
+built-in default (``default``)."""
 
 type _Scope = Literal['project', 'user']
 
@@ -786,6 +795,27 @@ def available_profiles() -> dict[str, DiscoveredConfig]:
     return found
 
 
+def _stage_fields(name: str, environment: str | None) -> frozenset[str]:
+    """The field names a profile's stage overlay supplies, if any.
+
+    Args:
+        name: Profile to read.
+        environment: Stage to read, or ``None`` for the profile's own
+            ``default_environment``.
+    """
+    disc = available_profiles().get(name)
+    if disc is None:
+        return frozenset()
+    profile = cast('dict[str, Any]', disc.data['profiles'])[name]
+    table = cast('dict[str, Any]', profile)
+    stage = environment or table.get('default_environment')
+    if not isinstance(stage, str):
+        return frozenset()
+    overlays = table.get(_ENVIRONMENTS)
+    overlay = cast('dict[str, Any]', overlays).get(stage) if overlays else None
+    return frozenset(cast('dict[str, Any]', overlay)) if overlay else frozenset()
+
+
 def profile_provider(name: str) -> str:
     """The provider a profile declares, without resolving its settings.
 
@@ -963,12 +993,18 @@ def config_provenance(
         if profile is not None
         else empty
     )
+    # a stage overlay is reported apart from the profile it sits on: "why is
+    # dev pointing at the prod container" is answered by which of the two
+    # supplied the value, not by knowing a profile was involved at all
+    stage_fields = _stage_fields(profile, environment) if profile else empty
+    profile_fields -= stage_fields
     project_fields = (
         frozenset(_section_values(project, settings_cls)) if project else empty
     )
     user_fields = frozenset(_section_values(user, settings_cls)) if user else empty
     layers: list[tuple[ConfigSource, frozenset[str]]] = [
         ('override', frozenset(overrides)),
+        ('environment', stage_fields),
         ('profile', profile_fields),
         ('env', _env_fields(settings_cls)),
         ('dotenv', _dotenv_fields(settings_cls)),

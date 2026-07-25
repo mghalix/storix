@@ -548,3 +548,27 @@ def test_the_user_config_uses_dot_config_elsewhere(monkeypatch):
     monkeypatch.setattr(sys, 'platform', 'linux')
 
     assert user_config_path().parts[-3:] == ('.config', 'storix', 'config.toml')
+
+
+def test_a_stage_supplied_field_is_reported_apart_from_its_profile(
+    tmp_path, monkeypatch
+):
+    """Given a stage overlay, when provenance is read, then the stage is named.
+
+    "Why is dev pointing at the prod bucket" is answered by which of the
+    two supplied the value, not by knowing a profile was involved.
+    """
+    from storix.config import config_provenance
+
+    (tmp_path / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "s3"\nregion = "auto"\n\n'
+        '[profiles.media.environments.prod]\nbucket = "media-prod"\n',
+        encoding='utf-8',
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    sources = config_provenance('s3', profile='media', environment='prod')
+
+    assert sources['bucket'] == 'environment'
+    assert sources['region'] == 'profile'

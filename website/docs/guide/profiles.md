@@ -86,7 +86,7 @@ to.
     time, from the process environment or a `.env` beside the project. A
     literal secret in a *project* file is refused outright, because project
     files get committed. See [Configure from
-    settings](../recipes/settings.md#secrets).
+    settings](../recipes/settings.md#secrets-in-config-files).
 
 ## Selecting one
 
