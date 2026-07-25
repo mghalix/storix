@@ -82,7 +82,9 @@ cli = [
     "click>=8.2.0",
     "prompt-toolkit>=3.0.0",
     "rich>=13.0.0",
-    "typer>=0.13.0",
+    # 0.16 is the first release that calls click 8.2's Parameter.make_metavar
+    # with the ctx it now requires; below it, any `sx --help` raises TypeError
+    "typer>=0.16.0",
 ]
 all = [
     "storix[local, azure, s3, gcs, cli]",
