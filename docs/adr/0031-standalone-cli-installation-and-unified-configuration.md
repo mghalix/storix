@@ -297,26 +297,34 @@ canonical provider models; the profile parser owns no field schema.
 ```toml
 [profiles.media]
 provider = "azure"
-
-[profiles.media.azure]
+default_environment = "dev"
 kind = "auto"
 account_name = "mediaaccount"
 credential = "env:MEDIA_AZURE_CREDENTIAL"
 
-[profiles.media.environments.dev.azure]
+[profiles.media.environments.dev]
 container = "media-dev"
 
-[profiles.media.environments.prod.azure]
+[profiles.media.environments.prod]
 container = "media-prod"
 
 [profiles.archive]
 provider = "azure"
-
-[profiles.archive.azure]
 kind = "adls"
 account_name = "archiveaccount"
 credential = "env:ARCHIVE_AZURE_CREDENTIAL"
 ```
+
+**Amended during implementation.** The first draft nested the settings
+under a provider-named sub-table
+(`[profiles.NAME.<provider>]`, `[profiles.NAME.environments.ENV.<provider>]`).
+A profile names exactly one provider, so repeating it in every table was
+ceremony, and worse: a table for a *second* provider inside a profile was
+silently ignored, which is the class of silent config this ADR exists to
+remove. Settings now sit directly in the profile and in each overlay, and a
+key that is not a setting of the profile's provider is an error naming the
+provider and its fields. `provider`, `default_environment`, and
+`environments` are the profile's own reserved keys.
 
 Rules:
 
@@ -351,10 +359,18 @@ definition, and letting `dev` silently point at a different provider
 family invites credential cross-wiring.
 
 Selection: `--environment` with `--env` as the documented alias, or
-`STORIX_ENVIRONMENT` (`sx` only). `--env` without a selected profile
-is an error; an unknown environment errors listing the profile's
-available environments. No environment selected means no overlay, the
-profile's base config applies. Internally and in documentation the
+`STORIX_ENVIRONMENT` (`sx` only), else the profile's own
+`default_environment` when it names one. `--env` without a selected
+profile is an error; an unknown environment (selected or defaulted)
+errors listing the profile's available environments. No environment
+selected and no default means no overlay, the profile's base config
+applies.
+
+**Amended during implementation.** `default_environment` was listed as
+deferred; a profile whose stages are the point ("I am nearly always on
+dev") makes typing `--env dev` every time the norm rather than the
+exception, so it lands here. It is validated against the profile's own
+stages when the file is read. Internally and in documentation the
 term is "environment" (docs say "environment (stage) overlays" once to
 disambiguate from process environment variables; CacheLayer's
 unrelated `environment` namespace option keeps its name).
@@ -539,7 +555,6 @@ Deferred, revisit on demonstrated need:
 - A `sx profile` command group beyond `config profiles`.
 - PowerShell installer.
 - OS keyring / external secret manager integration.
-- Default environment per profile (`default_environment`).
 - Connection URI factory (already deferred by ADR 0009).
 
 ## Consequences

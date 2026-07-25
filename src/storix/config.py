@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast, get_args
 
+from dotenv import dotenv_values
 from pydantic import ByteSize, Field
 from pydantic_settings import (
     BaseSettings,
@@ -216,21 +217,39 @@ def _section_values(
     return out
 
 
+def _dotenv_value(var: str) -> str | None:
+    """Read one variable from the project ``.env``, if there is one.
+
+    ``.env`` is already a first-class source for ``STORIX_*`` settings, so
+    an ``env:`` reference looks there too rather than treating the same
+    file as invisible depending on which spelling the user reached for.
+    The process environment still wins: an explicit export beats a file.
+    """
+    file = Path.cwd() / '.env'
+    if not file.is_file():
+        return None
+    return dotenv_values(file).get(var)
+
+
 def _resolve_secret(disc: DiscoveredConfig, field: str, value: object) -> object:
     """Resolve a secret field's TOML value under the secret policy (D4).
 
-    ``env:VAR`` resolves from the process environment in any scope; a
-    literal is refused in project scope and warned about in user scope.
+    ``env:VAR`` resolves from the process environment, then the project
+    ``.env``, in any scope; a literal is refused in project scope and
+    warned about in user scope.
 
     Raises:
         ConfigurationError: On a literal secret in project scope, or an
-            ``env:`` reference whose variable is unset.
+            ``env:`` reference whose variable is set in neither place.
     """
     if isinstance(value, str) and value.startswith('env:'):
         var = value[len('env:') :]
-        resolved = os.environ.get(var)
+        resolved = os.environ.get(var) or _dotenv_value(var)
         if resolved is None:
-            msg = f'{disc.path}: {field} references env:{var}, but {var} is not set'
+            msg = (
+                f'{disc.path}: {field} references env:{var}, but {var} is set '
+                f'neither in the environment nor in {Path.cwd() / ".env"}'
+            )
             raise ConfigurationError(msg)
         return resolved
     if disc.scope == 'project':
@@ -579,6 +598,11 @@ naming it carries no provider section."""
 _ENVIRONMENTS: Final[str] = 'environments'
 """Sub-table of a profile holding its stage overlays."""
 
+_RESERVED_PROFILE_KEYS: Final[frozenset[str]] = frozenset(
+    {'provider', 'default_environment', _ENVIRONMENTS}
+)
+"""Profile keys that are the profile's own rather than a provider setting."""
+
 
 @dataclass(frozen=True)
 class ResolvedProfile:
@@ -603,10 +627,16 @@ class ResolvedProfile:
 def _validate_profiles(path: Path, data: dict[str, Any]) -> None:
     """Check the shape of a ``[profiles]`` table before anything reads it.
 
+    A profile names one provider and carries that provider's settings
+    directly, so there is no provider-named sub-table to repeat and no way
+    to leave settings for a second provider lying around unread.
+
     Raises:
         ConfigurationError: If ``profiles`` is not a table, a profile is not
             a table, a name is illegal, a profile names no provider or an
-            unknown one, or an overlay tries to switch the provider.
+            unknown one, a setting is not one of that provider's, an overlay
+            tries to switch the provider, or a default environment does not
+            exist.
     """
     node = data.get('profiles')
     if node is None:
@@ -625,7 +655,8 @@ def _validate_profiles(path: Path, data: dict[str, Any]) -> None:
         if not isinstance(profile, dict):
             msg = f'{path}: profile {name!r} must be a table'
             raise ConfigurationError(msg)
-        provider = cast('dict[str, Any]', profile).get('provider')
+        table = cast('dict[str, Any]', profile)
+        provider = table.get('provider')
         if not isinstance(provider, str):
             msg = f'{path}: profile {name!r} must name a provider'
             raise ConfigurationError(msg)
@@ -636,15 +667,49 @@ def _validate_profiles(path: Path, data: dict[str, Any]) -> None:
                 f'{provider!r}; known: {known}'
             )
             raise ConfigurationError(msg)
-        _validate_environments(path, name, cast('dict[str, Any]', profile))
+        _validate_profile_keys(path, name, provider, table, _RESERVED_PROFILE_KEYS)
+        _validate_environments(path, name, provider, table)
+        _validate_default_environment(path, name, table)
 
 
-def _validate_environments(path: Path, name: str, profile: dict[str, Any]) -> None:
+def _validate_profile_keys(
+    path: Path,
+    name: str,
+    provider: str,
+    table: dict[str, Any],
+    reserved: frozenset[str],
+) -> None:
+    """Reject a key that is neither reserved nor a setting of the provider.
+
+    This is what stops a settings block for another provider, or a typo,
+    from sitting in a profile unread: a profile belongs to one provider, so
+    anything else in it is a mistake worth naming.
+
+    Raises:
+        ConfigurationError: On a key the selected provider does not have.
+    """
+    model = PROVIDER_MODELS.get(provider)
+    fields: set[str] = set(model.model_fields) if model is not None else set()
+    for key in table:
+        if key in reserved or key in fields:
+            continue
+        known = ', '.join(sorted(fields)) if fields else 'none'
+        msg = (
+            f'{path}: profile {name!r} is a {provider!r} profile and has no '
+            f'setting {key!r} (known: {known})'
+        )
+        raise ConfigurationError(msg)
+
+
+def _validate_environments(
+    path: Path, name: str, provider: str, profile: dict[str, Any]
+) -> None:
     """Check one profile's overlays.
 
     Raises:
         ConfigurationError: If the overlays are not a table, an environment
-            name is illegal, or an overlay declares its own provider.
+            name is illegal, an overlay declares its own provider, or an
+            overlay sets something the provider does not have.
     """
     node = profile.get(_ENVIRONMENTS)
     if node is None:
@@ -662,12 +727,39 @@ def _validate_environments(path: Path, name: str, profile: dict[str, Any]) -> No
         if not isinstance(overlay, dict):
             msg = f'{path}: profile {name!r}: environment {env_name!r} must be a table'
             raise ConfigurationError(msg)
-        if 'provider' in cast('dict[str, Any]', overlay):
+        stage = cast('dict[str, Any]', overlay)
+        if 'provider' in stage:
             msg = (
                 f'{path}: profile {name!r}: environment {env_name!r} cannot change '
                 'the provider; stages of one profile share a backend'
             )
             raise ConfigurationError(msg)
+        _validate_profile_keys(path, f'{name}.{env_name}', provider, stage, frozenset())
+
+
+def _validate_default_environment(
+    path: Path, name: str, profile: dict[str, Any]
+) -> None:
+    """Check a profile's ``default_environment`` against its own stages.
+
+    Raises:
+        ConfigurationError: If the default is not a string or names a stage
+            the profile does not define.
+    """
+    default = profile.get('default_environment')
+    if default is None:
+        return
+    stages = profile.get(_ENVIRONMENTS)
+    available: set[str] = (
+        set(cast('dict[str, Any]', stages)) if isinstance(stages, dict) else set()
+    )
+    if not isinstance(default, str) or default not in available:
+        known = ', '.join(sorted(available)) or 'none defined'
+        msg = (
+            f'{path}: profile {name!r}: default_environment {default!r} is not '
+            f'one of its environments (available: {known})'
+        )
+        raise ConfigurationError(msg)
 
 
 def available_profiles() -> dict[str, DiscoveredConfig]:
@@ -702,13 +794,15 @@ def configured_profile() -> str | None:
 def resolve_profile(name: str, environment: str | None = None) -> ResolvedProfile:
     """Resolve a profile (and optional overlay) into provider settings.
 
-    The profile's provider section and the overlay are merged and then run
-    through the same extraction every config file gets, so unknown keys,
-    secret policy, and path anchoring behave identically inside a profile.
+    A profile carries its provider's settings directly, and a stage overlay
+    carries the same fields; the two are merged and then run through the
+    extraction every config file gets, so unknown keys, the secret policy,
+    and path anchoring behave identically inside a profile.
 
     Args:
         name: Profile to select.
-        environment: Stage overlay to apply on top of it, if any.
+        environment: Stage overlay to apply. ``None`` uses the profile's
+            ``default_environment`` when it names one, else no overlay.
 
     Returns:
         The provider and its settings, ready as ``get_storage`` keywords.
@@ -727,53 +821,49 @@ def resolve_profile(name: str, environment: str | None = None) -> ResolvedProfil
         msg = f'unknown profile {name!r}; available: {known}'
         raise ConfigurationError(msg)
 
-    profile = cast(
-        'dict[str, Any]', cast('dict[str, Any]', disc.data['profiles'])[name]
-    )
+    table = cast('dict[str, Any]', disc.data['profiles'])
+    profile = cast('dict[str, Any]', table[name])
     provider = cast('str', profile['provider'])
-    model = PROVIDER_MODELS.get(provider)
-    if model is None:
-        # a provider with no settings model (memory) configures nothing
-        extra = sorted(k for k in profile if k not in {'provider', _ENVIRONMENTS})
-        if extra:
+    stage = environment or cast('str | None', profile.get('default_environment'))
+
+    settings = {
+        key: value
+        for key, value in profile.items()
+        if key not in _RESERVED_PROFILE_KEYS
+    }
+    if stage is not None:
+        overlays = cast('dict[str, Any]', profile.get(_ENVIRONMENTS, {}))
+        overlay = overlays.get(stage)
+        if overlay is None:
+            known = ', '.join(sorted(overlays)) or 'none defined'
             msg = (
-                f'{disc.path}: profile {name!r} names provider {provider!r}, '
-                f'which takes no configuration; remove {extra[0]!r}'
+                f'profile {name!r} has no environment {stage!r} '
+                f'({disc.path}); available: {known}'
             )
             raise ConfigurationError(msg)
+        settings |= cast('dict[str, Any]', overlay)
+
+    model = PROVIDER_MODELS.get(provider)
+    if model is None:
+        # a provider with no settings model (memory) configures nothing, and
+        # the validator has already refused any setting written under it
         return ResolvedProfile(
             name=name,
             provider=provider,
             values={},
             source=disc.path,
-            environment=environment,
-        )
-    section = str(getattr(model, 'TOML_SECTION', provider))
-    merged: dict[str, Any] = dict(cast('dict[str, Any]', profile.get(section, {})))
-
-    if environment is not None:
-        overlays = cast('dict[str, Any]', profile.get(_ENVIRONMENTS, {}))
-        overlay = overlays.get(environment)
-        if overlay is None:
-            known = ', '.join(sorted(overlays)) or 'none defined'
-            msg = (
-                f'profile {name!r} has no environment {environment!r} '
-                f'({disc.path}); available: {known}'
-            )
-            raise ConfigurationError(msg)
-        merged |= cast(
-            'dict[str, Any]', cast('dict[str, Any]', overlay).get(section, {})
+            environment=stage,
         )
 
     # reuse the file policy wholesale: unknown keys, env: secrets, anchoring
-    view = DiscoveredConfig(disc.path, {section: merged}, disc.scope)
-    values = _section_values(view, model)
+    section = str(getattr(model, 'TOML_SECTION', provider))
+    view = DiscoveredConfig(disc.path, {section: settings}, disc.scope)
     return ResolvedProfile(
         name=name,
         provider=provider,
-        values=values,
+        values=_section_values(view, model),
         source=disc.path,
-        environment=environment,
+        environment=stage,
     )
 
 

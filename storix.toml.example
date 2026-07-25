@@ -1,0 +1,103 @@
+# Every storix setting a config file can carry, in one place.
+#
+# Copy what you need into one of the three files storix reads:
+#
+#   storix.toml                      project scope, standalone (this shape)
+#   pyproject.toml [tool.storix]     project scope, namespaced (same keys)
+#   ~/.config/storix/config.toml     your personal defaults (same keys)
+#
+# Discovery walks upward from the current directory and stops at the first
+# directory holding one of the project files. For any value the strongest
+# source wins: flags and --set, then a selected profile's stage overlay, then
+# the profile, then STORIX_* in the environment, then .env, then the nearest
+# project file, then the user file, then the built-in default.
+#
+# This file is validated against the real settings models by the test suite,
+# so a key here is a key storix accepts.
+
+# --- top level: what to open, and how transfers behave -----------------------
+
+provider = "local"          # which backend get_storage() and sx open by default
+profile = "media"           # optional: the profile to select when none is named
+max_transfer_ranges = 8     # ceiling on parallel ranges per file; 1 disables
+
+# --- per provider: non-secret connection settings ----------------------------
+#
+# Secrets never belong in a project file. Reference one instead:
+#   credential = "env:MY_VAR"
+# which resolves from the process environment, then the project .env. A literal
+# secret is refused in a project file; the user file may hold one and warns when
+# it is group- or world-readable.
+
+[local]
+base = "./data"             # relative to this file in a project scope
+read_chunk_size = "1MiB"    # a byte count or a readable size: 8MiB, 8MB, 512KB
+write_chunk_size = "1MiB"
+
+[s3]                        # also R2 and MinIO, via endpoint
+bucket = "media"
+region = "auto"
+endpoint = "https://ACCOUNT.r2.cloudflarestorage.com"
+root = "/"
+access_key_id = "env:AWS_ACCESS_KEY_ID"
+secret_access_key = "env:AWS_SECRET_ACCESS_KEY"
+read_chunk_size = "4MiB"
+write_chunk_size = "4MiB"
+read_prefetch_size = "8MiB"
+
+[gcs]
+bucket = "media"
+credential = "env:GCS_SERVICE_ACCOUNT_JSON"   # the JSON itself, or use the path
+credential_path = "/etc/storix/gcs.json"
+endpoint = "https://storage.googleapis.com"
+root = "/"
+read_chunk_size = "4MiB"
+write_chunk_size = "4MiB"
+read_prefetch_size = "8MiB"
+
+[azure]                     # one schema for both Azure surfaces
+kind = "auto"               # auto | adls | blob
+account_name = "mediaaccount"
+container = "media"
+credential = "env:MEDIA_AZURE_CREDENTIAL"
+endpoint = "https://mediaaccount.blob.core.windows.net"
+read_chunk_size = "4MiB"
+write_chunk_size = "4MiB"
+read_prefetch_size = "8MiB"
+
+# --- profiles: named connections, with optional stages -----------------------
+#
+# A profile names one provider and carries that provider's settings directly.
+# Each stage lists only what it changes; a stage cannot change the provider.
+
+[profiles.media]
+provider = "azure"
+default_environment = "dev"     # the stage used when --env is not given
+account_name = "mediaaccount"
+credential = "env:MEDIA_AZURE_CREDENTIAL"
+
+[profiles.media.environments.dev]
+container = "media-dev"
+
+[profiles.media.environments.prod]
+container = "media-prod"
+read_prefetch_size = "32MiB"
+
+[profiles.archive]
+provider = "s3"
+bucket = "archive"
+region = "auto"
+
+# --- sx preferences ----------------------------------------------------------
+#
+# CLI-only: display, aliases, and the layer stack applied to every session.
+
+[cli]
+icons = true                # Nerd Font glyphs in listings
+dir_contents = true         # show whether a directory is empty in flat listings
+provider = "local"          # which backend sx opens, overriding the top level
+layers = [{ name = "cache", ttl = 300 }]
+
+[cli.alias]
+lt = "tree --level=2"
+la = "ls -a"

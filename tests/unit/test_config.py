@@ -14,11 +14,15 @@ from pydantic import ValidationError
 
 from storix import get_storage
 from storix.config import (
+    PROVIDER_MODELS,
     AzureConfig,
+    DiscoveredConfig,
     LocalConfig,
     S3Config,
     StorixSettings,
+    _resolve_secret,
     config_provenance,
+    configured_profile,
     find_project_config,
     is_secret,
     resolve_profile,
@@ -131,8 +135,8 @@ def test_a_profile_supplies_its_provider_and_settings(sandbox):
     """Given a profile, when selected, then it decides provider and settings."""
     (sandbox / 'data').mkdir()
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "data"\nread_chunk_size = "2MiB"\n',
+        '[profiles.media]\nprovider = "local"\nbase = "data"\n'
+        'read_chunk_size = "2MiB"\n',
         encoding='utf-8',
     )
 
@@ -147,9 +151,8 @@ def test_an_environment_overlays_the_profile(sandbox):
     (sandbox / 'dev').mkdir()
     (sandbox / 'prod').mkdir()
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "dev"\n\n'
-        '[profiles.media.environments.prod.local]\nbase = "prod"\n',
+        '[profiles.media]\nprovider = "local"\nbase = "dev"\n\n'
+        '[profiles.media.environments.prod]\nbase = "prod"\n',
         encoding='utf-8',
     )
 
@@ -170,8 +173,8 @@ def test_an_unknown_profile_lists_what_exists(sandbox):
 def test_an_unknown_environment_lists_the_profile_stages(sandbox):
     """Given a stage that is not defined, when selected, then it says which are."""
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.environments.prod.local]\nbase = "."\n',
+        '[profiles.media]\nprovider = "local"\nbase = "."\n\n'
+        '[profiles.media.environments.prod]\nbase = "."\n',
         encoding='utf-8',
     )
 
@@ -188,7 +191,7 @@ def test_an_environment_without_a_profile_is_an_error(sandbox):
 def test_a_profile_refuses_a_conflicting_provider(sandbox):
     """Given a profile, when another provider is named, then it is an error."""
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n[profiles.media.local]\nbase = "."\n',
+        '[profiles.media]\nprovider = "local"\nbase = "."\n',
         encoding='utf-8',
     )
 
@@ -223,8 +226,7 @@ def test_a_project_profile_shadows_a_user_profile_of_the_same_name(sandbox, tmp_
     (sandbox / 'project').mkdir()
     _user_config(tmp_path, '[profiles.media]\nprovider = "memory"\n')
     (sandbox / 'storix.toml').write_text(
-        '[profiles.media]\nprovider = "local"\n\n'
-        '[profiles.media.local]\nbase = "project"\n',
+        '[profiles.media]\nprovider = "local"\nbase = "project"\n',
         encoding='utf-8',
     )
 
@@ -382,3 +384,132 @@ def test_transfer_knobs_are_legal_in_toml(sandbox):
 
     assert StorixSettings().max_transfer_ranges == 2
     assert LocalConfig().read_chunk_size == 262144
+
+
+def test_an_env_reference_falls_back_to_the_project_dotenv(sandbox, monkeypatch):
+    """Given a secret only in .env, when a config references it, then it resolves.
+
+    `.env` is already a first-class source for `STORIX_*`, so the same file
+    must not be invisible to an `env:` reference.
+    """
+    monkeypatch.delenv('MEDIA_SECRET', raising=False)
+    (sandbox / '.env').write_text('MEDIA_SECRET=from-dotenv\n', encoding='utf-8')
+    disc = DiscoveredConfig(sandbox / 'storix.toml', {}, 'project')
+
+    assert _resolve_secret(disc, 'credential', 'env:MEDIA_SECRET') == 'from-dotenv'
+
+
+def test_the_process_environment_beats_the_dotenv(sandbox, monkeypatch):
+    """Given both, when a reference resolves, then the export wins."""
+    (sandbox / '.env').write_text('MEDIA_SECRET=from-dotenv\n', encoding='utf-8')
+    monkeypatch.setenv('MEDIA_SECRET', 'from-environment')
+    disc = DiscoveredConfig(sandbox / 'storix.toml', {}, 'project')
+
+    assert _resolve_secret(disc, 'credential', 'env:MEDIA_SECRET') == 'from-environment'
+
+
+def test_a_reference_set_nowhere_names_both_places(sandbox, monkeypatch):
+    """Given a reference to nothing, when read, then it says where it looked."""
+    monkeypatch.delenv('MEDIA_SECRET', raising=False)
+    disc = DiscoveredConfig(sandbox / 'storix.toml', {}, 'project')
+
+    with pytest.raises(ConfigurationError, match='neither in the environment nor'):
+        _resolve_secret(disc, 'credential', 'env:MEDIA_SECRET')
+
+
+def test_a_config_file_can_pin_a_default_profile(sandbox, tmp_path):
+    """Given a pinned profile, when nothing is selected, then it is used."""
+    (sandbox / 'data').mkdir()
+    (sandbox / 'storix.toml').write_text(
+        'profile = "media"\n\n[profiles.media]\nprovider = "local"\nbase = "data"\n',
+        encoding='utf-8',
+    )
+
+    assert configured_profile() == 'media'
+    assert get_storage().backend.base.name == 'data'
+
+
+def test_a_profile_refuses_a_setting_from_another_provider(sandbox):
+    """Given a stray provider table, when read, then it is named, not ignored."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "azure"\nlocal = { base = "." }\n',
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ConfigurationError, match="has no setting 'local'"):
+        find_project_config()
+
+
+def test_a_default_environment_applies_without_a_flag(sandbox):
+    """Given a default stage, when none is selected, then it is applied."""
+    (sandbox / 'dev').mkdir()
+    (sandbox / 'prod').mkdir()
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\ndefault_environment = "dev"\n\n'
+        '[profiles.media.environments.dev]\nbase = "dev"\n\n'
+        '[profiles.media.environments.prod]\nbase = "prod"\n',
+        encoding='utf-8',
+    )
+
+    assert get_storage(profile='media').backend.base.name == 'dev'
+    assert get_storage(profile='media', environment='prod').backend.base.name == 'prod'
+
+
+def test_a_default_environment_must_exist(sandbox):
+    """Given a default naming nothing, when read, then the file is refused."""
+    (sandbox / 'storix.toml').write_text(
+        '[profiles.media]\nprovider = "local"\ndefault_environment = "nope"\n',
+        encoding='utf-8',
+    )
+
+    with pytest.raises(ConfigurationError, match='not one of its environments'):
+        find_project_config()
+
+
+# --- the tracked example file stays in step with the schema ---
+
+
+def _example_document() -> dict[str, object]:
+    """The repository's storix.toml.example, parsed."""
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    return tomllib.loads((root / 'storix.toml.example').read_text(encoding='utf-8'))
+
+
+def test_the_example_config_is_accepted_by_the_loader(sandbox):
+    """Given the shipped example, when read as a project file, then it loads.
+
+    The example is documentation that rots silently, so it is validated
+    against the real models: a key that storix stopped accepting, or a
+    provider table that grew a field the example never learned, fails here.
+    """
+    source = Path(__file__).resolve().parents[2] / 'storix.toml.example'
+    (sandbox / 'storix.toml').write_text(
+        source.read_text(encoding='utf-8'), encoding='utf-8'
+    )
+
+    discovered = find_project_config()
+
+    assert discovered is not None
+    assert discovered.path == sandbox / 'storix.toml'
+
+
+def test_the_example_config_shows_every_provider_and_setting():
+    """Given a new provider or setting, when it lands, then the example has it.
+
+    Fails the moment a provider model gains a field the example does not
+    mention, which is the point: the next configuration PR updates it.
+    """
+    document = _example_document()
+
+    for provider, model in PROVIDER_MODELS.items():
+        assert provider in document, f'{provider} missing from storix.toml.example'
+        section = document[provider]
+        assert isinstance(section, dict)
+        documented = set(section)
+        missing = set(model.model_fields) - documented
+        assert not missing, f'[{provider}] is missing {sorted(missing)}'
+
+    top_level = set(StorixSettings.model_fields) | {'profile'}
+    assert top_level <= set(document), sorted(top_level - set(document))

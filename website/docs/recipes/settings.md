@@ -26,6 +26,61 @@ from storix import get_storage
 fs = get_storage()   # provider and credentials come from the environment
 ```
 
+## From a config file
+
+Non-secret settings can live in a file instead, which is how a project
+carries its own storage configuration without every developer exporting the
+same variables:
+
+```toml
+# storix.toml at the project root
+provider = "s3"
+max_transfer_ranges = 4
+
+[s3]
+bucket = "media"
+region = "auto"
+root = "/"
+
+[local]
+base = "./data"
+```
+
+[`storix.toml.example`](https://github.com/mghalix/storix/blob/main/storix.toml.example)
+in the repository is the complete reference: every provider, every setting,
+profiles, and the `[cli]` table, with a comment on each. It is validated
+against the real settings models by the test suite, so it cannot drift out
+of date without failing the build.
+
+storix looks for `storix.toml`, then `.storix.toml`, then a
+`pyproject.toml` carrying `[tool.storix]`, walking upward from the current
+directory ruff-style; the first directory holding any of the three anchors
+the project and stops the walk. Personal defaults live in
+`~/.config/storix/config.toml` (`XDG_CONFIG_HOME` is honored).
+
+An unknown key or table is an error naming the file, the key, and the known
+set - a setting that silently does nothing is worse than one that refuses to
+load. Relative paths in a project file resolve against that file; in the
+user file they must be absolute or `~`-prefixed, because a relative
+machine-global path means nothing.
+
+### Precedence
+
+Strongest first, verified in that order:
+
+| source | example |
+| --- | --- |
+| explicit keywords (and `sx` flags / `--set`) | `get_storage("local", base="./data")` |
+| a selected profile and its stage overlay | `get_storage(profile="media")` |
+| the process environment | `STORIX_LOCAL_BASE=/data` |
+| the project `.env` | `STORIX_LOCAL_BASE=/data` in `.env` |
+| the nearest project config file | `storix.toml` |
+| the XDG user config file | `~/.config/storix/config.toml` |
+| built-in defaults | `~/.storix` |
+
+A profile sits above the process environment on purpose: selecting one is an
+explicit act, and a stale exported variable must not quietly redirect it.
+
 ## From your app's settings
 
 To keep storage config next to the rest of your configuration, use the common
@@ -48,6 +103,22 @@ The cached `get_fs()` is a process-level resource. Close it from your
 application's shutdown hook. The [FastAPI recipe](fastapi.md) shows the same
 lifetime explicitly with `lifespan`.
 
+## Secrets in config files
+
+A config file may reference a secret instead of holding one:
+
+```toml
+[azure]
+credential = "env:MEDIA_AZURE_CREDENTIAL"
+```
+
+The reference resolves from the process environment first, then from the
+project `.env` - the same file `STORIX_*` settings already come from, so a
+secret kept there is not invisible to an `env:` reference. A variable set in
+neither place is an error naming both. A literal secret in a project file is
+refused outright (project files get committed); the XDG user file may hold
+one, and warns if it is group- or world-readable.
+
 ## Named profiles
 
 A profile bundles a provider and its settings under a name, with optional
@@ -56,12 +127,13 @@ stage overlays:
 ```toml
 [profiles.media]
 provider = "s3"
-
-[profiles.media.s3]
-bucket = "media"
+default_environment = "dev"
 region = "auto"
 
-[profiles.media.environments.prod.s3]
+[profiles.media.environments.dev]
+bucket = "media-dev"
+
+[profiles.media.environments.prod]
 bucket = "media-prod"
 ```
 

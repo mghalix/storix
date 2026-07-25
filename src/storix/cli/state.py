@@ -217,18 +217,19 @@ def build_base(
             its configuration is invalid, or its optional extra is missing
             (with a context-aware install remedy, D7).
     """
-    selected: dict[str, str] = {}
-    if profile is not None:
-        selected['profile'] = profile
-    if environment is not None:
-        selected['environment'] = environment
     name = resolve_provider(provider, profile)
-    # with a profile selected, the factory is handed whatever -p said (usually
-    # nothing) so that a conflicting one is reported rather than overridden;
-    # `name` stays the effective provider, for flag validation and messages
-    positional = provider if profile is not None else name
+    if profile is not None and provider is not None and provider != name:
+        # a profile names its own provider: -p naming another one is a
+        # contradiction to report, not an override to apply silently
+        message = (
+            f'sx: profile {profile!r} connects to {name!r}, not {provider!r}; '
+            'drop -p or select a profile on that provider'
+        )
+        raise SystemExit(message)
     try:
-        return get_storage(positional, **selected, **(overrides or {}))
+        return get_storage(
+            name, profile=profile, environment=environment, **(overrides or {})
+        )
     except (StorageError, ValueError, KeyError) as exc:
         # the factory's own error already names the available providers
         message = f'sx: cannot open provider {name!r}: {exc}'

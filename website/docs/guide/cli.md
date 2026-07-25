@@ -155,15 +155,21 @@ once in a config file and selected by name.
 # storix.toml
 [profiles.media]
 provider = "azure"
-
-[profiles.media.azure]
+default_environment = "dev"
 account_name = "mediaaccount"
-container = "media"
 credential = "env:MEDIA_AZURE_CREDENTIAL"
 
-[profiles.media.environments.prod.azure]
+[profiles.media.environments.dev]
+container = "media-dev"
+
+[profiles.media.environments.prod]
 container = "media-prod"
 ```
+
+The provider is named once and its settings sit directly in the profile;
+each stage lists only what it changes. A key that is not a setting of that
+provider is an error naming the provider and its fields, so a block meant
+for another backend cannot sit there unread.
 
 ```bash
 sx --profile media ls /                  # the profile's own settings
@@ -177,9 +183,38 @@ never the provider - stages of one profile share a backend by definition.
 `--env` without a profile, an unknown profile, and an unknown stage each
 exit naming what is available.
 
+#### A default profile
+
+Typing `--profile` every time is not the intended workflow. Pin one, and
+every `sx` invocation uses it with no flag:
+
+```toml
+# ~/.config/storix/config.toml - your personal default
+profile = "media"
+
+[profiles.media]
+provider = "azure"
+account_name = "mediaaccount"
+container = "media"
+credential = "env:MEDIA_AZURE_CREDENTIAL"
+```
+
+```toml
+# storix.toml in a project - that project's default, for anyone who works on it
+profile = "media"
+```
+
+Selection order is flag, then `STORIX_PROFILE`, then the pinned key: a
+project's pin beats your personal one, `--profile` beats both for one
+command, and `STORIX_PROFILE=other sx ...` beats both for one shell. A
+profile can pin its own usual stage with `default_environment`, so `--env`
+is only needed to step off it.
+
 `STORIX_PROFILE` and `STORIX_ENVIRONMENT` are read by `sx` and deliberately
 not by the library: an operator's shell habit should not redirect a
-service's sessions. In code the selection is explicit:
+service's sessions. A pinned `profile` key in a config file *is* honored by
+both, because that is a property of the project rather than of the shell.
+In code the selection is explicit:
 
 ```python
 fs = get_storage(profile="media", environment="prod")
@@ -331,14 +366,24 @@ not retype flags. Three canonical files are read; for any value, the strongest
 source wins:
 
 1. command-line flags and `--set`
-2. `STORIX_*` (provider settings) / `STORIX_CLI_*` (preferences) environment
+2. the selected profile's stage overlay (`--env`)
+3. the selected profile (`--profile`)
+4. `STORIX_*` (provider settings) / `STORIX_CLI_*` (preferences) environment
    variables
-3. a project `.env` (provider settings)
-4. the nearest project config, searching upward from the current directory:
+5. a project `.env` (provider settings)
+6. the nearest project config, searching upward from the current directory:
    `storix.toml` > `.storix.toml` (a compatibility alias) > `pyproject.toml`
    (`[tool.storix]`)
-5. your personal defaults: `~/.config/storix/config.toml`
-6. built-in defaults
+7. your personal defaults: `~/.config/storix/config.toml`
+8. built-in defaults
+
+A profile sits above the environment on purpose: selecting one is an
+explicit act, and a stale exported variable must not quietly redirect it.
+The same chain applies to the library, with `get_storage()` keywords in
+place of flags; see [Configure from settings](../recipes/settings.md).
+
+A complete annotated example of every key lives in the repository as
+[`storix.toml.example`](https://github.com/mghalix/storix/blob/main/storix.toml.example).
 
 The three canonical files:
 
@@ -361,6 +406,8 @@ pyproject.toml -> [tool.storix]   # project scope, namespaced
     account_name = "myaccount"
     container = "media"
     credential = "env:AZURE_CREDENTIAL"   # secrets via env: refs, not literals
+                                          # (resolved from the environment,
+                                          #  then the project .env)
 
     [alias]
     lt = "tree"
