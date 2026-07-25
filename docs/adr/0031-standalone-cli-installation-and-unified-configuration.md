@@ -230,7 +230,7 @@ policy:
   `.storix.toml`, `pyproject.toml`) are rejected with an error naming
   the field and the safe alternatives. Project files get committed.
 - Secret fields in any TOML scope may hold an environment reference:
-  `credential = "env:RERA_AZURE_CREDENTIAL"` resolves from the process
+  `credential = "env:MEDIA_AZURE_CREDENTIAL"` resolves from the process
   environment at load time; a missing variable is an error naming the
   variable and the file. This is the mechanism that lets two profiles
   on the same backend carry different credentials.
