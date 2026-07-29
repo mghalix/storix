@@ -156,6 +156,16 @@ def _count_label(count: int, singular: str, plural: str) -> str:
     return singular if count == 1 else plural
 
 
+def _listing_order(entry: DirEntry) -> tuple[str, str]:
+    """Sort key for a displayed listing: case-insensitive, like ls and eza.
+
+    Byte order would file every capitalized name above every lowercase one
+    (``Zebra.txt`` before ``a.txt``), which neither coreutils under a UTF-8
+    locale nor eza does. The exact name breaks ties so the order is total.
+    """
+    return entry.name.lower(), entry.name
+
+
 # --- listing / navigation ---
 
 
@@ -182,7 +192,7 @@ def ls(
     fs = _fs()
     base = fs.resolve(path)
     try:
-        entries = sorted(fs.scandir(path, all=all_), key=lambda e: e.name)
+        entries = sorted(fs.scandir(path, all=all_), key=_listing_order)
     except StorageError as exc:
         _die('ls', exc)
 
@@ -313,7 +323,7 @@ def _sorted_entries(fs: Storix, entries: list[DirEntry], sort: str) -> list[DirE
             return entry.size if entry.size is not None else extra[entry.path]
 
         return sorted(entries, key=size_of, reverse=True)
-    return sorted(entries, key=lambda e: e.name)
+    return sorted(entries, key=_listing_order)
 
 
 @app.command(rich_help_panel=_NAVIGATE)
@@ -343,15 +353,18 @@ def tree(
         _die('tree', ValueError(f'sort must be name, time or size, got {sort!r}'))
     if level is not None and level < 1:
         _die('tree', ValueError(f'level must be at least 1, got {level}'))
-    dirs: int = 1  # unix tree counts the root directory
-    files: int = 0
-
     # one core walk carries the traversal (concurrent, depth-bounded);
     # everything below is presentation over entries pulled on demand, so
     # lines print while deeper levels are still being listed. order='level'
     # keeps sibling groups contiguous, which _LevelBuffer's monotone-depth
     # rule (and tree's sibling sorting) depends on.
     root = fs.resolve(path)
+    # unix tree counts its root: a directory argument, or the one file a
+    # file argument names (the walk under it is empty either way)
+    root_is_file = fs.isfile(root)
+    dirs: int = 0 if root_is_file else 1
+    files: int = 1 if root_is_file else 0
+
     walked = fs.walk(root, all=all_, max_depth=level, order='level')
     buffer = _LevelBuffer(walked, root)
 
@@ -478,7 +491,9 @@ def echo(
 ) -> None:
     """Print text, or write it to a file with -f."""
     if file is None:
-        console.print(text)
+        # literal, like unix echo: rich would read '[bold]' as markup (and
+        # raise MarkupError on a lone '[/]') and wrap at the console width
+        sys.stdout.write(text + '\n')
         return
     try:
         _fs().echo(text + '\n', file, mode='a' if append else 'w')
@@ -495,27 +510,32 @@ def cat(
     *,
     binary: Annotated[bool, typer.Option('-b', '--binary')] = False,
 ) -> None:
-    """Concatenate and print files."""
+    """Concatenate and print files.
+
+    Streams over the core's bounded ``stream`` and writes the bytes
+    straight out: file contents are data, and rich would wrap them to the
+    console width and expand tabs. A file larger than memory prints fine.
+    """
     fs = _fs()
+    out = sys.stdout.buffer
+    last = b''
     try:
-        data = fs.cat(*files)
+        for i, chunk in enumerate(fs.stream(*files)):
+            # ponytail: the binary guard reads the first chunk only, so a
+            # NUL that appears later still prints; widen it if that bites
+            if i == 0 and not binary and b'\x00' in chunk:
+                err.print('[yellow]cat: binary file; use -b[/yellow]')
+                return
+            out.write(chunk)
+            last = chunk[-1:] or last
     except StorageError as exc:
         _die('cat', exc)
 
-    if binary:
-        sys.stdout.buffer.write(data)
-        return
-    if b'\x00' in data:
-        err.print(f'[yellow]cat: binary file ({len(data)} bytes); use -b[/yellow]')
-        return
-
-    text = data.decode(errors='replace')
-    # exact bytes when piped; a trailing newline in a terminal so the
-    # shell prompt (and one-shot output) starts on a fresh line
-    if text and not text.endswith('\n') and sys.stdout.isatty():
-        text += '\n'
-    # no markup/highlight: file contents are data, not rich markup
-    console.print(text, end='', markup=False, highlight=False)
+    # a trailing newline in a terminal so the shell prompt (and one-shot
+    # output) starts on a fresh line; piped output stays byte-exact
+    if last and last != b'\n' and sys.stdout.isatty():
+        out.write(b'\n')
+    out.flush()
 
 
 @app.command(rich_help_panel=_READ)

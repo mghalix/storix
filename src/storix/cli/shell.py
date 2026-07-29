@@ -16,8 +16,11 @@ import click
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
 from typer.main import get_command
+
+from storix.config import user_config_path
 
 from .app import app
 from .config import expand_alias, load_prefs
@@ -251,19 +254,42 @@ def _prompt(fs: Storix) -> FormattedText:
     )
 
 
-def _help() -> None:
+def _help(commands: Mapping[str, click.Command]) -> None:
+    """List the commands, grouped exactly as ``sx --help`` groups them.
+
+    Derived from what is registered rather than restated here: the
+    hand-written list drifted, advertising the hidden ``provider`` alias
+    while never learning about ``find``, ``whereami``, ``doctor`` or
+    ``config``.
+
+    Args:
+        commands: The registered subcommands, keyed by name.
+    """
     console.print('[bold blue]storix shell[/bold blue] - unix over any backend\n')
-    console.print(
-        '  [cyan]navigate[/cyan]  ls  pwd  cd  tree\n'
-        '  [cyan]read[/cyan]      cat  stat  du  url\n'
-        '  [cyan]write[/cyan]     touch  echo  mkdir\n'
-        '  [cyan]remove[/cyan]    rm  rmdir\n'
-        '  [cyan]move[/cyan]      mv  cp\n'
-        '  [cyan]transfer[/cyan]  push  pull\n'
-        '  [cyan]session[/cyan]   provider  provision  exists\n'
-        '  [cyan]shell[/cyan]     help  clear  refresh  exit\n'
-    )
-    console.print('[dim]any command supports --help, e.g. `ls --help`[/dim]')
+    panels: dict[str, list[str]] = {}
+    for name, sub in commands.items():
+        if sub.hidden:
+            continue
+        panel = getattr(sub, 'rich_help_panel', None) or 'commands'
+        panels.setdefault(panel.lower(), []).append(name)
+    panels['shell'] = sorted(_BUILTINS)
+
+    width = max(len(panel) for panel in panels)
+    for panel, names in panels.items():
+        console.print(f'  [cyan]{panel:<{width}}[/cyan]  {"  ".join(names)}')
+    console.print('\n[dim]any command supports --help, e.g. `ls --help`[/dim]')
+
+
+def _history() -> FileHistory:
+    """The prompt history file, kept beside the user config.
+
+    A shell that forgets every line the moment it exits is not one; the
+    user config directory is where storix already keeps per-user state,
+    so history follows it (``XDG_CONFIG_HOME`` included).
+    """
+    path = user_config_path().parent / 'history'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return FileHistory(str(path))
 
 
 def _parse_input(line: str, aliases: dict[str, str]) -> list[str]:
@@ -303,14 +329,14 @@ def start_shell(fs: Storix | None = None) -> None:
 
     prefs = load_prefs()
     command = get_command(app)
-    commands = (
-        {name: sub.get_short_help_str(60) for name, sub in command.commands.items()}
-        if isinstance(command, click.Group)
-        else {}
+    registered: Mapping[str, click.Command] = (
+        command.commands if isinstance(command, click.Group) else {}
     )
+    commands = {name: sub.get_short_help_str(60) for name, sub in registered.items()}
     alias_cmds = {name: f"alias: '{target}'" for name, target in prefs.alias.items()}
     session: PromptSession[str] = PromptSession(
         completer=_ShellCompleter({**commands, **alias_cmds, **_BUILTINS}),
+        history=_history(),
         complete_while_typing=False,
         complete_in_thread=True,
         style=_MENU_STYLE,
@@ -338,7 +364,7 @@ def start_shell(fs: Storix | None = None) -> None:
             console.print('[yellow]bye[/yellow]')
             return
         if name == 'help':
-            _help()
+            _help(registered)
             continue
         if name == 'clear':
             console.clear()

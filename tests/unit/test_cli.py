@@ -452,6 +452,7 @@ def test_ls_long_format_outputs_kind_size_date_time():
 
 
 def test_ls_long_format_on_a_file_lists_that_file():
+    """Like unix ls, `ls -l FILE` reports the file, not FILE/FILE."""
     run('echo', 'hello world', '-f', '/a.txt')
 
     out = run('ls', '-l', '/a.txt')
@@ -459,6 +460,69 @@ def test_ls_long_format_on_a_file_lists_that_file():
     assert out.exit_code == 0
     assert 'a.txt' in out.stdout
     assert 'a.txt/a.txt' not in out.stdout
+
+
+def test_ls_sorts_case_insensitively_like_coreutils_and_eza():
+    for name in ('Zebra.txt', 'a.txt', 'apple.txt', 'B.md'):
+        run('touch', f'/{name}')
+
+    listed = run('ls').stdout.split()
+
+    assert listed == ['a.txt', 'apple.txt', 'B.md', 'Zebra.txt']
+
+
+def test_cat_reproduces_file_bytes_exactly():
+    """`sx cat f > copy` must be byte-identical: no wrapping, no tab expansion."""
+    long_line = 'x' * 300
+    run('echo', long_line, '-f', '/long.txt')
+    run('echo', 'a\tb   ', '-f', '/ws.txt')
+
+    assert run('cat', '/long.txt').stdout == f'{long_line}\n'
+    assert run('cat', '/ws.txt').stdout == 'a\tb   \n'
+
+
+def test_cat_streams_rather_than_buffering_whole_files(monkeypatch):
+    """cat renders over the core's bounded ``stream`` (never ``cat``), so a
+    file larger than memory is printable."""
+    run('echo', 'hello', '-f', '/a.txt')
+
+    def forbidden_cat(self, *args, **kwargs):
+        message = 'sx cat must stream, not materialize the whole file'
+        raise AssertionError(message)
+
+    monkeypatch.setattr(Storix, 'cat', forbidden_cat)
+
+    result = run('cat', '/a.txt')
+
+    assert result.exit_code == 0
+    assert result.stdout == 'hello\n'
+
+
+def test_cat_names_a_missing_file_before_writing_anything():
+    run('echo', 'hello', '-f', '/a.txt')
+
+    result = run('cat', '/a.txt', '/nope.txt')
+
+    assert result.exit_code == 1
+    assert 'does not exist' in result.stderr
+
+
+def test_echo_prints_text_literally():
+    """Text is data, not rich markup - unix echo never interprets it."""
+    assert run('echo', '[bold]hi[/bold]').stdout == '[bold]hi[/bold]\n'
+
+    unbalanced = run('echo', 'a[/]b')  # a lone closing tag crashed rich
+
+    assert unbalanced.exit_code == 0
+    assert unbalanced.stdout == 'a[/]b\n'
+
+
+def test_tree_on_a_file_counts_one_file_and_no_directory():
+    run('echo', 'hello', '-f', '/a.txt')
+
+    out = run('tree', '/a.txt').stdout
+
+    assert '0 directories, 1 file' in out
 
 
 def test_icons_lookup_and_namespace():
@@ -636,6 +700,33 @@ def test_completion_context_parsing():
     assert _parse_completion_context('cp a b ') == ('cp', 3, '')
     # an escaped trailing space stays within the current token
     assert _parse_completion_context('cat my\\ ') == ('cat', 1, 'my ')
+
+
+def test_shell_help_is_derived_from_the_registered_commands(capsys):
+    """The REPL's command list cannot drift from the real command set: a
+    hand-written one advertised the hidden `provider` alias and never
+    learned about `find`."""
+    from typer.main import get_command
+
+    from storix.cli import shell
+
+    shell._help(get_command(cli.app).commands)
+    listed = capsys.readouterr().out
+
+    assert 'provider' not in listed  # hidden deprecated alias for whereami
+    for command in ('ls', 'find', 'whereami', 'doctor', 'config', 'exit'):
+        assert command in listed
+
+
+def test_shell_history_persists_between_sessions(tmp_path, monkeypatch):
+    from storix.cli import shell
+
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
+
+    history = shell._history()
+    history.append_string('pwd')
+
+    assert 'pwd' in list(shell._history().load_history_strings())
 
 
 def test_push_pull_completion_side(monkeypatch):
