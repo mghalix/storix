@@ -1164,6 +1164,25 @@ def test_doctor_does_not_call_an_importable_extra_ready(tmp_path, monkeypatch):
     assert 'ready' not in text
 
 
+def test_doctor_reports_an_uninstalled_extra_as_missing(tmp_path, monkeypatch):
+    """Given an absent engine, when doctor runs, then it does not claim it.
+
+    Doctor used to read the builder registry, which lists what get_storage
+    accepts rather than what this environment can import, so every built-in
+    provider reported as installed on a CLI-only install.
+    """
+    from storix.config import PROVIDER_REQUIRES
+
+    monkeypatch.setitem(PROVIDER_REQUIRES, 's3', ('storix_no_such_engine',))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path / 'xdg'))
+
+    text = _plain(run('doctor').stdout)
+
+    assert 's3 not installed' in text
+    assert 'local installed' in text
+
+
 def test_listing_profiles_survives_an_unresolvable_credential(tmp_path, monkeypatch):
     """Given a profile whose env: secret is unset, when listed, then it prints.
 

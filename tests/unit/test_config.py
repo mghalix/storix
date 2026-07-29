@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from storix import get_storage
 from storix.config import (
     PROVIDER_MODELS,
+    PROVIDER_REQUIRES,
     AzureConfig,
     DiscoveredConfig,
     LocalConfig,
@@ -25,6 +26,7 @@ from storix.config import (
     _resolve_secret,
     config_provenance,
     configured_profile,
+    extra_installed,
     find_project_config,
     is_secret,
     resolve_profile,
@@ -687,3 +689,45 @@ def test_a_singular_environment_table_names_the_right_spelling(tmp_path, monkeyp
 
     assert 'environments' in str(exc_info.value)
     assert 'profiles.media.environments.dev' in str(exc_info.value)
+
+
+def test_an_absent_module_makes_its_extra_not_installed(monkeypatch):
+    """Given a provider whose module is missing, when probed, then it is absent.
+
+    The dev environment installs every extra, so the missing case is only
+    reachable by naming a module that cannot exist.
+    """
+    monkeypatch.setitem(PROVIDER_REQUIRES, 'local', ('storix_no_such_engine',))
+
+    assert extra_installed('local') is False
+    assert extra_installed('memory') is True
+
+
+def test_a_provider_reports_its_missing_extra_before_its_missing_config(monkeypatch):
+    """Given no engine, when a session opens, then the extra is what fails.
+
+    A credential message is not actionable advice for someone who has no
+    engine to use the credential with (ADR 0031 D7).
+    """
+    monkeypatch.setitem(PROVIDER_REQUIRES, 's3', ('storix_no_such_engine',))
+    monkeypatch.delenv('STORIX_S3_BUCKET', raising=False)
+
+    with pytest.raises(ModuleNotFoundError) as exc_info:
+        get_storage('s3')
+
+    assert 'storix[s3]' in str(exc_info.value)
+
+
+def test_an_unknown_provider_needs_no_extra(monkeypatch):
+    """Given a registered third-party provider, when opened, then nothing blocks.
+
+    PROVIDER_REQUIRES lists what storix ships; a backend it has never heard
+    of brings its own dependencies and must not be gated on this table.
+    """
+    from storix import register_backend
+    from storix.backends import MemoryBackend
+
+    register_backend('storix_test_plugin', lambda **_: MemoryBackend())
+
+    assert extra_installed('storix_test_plugin') is True
+    assert get_storage('storix_test_plugin') is not None
