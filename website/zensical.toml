@@ -26,7 +26,15 @@ nav = [
     { "Backends" = "guide/backends.md" },
     { "Layers" = "guide/layers.md" },
     { "Profiles and stages" = "guide/profiles.md" },
-    { "The sx CLI" = "guide/cli.md" },
+  ] },
+  { "The sx CLI" = [
+    { "Overview" = "cli/index.md" },
+    { "Commands" = "cli/commands.md" },
+    { "The interactive shell" = "cli/shell.md" },
+    { "Transfers" = "cli/transfers.md" },
+    { "Configuration" = "cli/configuration.md" },
+    { "Preferences and layers" = "cli/preferences.md" },
+    { "doctor and update" = "cli/maintenance.md" },
   ] },
   { "Recipes" = [
     { "FastAPI" = "recipes/fastapi.md" },

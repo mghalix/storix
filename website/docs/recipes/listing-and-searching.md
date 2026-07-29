@@ -87,4 +87,4 @@ that is a cheap syscall; on an object store it is a network round trip. So:
   repeated metadata lookups are free.
 
 See [Cache with Redis or disk](caching.md) for the read-through cache, and
-[The sx CLI](../guide/cli.md) for the shell.
+[The sx CLI](../cli/index.md) for the shell.

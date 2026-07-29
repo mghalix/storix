@@ -801,7 +801,7 @@ The first traversal reaches remote storage. Repeated reads can reuse cached valu
 
 `sx` also includes provider flags such as `--base`, `--bucket`, `--container`, `--account-name`, `--region`, `--endpoint`, `--root`, and `--kind`, plus a typed `--set provider.field=value` escape hatch for less common non-secret coordinates.
 
-See [The `sx` CLI](https://storix.mghalix.com/guide/cli/).
+See [The `sx` CLI](https://storix.mghalix.com/cli/).
 
 ## What this demo proves
 
@@ -907,5 +907,5 @@ Zero storage rewrites.
 - [Caching with Redis or disk](https://storix.mghalix.com/recipes/caching/#cashews-with-async-storix)
 - [Write a custom backend](https://storix.mghalix.com/recipes/custom-backend/)
 - [Write a custom layer](https://storix.mghalix.com/recipes/custom-layer/)
-- [The `sx` CLI](https://storix.mghalix.com/guide/cli/)
+- [The `sx` CLI](https://storix.mghalix.com/cli/)
 - [Cloudflare R2 S3 SDK configuration](https://developers.cloudflare.com/r2/get-started/s3/#3-use-an-aws-sdk)

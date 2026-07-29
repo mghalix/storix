@@ -200,5 +200,5 @@ Provisioning never runs implicitly when a session opens: a missing root fails
 loudly (`StorageRootNotFoundError`, see [Errors](../reference/errors.md)) rather
 than being silently created, so a typo in a bucket name can never materialize a
 new empty bucket. The same operation is available on the command line as
-[`sx provision`](cli.md#provisioning-the-storage-root). `mkdir` never creates a
+[`sx provision`](../cli/commands.md#provisioning-the-storage-root). `mkdir` never creates a
 root - it only makes directories inside one.
