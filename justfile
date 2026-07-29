@@ -114,8 +114,8 @@ docs-build:
     cd website && uv run --project .. --no-sync zensical build --strict
 
 # Serve the documentation locally with live reload.
-docs:
-    cd website && uv run --project .. --no-sync zensical serve -o
+docs *args:
+    cd website && uv run --project .. --no-sync zensical serve -o {{ args }}
 
 # Run a sample by repository-relative path, for example `just sample quickstart.py`.
 sample path:

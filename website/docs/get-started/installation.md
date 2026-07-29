@@ -56,6 +56,10 @@ optional extras so you only pull in a provider SDK when you need it.
 | `cli` | the `sx` command-line interface and interactive shell |
 | `all` | every backend and tool above |
 
+In a project you choose these up front, because your dependency file is the
+record. A standalone `sx` does not need you to: it adds and removes them on
+demand with [`sx install`](#then-pick-your-backends).
+
 ## Verify
 
 ```python
@@ -84,15 +88,65 @@ environment needed.
 curl -LsSf https://storix.mghalix.com/install.sh | sh
 ```
 
-```bash
-curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --with azure,s3
-curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --all
-curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --version 0.5.0
-curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --help
+On Windows, the same thing in PowerShell:
+
+```powershell
+powershell -c "irm https://storix.mghalix.com/install.ps1 | iex"
 ```
 
-The script is a thin wrapper over `uv tool install`: it installs one tool for
-your user, and it does **not** need root, ask for credentials, write any
+That is the whole install. It gives you `sx` and the local backend.
+
+### Then pick your backends
+
+Cloud backends are optional, and `sx` installs them itself:
+
+```bash
+sx install s3          # + S3/R2/MinIO
+sx install azure,gcs   # several at once
+sx uninstall gcs       # changed your mind
+```
+
+Doing it in this order means you decide nothing up front, and changing your
+mind later never sends you back to the installer's flags. Extras are
+cumulative: adding `s3` keeps the ones you already have, and the version you
+are on does not move (that is `sx update`'s job).
+
+`sx doctor` tells you which are present, and naming a provider you have not
+installed yet tells you exactly what to run:
+
+```console
+$ sx -p s3
+sx: the s3 extra is not installed. Install it: sx install s3
+```
+
+See [doctor, install and update](../cli/maintenance.md) for the whole set.
+
+??? note "Selecting backends at install time instead"
+
+    The installers take the same selections, if you would rather do it in one
+    step, or are scripting an unattended install where no second command runs:
+
+    ```bash
+    curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --with azure,s3
+    curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --all
+    curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --version 0.5.0
+    curl -LsSf https://storix.mghalix.com/install.sh | sh -s -- --help
+    ```
+
+    ```powershell
+    # with options, PowerShell needs the script as a block:
+    & ([scriptblock]::Create((irm https://storix.mghalix.com/install.ps1))) -With azure,s3
+    ```
+
+    Both scripts take the same options (`--with`/`-With`, `--all`/`-All`,
+    `--version`/`-Version`, `--help`/`-Help`) and are exercised on every change
+    by a CI job that installs storix from them on Linux and Windows and runs
+    the result.
+
+### What the script does
+
+It is a thin wrapper over `uv tool install`: it installs one tool for your
+user, and it does **not** need root, ask for credentials, write any
 configuration, or edit your shell startup files. If `uv` is missing it says so
 and runs the official uv installer first. Re-running it upgrades in place.
 
@@ -102,24 +156,8 @@ before you run it:
 ```bash
 curl -LsSf https://storix.mghalix.com/install.sh -o install.sh
 less install.sh
-sh install.sh --with azure
+sh install.sh
 ```
-
-On Windows, the same thing in PowerShell:
-
-```powershell
-powershell -c "irm https://storix.mghalix.com/install.ps1 | iex"
-```
-
-```powershell
-# with options, PowerShell needs the script as a block:
-& ([scriptblock]::Create((irm https://storix.mghalix.com/install.ps1))) -With azure,s3
-```
-
-Both scripts take the same options (`--with`/`-With`, `--all`/`-All`,
-`--version`/`-Version`, `--help`/`-Help`) and are exercised on every change by
-a CI job that installs storix from them on Linux and Windows and runs the
-result.
 
 ### Uninstall
 
@@ -127,16 +165,20 @@ result.
 uv tool uninstall storix
 ```
 
+That removes `sx` entirely. To drop a single backend and keep the rest, use
+`sx uninstall gcs`.
+
 ### With uv or pip directly
 
+If you already have `uv` and would rather not pipe a script:
+
 ```bash
-uv tool install "storix[cli]"                 # sx, local backend only
-uv tool install "storix[cli,azure]"           # + both Azure backends
-uv tool install "storix[cli,s3]"              # + S3/R2/MinIO
-uv tool install "storix[cli,gcs]"             # + Google Cloud Storage
-uv tool install "storix[cli,azure,s3,gcs]"    # a mix
-uv tool install "storix[all]"                 # everything
+uv tool install "storix[cli]"    # sx, local backend only
+uv tool install "storix[all]"    # everything, no picking
 ```
+
+Backends go on the same way afterwards (`sx install s3`), so the `[cli,...]`
+combinations are only worth spelling out when you want them in one command.
 
 Inside a project you can instead add it as a dependency:
 
