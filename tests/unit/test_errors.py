@@ -208,3 +208,23 @@ def test_storage_root_not_found_default_message_names_kind_and_root():
 
 def test_storage_root_not_found_custom_message_overrides_default():
     assert str(StorageRootNotFoundError('media', msg='boom')) == 'boom'
+
+
+def test_from_os_error_never_leaks_the_native_path():
+    """The message speaks the port namespace: a native path in the raw
+    OSError's own text must not ride through the fallback branch.
+    """
+    from shutil import SameFileError
+
+    from storix.errors import from_os_error
+
+    native = SameFileError(
+        "PosixPath('/srv/data/a.txt') and PosixPath('/srv/data/a.txt') "
+        'are the same file'
+    )
+
+    translated = from_os_error(native, StorixPath('/a.txt'))
+
+    assert '/srv/data' not in str(translated)
+    assert 'PosixPath' not in str(translated)
+    assert '/a.txt' in str(translated)

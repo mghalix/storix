@@ -142,13 +142,20 @@ def from_os_error(exc: OSError, path: StrPathLike) -> StorageError:
     raise ``from_os_error(exc, port_path) from exc``. ``path`` should be
     the *port* path (virtual), never the native OS path, so errors speak
     the caller's namespace.
+
+    Only ``strerror`` carries into the message, never ``str(exc)``: an
+    ``OSError`` subclass raised by a library rather than the kernel (such
+    as ``shutil.SameFileError``) formats native paths into its own text,
+    and letting that through would leak the backend's real location into
+    a port-level error.
     """
     for stdlib_cls, storix_cls in _OS_ERROR_MAP:
         if isinstance(exc, stdlib_cls):
             return storix_cls(path)
     if exc.errno == errno.ENOTEMPTY:
         return DirectoryNotEmptyError(path)
-    return StorageError(f"'{path}': {exc.strerror or exc}")
+    detail = exc.strerror or type(exc).__name__
+    return StorageError(f"'{path}': {detail}")
 
 
 class ConfigurationError(StorageError):
