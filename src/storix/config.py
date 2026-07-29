@@ -16,6 +16,7 @@ which source supplied each effective field (``config_provenance``).
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import re
 import sys
@@ -576,6 +577,76 @@ PROVIDER_MODELS: Final[dict[str, type[_ConfigBase]]] = {
 """Provider name -> its configuration model. ``memory`` takes no config and
 is deliberately absent, so any ``[memory]`` table or memory coordinate flag
 reads as unknown."""
+
+PROVIDER_REQUIRES: Final[dict[str, tuple[str, ...]]] = {
+    'local': ('aiofiles',),
+    's3': ('opendal',),
+    'gcs': ('opendal',),
+    # azure is azadls + azblob composed, and each lean extra serves its own
+    # kind, so one importable engine already means the extra is present; the
+    # kind that is missing reports itself when the session opens
+    'azure': ('azure.storage.filedatalake', 'opendal'),
+}
+"""Provider name -> the third-party modules its extra installs, any one of
+which being importable means the extra is present. ``memory`` needs nothing
+and is deliberately absent, as is every third-party provider registered
+through ``register_backend``: nothing storix knows about is missing."""
+
+
+def _importable(module: str) -> bool:
+    """Whether ``module`` can be located without importing the module itself.
+
+    ``find_spec`` does import parent packages in order to search them, so a
+    dotted name whose parent is absent raises instead of returning None.
+    Both answers mean the same thing here.
+
+    Args:
+        module: The dotted module name to look for.
+    """
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def extra_installed(provider: str) -> bool:
+    """Whether ``provider``'s optional extra is importable in this environment.
+
+    The honest signal for "can this environment open that provider", as
+    opposed to ``available_providers()``, which answers the different
+    question of which names ``get_storage`` accepts. A provider with no
+    known extra reads as installed, because nothing is missing.
+
+    Args:
+        provider: The provider name to probe.
+    """
+    required = PROVIDER_REQUIRES.get(provider)
+    return required is None or any(_importable(module) for module in required)
+
+
+def require_extra(provider: str) -> None:
+    """Fail on a missing extra before any other diagnosis of ``provider``.
+
+    Construction otherwise reports whichever problem its statements happen
+    to reach first, so a provider that validates configuration before
+    importing its engine asks for credentials from someone who has no
+    engine to use them with. Missing-extra comes first everywhere because
+    it is the only one of the two the reader can act on (ADR 0031 D7).
+
+    Args:
+        provider: The provider about to be constructed.
+
+    Raises:
+        ModuleNotFoundError: If none of the provider's modules are
+            importable. ``sx`` turns this into the install remedy; a
+            library caller sees the missing distribution named.
+    """
+    if extra_installed(provider):
+        return
+    module = PROVIDER_REQUIRES[provider][0]
+    msg = f'No module named {module!r} - install storix[{provider}]'
+    raise ModuleNotFoundError(msg, name=module.partition('.')[0])
+
 
 _KNOWN_TOP_LEVEL: Final[frozenset[str]] = frozenset(
     {

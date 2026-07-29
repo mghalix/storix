@@ -79,8 +79,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# PEP 508 puts the extras before the version specifier, so the spec is
+# storix[cli]==0.5.0; the other order is a parse error, not a preference
+SPEC="storix[${EXTRAS}]"
 if [ -n "$VERSION" ]; then
-    SPEC="storix==$VERSION"
+    SPEC="${SPEC}==${VERSION}"
 fi
 
 if ! command -v uv >/dev/null 2>&1; then
@@ -93,8 +96,8 @@ if ! command -v uv >/dev/null 2>&1; then
     command -v uv >/dev/null 2>&1 || die "uv installation did not put uv on PATH"
 fi
 
-say "Installing ${SPEC}[${EXTRAS}] with uv tool install"
-uv tool install --force "${SPEC}[${EXTRAS}]"
+say "Installing ${SPEC} with uv tool install"
+uv tool install --force "${SPEC}"
 
 if command -v sx >/dev/null 2>&1; then
     say ""

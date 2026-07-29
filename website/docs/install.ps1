@@ -49,9 +49,11 @@ if ($All) {
     $extras = "cli,$With"
 }
 
-$spec = 'storix'
+# PEP 508 puts the extras before the version specifier, so the spec is
+# storix[cli]==0.5.0; the other order is a parse error, not a preference
+$spec = "storix[$extras]"
 if ($Version) {
-    $spec = "storix==$Version"
+    $spec = "$spec==$Version"
 }
 
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -74,8 +76,8 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
     }
 }
 
-Write-Output "Installing $spec[$extras] with uv tool install"
-uv tool install --force "$spec[$extras]"
+Write-Output "Installing $spec with uv tool install"
+uv tool install --force "$spec"
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
