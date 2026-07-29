@@ -333,6 +333,29 @@ def test_installer_is_shellcheck_clean() -> None:
     assert result.returncode == 0, result.stdout
 
 
+def test_installer_builds_a_spec_pip_can_parse(tmp_path: Path) -> None:
+    """Given --version and --with, when run, then the spec is well formed.
+
+    PEP 508 puts the extras before the version specifier. The other order
+    parses as a version, so `--version` used to fail at the resolver with
+    no local symptom at all.
+    """
+    stub = tmp_path / 'uv'
+    stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$0.args"\n', encoding='utf-8')
+    stub.chmod(0o755)
+
+    subprocess.run(  # noqa: S603
+        ['/bin/sh', str(_installer()), '--version', '9.9.9', '--with', 's3'],
+        env={'PATH': f'{tmp_path}:/usr/bin:/bin', 'HOME': str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    argv = (tmp_path / 'uv.args').read_text(encoding='utf-8').split()
+    assert argv == ['tool', 'install', '--force', 'storix[cli,s3]==9.9.9']
+
+
 def _windows_installer() -> Path:
     """The single source of the published Windows installer."""
     return Path(__file__).resolve().parents[2] / 'website' / 'docs' / 'install.ps1'

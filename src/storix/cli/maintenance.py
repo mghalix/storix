@@ -26,6 +26,7 @@ from storix.config import (
     available_profiles,
     config_provenance,
     declared_extras,
+    extra_installed,
     find_project_config,
     find_user_config,
     installation_kind,
@@ -243,12 +244,14 @@ def _extra_state(provider: str) -> str:
     Deliberately not "ready": nothing here opens a connection or checks a
     credential, so a word that implies either would be a diagnosis storix
     has not made. Credentials show up under ``configuration``.
-    """
-    from storix import available_providers
 
+    Deliberately not ``available_providers()`` either, which names what
+    ``get_storage`` accepts rather than what this environment can import,
+    and so reported every built-in provider as installed.
+    """
     return (
         '[green]installed[/green]'
-        if provider in available_providers()
+        if extra_installed(provider)
         else '[dim]not installed[/dim]'
     )
 

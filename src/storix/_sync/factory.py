@@ -20,6 +20,7 @@ from storix.config import (
     LocalConfig,
     S3Config,
     StorixSettings,
+    require_extra,
     resolve_profile,
 )
 from storix.errors import ConfigurationError
@@ -409,4 +410,8 @@ def get_storage(
     if builder is None:
         msg = f'unknown storage provider {name!r}; available: {sorted(_BUILDERS)}'
         raise ConfigurationError(msg)
+    # the one place every builder routes through, so a missing extra outranks
+    # a missing credential without depending on the order of statements inside
+    # each builder (D7); third-party providers are not in the table and pass
+    require_extra(name)
     return Storix(builder(**overrides))
