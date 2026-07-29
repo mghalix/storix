@@ -102,6 +102,9 @@ region = "auto"
 [cli]
 icons = true                # Nerd Font glyphs in listings
 dir_contents = true         # show whether a directory is empty in flat listings
+completion_case = "smart"   # tab completion: smart (default) | insensitive | sensitive
+                            # smart ignores case until you type an uppercase letter
+editor = "nvim"             # what `sx edit` opens; beats $VISUAL and $EDITOR
 provider = "local"          # which backend sx opens, overriding the top level
 layers = [{ name = "cache", ttl = 300 }]
 
