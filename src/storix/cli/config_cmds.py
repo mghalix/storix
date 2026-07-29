@@ -8,9 +8,6 @@ rules it displays.
 
 from __future__ import annotations
 
-import os
-import subprocess
-
 from typing import Annotated, Any, cast
 
 import typer
@@ -36,7 +33,7 @@ from storix.config import (
 )
 from storix.errors import ConfigurationError
 
-from .render import console, err
+from .render import console, err, launch_editor
 from .state import resolve_provider, selection
 
 
@@ -518,14 +515,10 @@ def config_validate() -> None:
 def config_edit(*, scope: _SCOPE = 'project', user: _USER = False) -> None:
     """Open the config file in $VISUAL, else $EDITOR."""
     path, exists = scope_path(_target(scope, user))
-    editor = os.environ.get('VISUAL') or os.environ.get('EDITOR')
-    if editor is None:
-        err.print('[red]sx: set $VISUAL or $EDITOR to use sx config edit[/red]')
-        raise typer.Exit(1)
     if not exists:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_SKELETON, encoding='utf-8')
-    subprocess.run([*editor.split(), str(path)], check=False)  # noqa: S603
+    launch_editor(path)
 
 
 @config_app.command('profiles')

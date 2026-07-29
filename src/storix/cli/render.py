@@ -7,17 +7,25 @@ enabled (``--no-icons`` / persistent prefs), mirroring eza's ``--icons=auto``.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 from math import ceil
 from typing import TYPE_CHECKING, Final
+
+import typer
 
 from rich.console import Console
 from rich.text import Text
 
+from .config import load_prefs
 from .icons import lookup_entry_decor
 from .state import icons_enabled
 
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from typing import Literal
 
     from storix.models import DirEntry
@@ -27,6 +35,47 @@ if TYPE_CHECKING:
 
 console = Console()
 err = Console(stderr=True)
+
+
+def resolve_editor() -> str | None:
+    """The editor command to open files with, or None if there is none.
+
+    In order: the ``[cli] editor`` preference, because a user who set it
+    for sx means it; then ``$VISUAL`` over ``$EDITOR``, the long-standing
+    convention where the former names an editor that can hold a terminal,
+    which is what a blocking hand-off needs; then ``notepad`` on Windows,
+    where a fresh shell has neither variable set but does always have
+    that. No such last resort on unix: ``vi`` and ``nano`` are both
+    plausible and picking one for someone is worse than saying so.
+    """
+    configured = load_prefs().editor
+    if configured:
+        return configured
+    inherited = os.environ.get('VISUAL') or os.environ.get('EDITOR')
+    if inherited:
+        return inherited
+    return 'notepad' if sys.platform == 'win32' else None
+
+
+def launch_editor(path: Path) -> None:
+    """Open ``path`` in the user's editor and wait for it to close.
+
+    Args:
+        path: The local file to open.
+
+    Raises:
+        Exit: If no editor can be determined, since guessing which editor
+            a user wants is not a thing to be clever about.
+    """
+    editor = resolve_editor()
+    if editor is None:
+        err.print(
+            '[red]sx: no editor configured[/red]\n'
+            'set $VISUAL or $EDITOR, or put [cyan]editor = "nvim"[/cyan] under '
+            '[cyan][cli][/cyan] in your config ([cyan]sx config edit[/cyan])'
+        )
+        raise typer.Exit(1)
+    subprocess.run([*editor.split(), str(path)], check=False)  # noqa: S603
 
 
 def entry_decor(entry: DirEntry, *, dir_state: DirState = 'closed') -> tuple[str, str]:

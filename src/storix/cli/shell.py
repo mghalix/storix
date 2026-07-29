@@ -7,6 +7,8 @@ keep in sync. Only shell built-ins (exit/help/clear) are handled here.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import shlex
 
 from typing import TYPE_CHECKING
@@ -15,12 +17,15 @@ import click
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.filters import completion_is_selected
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
 from typer.main import get_command
 
 from storix.config import user_config_path
+from storix.errors import StorageError
 
 from .app import app
 from .config import expand_alias, load_prefs
@@ -40,6 +45,7 @@ if TYPE_CHECKING:
 
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
+    from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 
     from storix import Storix
 
@@ -64,6 +70,23 @@ _MENU_STYLE = Style.from_dict(
     }
 )
 """Completion menu colors (ansi names so they follow the terminal theme)."""
+
+
+def _key_bindings() -> KeyBindings:
+    """Make Enter accept a highlighted completion instead of submitting.
+
+    prompt_toolkit's default runs the line the moment you press Enter on a
+    menu entry, so tab-completing a path and pressing Enter executes a
+    half-written command. Every shell instead puts the completion on the
+    line and waits, which is what lets you complete a second argument.
+    """
+    bindings = KeyBindings()
+
+    @bindings.add('enter', filter=completion_is_selected)
+    def _accept(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        event.current_buffer.complete_state = None
+
+    return bindings
 
 
 def _escape_shell_path(name: str) -> str:
@@ -112,6 +135,26 @@ def _parse_completion_context(text_before_cursor: str) -> tuple[str, int, str]:
     return cmd, len(tokens) - 1, tokens[-1]
 
 
+def _completion_matches(name: str, fragment: str) -> bool:
+    """Whether ``name`` completes ``fragment``, per ``[cli] completion_case``.
+
+    ``smart`` (the default) ignores case only until the user types an
+    uppercase letter - at which point they clearly meant it.
+    ``insensitive`` always ignores it, ``sensitive`` is the plain prefix
+    test.
+
+    Args:
+        name: The candidate entry name.
+        fragment: The word fragment the user has typed.
+    """
+    mode = load_prefs().completion_case
+    if mode == 'insensitive' or (
+        mode == 'smart' and not any(char.isupper() for char in fragment)
+    ):
+        return name.lower().startswith(fragment.lower())
+    return name.startswith(fragment)
+
+
 def _get_remote_completions(word: str) -> Iterator[Completion]:
     """Yield remote backend completions for `word`."""
     fragment = word.rpartition('/')[2]
@@ -124,7 +167,7 @@ def _get_remote_completions(word: str) -> Iterator[Completion]:
     except Exception:  # noqa: BLE001 - completion must never break the prompt
         return
     for entry in entries:
-        if not entry.name.startswith(fragment):
+        if not _completion_matches(entry.name, fragment):
             continue
         icon = entry_decor(entry)[0]
         slash = '/' if entry.is_dir else ''
@@ -174,7 +217,7 @@ def _get_local_completions(word: str) -> Iterator[Completion]:
         name = path.name
         if not show_hidden and name.startswith('.'):
             continue
-        if not name.startswith(fragment):
+        if not _completion_matches(name, fragment):
             continue
 
         try:
@@ -254,6 +297,11 @@ def _prompt(fs: Storix) -> FormattedText:
     )
 
 
+def _subcommands(command: click.Command) -> Mapping[str, click.Command]:
+    """The registered subcommands, or empty when ``command`` is not a group."""
+    return command.commands if isinstance(command, click.Group) else {}
+
+
 def _help(commands: Mapping[str, click.Command]) -> None:
     """List the commands, grouped exactly as ``sx --help`` groups them.
 
@@ -290,6 +338,52 @@ def _history() -> FileHistory:
     path = user_config_path().parent / 'history'
     path.parent.mkdir(parents=True, exist_ok=True)
     return FileHistory(str(path))
+
+
+def _split_redirect(argv: list[str]) -> tuple[list[str], str | None, bool]:
+    """Split a trailing ``> path`` / ``>> path`` off a command line.
+
+    Redirection only, not pipes: the target is a backend path and the
+    operator is an output sink, which needs no process model. ``cmd1 |
+    cmd2`` does, and is deliberately not here.
+
+    Args:
+        argv: The tokenized line, after alias expansion.
+
+    Returns:
+        The command's own argv, the redirect target (None when there is
+        no operator), and whether it appends.
+
+    Raises:
+        ValueError: If the operator has no target, or more than one.
+    """
+    for i, token in enumerate(argv):
+        if not token.startswith('>'):
+            continue
+        append = token.startswith('>>')
+        attached = token[2:] if append else token[1:]
+        rest = argv[i + 1 :]
+        target = attached or (rest.pop(0) if rest else '')
+        if not target or rest:
+            msg = 'redirect needs exactly one target: cmd > path'
+            raise ValueError(msg)
+        return argv[:i], target, append
+    return argv, None, False
+
+
+def _capture(command: click.Command, argv: list[str]) -> bytes:
+    """Run one command with its stdout collected instead of printed.
+
+    A text wrapper over a byte buffer, because both output paths have to
+    land in the same place: ``cat`` writes bytes to ``stdout.buffer``
+    while everything else prints text through rich.
+    """
+    collected = io.BytesIO()
+    text = io.TextIOWrapper(collected, encoding='utf-8', newline='')
+    with contextlib.redirect_stdout(text):
+        _dispatch(command, argv)
+        text.flush()
+    return collected.getvalue()
 
 
 def _parse_input(line: str, aliases: dict[str, str]) -> list[str]:
@@ -329,14 +423,14 @@ def start_shell(fs: Storix | None = None) -> None:
 
     prefs = load_prefs()
     command = get_command(app)
-    registered: Mapping[str, click.Command] = (
-        command.commands if isinstance(command, click.Group) else {}
-    )
-    commands = {name: sub.get_short_help_str(60) for name, sub in registered.items()}
+    commands = {
+        name: sub.get_short_help_str(60) for name, sub in _subcommands(command).items()
+    }
     alias_cmds = {name: f"alias: '{target}'" for name, target in prefs.alias.items()}
     session: PromptSession[str] = PromptSession(
         completer=_ShellCompleter({**commands, **alias_cmds, **_BUILTINS}),
         history=_history(),
+        key_bindings=_key_bindings(),
         complete_while_typing=False,
         complete_in_thread=True,
         style=_MENU_STYLE,
@@ -344,41 +438,96 @@ def start_shell(fs: Storix | None = None) -> None:
 
     _banner(fs)
 
+    # two Ctrl+C in a row leave; a single one never does. The first of the
+    # pair discards whatever was being typed, which is what makes Ctrl+C safe
+    # to reach for mid-command - and it still counts as the first press, so
+    # clearing a line then pressing again exits rather than asking a third
+    # time.
+    warned = False
+
     while True:
         try:
             line = session.prompt(_prompt(current_fs())).strip()
-        except (EOFError, KeyboardInterrupt):
+        except KeyboardInterrupt:
+            if warned:
+                console.print('[yellow]bye[/yellow]')
+                return
+            warned = True
+            console.print('[dim]press Ctrl+C again to exit[/dim]')
+            continue
+        except EOFError:
+            # end of input, not an interrupt: one press, like any shell
             console.print('\n[yellow]bye[/yellow]')
             return
 
-        if not line:
-            continue
-        try:
-            argv = _parse_input(line, prefs.alias)
-        except ValueError as exc:
-            console.print(f'[red]parse error: {exc}[/red]')
-            continue
-
-        name = argv[0]
-        if name in {'exit', 'quit'}:
+        warned = False
+        if line and not _run_line(command, line, prefs.alias):
             console.print('[yellow]bye[/yellow]')
             return
-        if name == 'help':
-            _help(registered)
-            continue
-        if name == 'clear':
-            console.clear()
-            continue
-        if name == 'refresh':
-            layer = cache_layer(current_fs())
-            if layer is None:
-                console.print('[yellow]no cache layer active[/yellow]')
-            else:
-                layer.clear()
-                console.print('[green]cache cleared[/green]')
-            continue
 
+
+def _run_line(command: click.Command, line: str, aliases: dict[str, str]) -> bool:
+    """Execute one prompt line.
+
+    Args:
+        command: The shared Click group every non-built-in goes through.
+        line: The line as typed, already stripped and known non-empty.
+        aliases: Alias table from the preferences.
+
+    Returns:
+        False when the line asked the shell to exit, True otherwise.
+    """
+    try:
+        argv, redirect, append = _split_redirect(_parse_input(line, aliases))
+    except ValueError as exc:
+        console.print(f'[red]parse error: {exc}[/red]')
+        return True
+    if not argv:
+        console.print('[red]parse error: redirect needs a command[/red]')
+        return True
+
+    name = argv[0]
+    if name in {'exit', 'quit'}:
+        return False
+    if _builtin(name, command):
+        return True
+
+    if redirect is None:
         _dispatch(command, argv)
+    else:
+        try:
+            current_fs().echo(
+                _capture(command, argv), redirect, mode='a' if append else 'w'
+            )
+        except StorageError as exc:
+            console.print(f'[red]{name}: {exc}[/red]')
+    return True
+
+
+def _builtin(name: str, command: click.Command) -> bool:
+    """Run the shell built-in called ``name``, if it is one.
+
+    Args:
+        name: The first token of the line.
+        command: The shared Click group, which ``help`` lists.
+
+    Returns:
+        True when ``name`` was a built-in and has now run.
+    """
+    if name == 'help':
+        _help(_subcommands(command))
+    elif name == 'clear':
+        console.clear()
+    elif name == 'refresh':
+        layer = cache_layer(current_fs())
+        if layer is None:
+            console.print('[yellow]no cache layer active[/yellow]')
+        else:
+            layer.clear()
+            console.print('[green]cache cleared[/green]')
+    else:
+        return False
+    return True
 
 
 def _dispatch(command: click.Command, argv: list[str]) -> None:

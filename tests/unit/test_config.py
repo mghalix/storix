@@ -33,6 +33,7 @@ from storix.config import (
     is_secret,
     resolve_profile,
     secret_fields,
+    upgrade_command,
     user_config_path,
 )
 from storix.errors import ConfigurationError
@@ -780,3 +781,49 @@ def test_an_unknown_provider_needs_no_extra(monkeypatch):
 
     assert extra_installed('storix_test_plugin') is True
     assert get_storage('storix_test_plugin') is not None
+
+
+def test_upgrade_command_crosses_a_pin_and_keeps_the_extras(tmp_path, monkeypatch):
+    """Given a pinned uv tool install, when upgrading, then it reinstalls at
+    @latest with the receipt's extras.
+
+    `sx install` pins to the running version every time it adds an extra,
+    and `uv tool upgrade` will not cross that pin - so upgrading that way
+    is a permanent no-op for anyone who ever added a backend.
+    """
+    (tmp_path / 'uv-receipt.toml').write_text(
+        '[tool]\nrequirements = [{ name = "storix", extras = ["cli", "s3"] }]\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(sys, 'prefix', str(tmp_path))
+
+    argv = upgrade_command()
+
+    assert argv == [
+        'uv',
+        'tool',
+        'install',
+        '--force',
+        '--refresh-package',
+        'storix',
+        'storix[cli,s3]@latest',
+    ]
+
+
+def test_upgrade_command_can_target_an_exact_version(tmp_path, monkeypatch):
+    (tmp_path / 'uv-receipt.toml').write_text(
+        '[tool]\nrequirements = [{ name = "storix", extras = ["cli"] }]\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(sys, 'prefix', str(tmp_path))
+
+    assert upgrade_command('0.5.1')[-1] == 'storix[cli]@0.5.1'
+
+
+def test_upgrade_command_outside_a_uv_tool_stays_the_printed_pip_form(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(sys, 'prefix', str(tmp_path))
+
+    assert upgrade_command()[1:] == ['-m', 'pip', 'install', '--upgrade', 'storix']
+    assert upgrade_command('0.5.1')[-1] == 'storix==0.5.1'

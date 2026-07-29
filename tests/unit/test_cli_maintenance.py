@@ -1,5 +1,7 @@
 """`sx update` and `sx doctor`: what they report and what they refuse."""
 
+import subprocess
+
 from collections.abc import Generator
 from pathlib import Path
 
@@ -47,7 +49,7 @@ def test_update_refuses_to_touch_an_installation_it_did_not_make(sandbox, monkey
     monkeypatch.setattr(
         maintenance,
         'upgrade_command',
-        lambda: ['python', '-m', 'pip', 'install', '-U', 'storix'],
+        lambda version=None: ['python', '-m', 'pip', 'install', '-U', 'storix'],
     )
 
     result = run('update')
@@ -61,15 +63,63 @@ def test_update_drives_uv_for_a_uv_tool_install(sandbox, monkeypatch):
     """Given a uv tool install, when updating, then uv is run, not pip."""
     ran: list[list[str]] = []
     monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(maintenance, 'installed_version', lambda: '0.4.9')
+    monkeypatch.setattr(maintenance, 'latest_version', lambda: '0.5.0')
     monkeypatch.setattr(
-        maintenance, 'upgrade_command', lambda: ['uv', 'tool', 'upgrade', 'storix']
+        maintenance,
+        'upgrade_command',
+        lambda version=None: ['uv', 'tool', 'install', '--force', 'storix[cli]@latest'],
     )
-    monkeypatch.setattr(maintenance, '_run', lambda argv: ran.append(list(argv)) or 0)
+    monkeypatch.setattr(
+        maintenance, '_run_quietly', lambda argv, label: ran.append(list(argv)) or 0
+    )
 
     result = run('update')
 
     assert result.exit_code == 0
-    assert ran == [['uv', 'tool', 'upgrade', 'storix']]
+    assert ran == [['uv', 'tool', 'install', '--force', 'storix[cli]@latest']]
+    assert '0.4.9 -> 0.5.0' in unwrapped(result.stdout)
+
+
+def test_update_does_nothing_when_already_on_the_newest_release(sandbox, monkeypatch):
+    """The noisiest possible no-op is a full reinstall of what is already
+    there, so say so instead."""
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(maintenance, 'installed_version', lambda: '0.5.0')
+    monkeypatch.setattr(maintenance, 'latest_version', lambda: '0.5.0')
+    monkeypatch.setattr(
+        maintenance, '_run_quietly', lambda argv, label: ran.append(list(argv)) or 0
+    )
+
+    result = run('update')
+
+    assert result.exit_code == 0
+    assert ran == []
+    assert 'already on' in unwrapped(result.stdout)
+
+
+def test_update_shows_the_package_manager_output_on_failure(sandbox, monkeypatch):
+    """Quiet while it works, never quiet when it breaks."""
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(maintenance, 'installed_version', lambda: '0.4.9')
+    monkeypatch.setattr(maintenance, 'latest_version', lambda: '0.5.0')
+    monkeypatch.setattr(
+        maintenance, 'upgrade_command', lambda version=None: ['uv', 'boom']
+    )
+
+    def failing(argv, check, capture_output, text):
+        del argv, check, capture_output, text
+        return subprocess.CompletedProcess([], 1, 'resolve log', 'no such package')
+
+    monkeypatch.setattr(maintenance.subprocess, 'run', failing)
+
+    result = run('update')
+
+    assert result.exit_code == 1
+    reported = unwrapped(result.stderr)
+    assert 'no such package' in reported  # uv's own words, unedited
+    assert 'uv boom' in reported  # and the command that produced them
 
 
 def test_update_check_reports_both_versions_without_installing(sandbox, monkeypatch):
@@ -272,3 +322,25 @@ def test_uninstall_refuses_to_remove_the_extra_that_makes_sx_run(sandbox, monkey
     assert result.exit_code == 2
     assert 'uv tool uninstall storix' in unwrapped(result.stderr)
     assert ran == []
+
+
+def test_update_passes_an_explicit_version_through(sandbox, monkeypatch):
+    """Given a version argument, when updating, then that exact version is
+    what gets installed - the deliberate pin / downgrade path."""
+    asked: list[str | None] = []
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(
+        maintenance,
+        'upgrade_command',
+        lambda version=None: asked.append(version) or ['uv', 'x', str(version)],
+    )
+    monkeypatch.setattr(
+        maintenance, '_run_quietly', lambda argv, label: ran.append(list(argv)) or 0
+    )
+
+    result = run('update', '0.5.1')
+
+    assert result.exit_code == 0
+    assert asked == ['0.5.1']
+    assert ran == [['uv', 'x', '0.5.1']]

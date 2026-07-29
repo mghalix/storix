@@ -11,11 +11,13 @@ import ctypes
 import os
 import signal
 import sys
+import tempfile
 import threading
 
 from collections import defaultdict
 from contextlib import contextmanager, suppress
 from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, NoReturn
 
 import typer
@@ -38,10 +40,11 @@ from storix._sync._compat import concurrent
 from storix.config import StorixSettings, resolve_profile
 from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
 from storix.enums import PathKind
-from storix.errors import StorageError, TransferStoppedError
+from storix.errors import PathNotFoundError, StorageError, TransferStoppedError
 
 from . import config_cmds, maintenance
 from .config import load_prefs
+from .icons import Icons
 from .render import (
     console,
     dir_state_of,
@@ -49,6 +52,7 @@ from .render import (
     entry_label,
     err,
     human_size,
+    launch_editor,
 )
 from .state import (
     _fs,  # pyright: ignore[reportPrivateUsage]
@@ -254,11 +258,20 @@ def pwd() -> None:
 
 @app.command(rich_help_panel=_NAVIGATE)
 def cd(path: Annotated[str | None, typer.Argument()] = None) -> None:
-    """Change directory (no argument: home)."""
+    """Change directory (no argument: home, '-' for the previous one)."""
+    fs = _fs()
     try:
-        _fs().cd(path)
+        fs.cd(path)
     except StorageError as exc:
         _die('cd', exc)
+    if path == '-':
+        # unix cd echoes where '-' landed, because you did not name it. The
+        # jump glyph (zoxide's convention) marks it as a destination rather
+        # than one more line of output, and drops out when icons are off.
+        arrow = (
+            f'{Icons.ARROW_JUMP} ' if icons_enabled() and console.is_terminal else ''
+        )
+        console.print(f'[dim]{arrow}[/dim][blue]{fs.pwd()}[/blue]')
 
 
 class _LevelBuffer:
@@ -499,6 +512,43 @@ def echo(
         _fs().echo(text + '\n', file, mode='a' if append else 'w')
     except StorageError as exc:
         _die('echo', exc)
+
+
+@app.command(rich_help_panel=_WRITE)
+def edit(path: Annotated[str, typer.Argument()]) -> None:
+    """Open a file in $VISUAL/$EDITOR, writing it back if it changed.
+
+    The backend file is staged into a temporary directory under its own
+    name (so the editor shows the name you asked for, and picks its syntax
+    highlighting from the extension), then written back only when the
+    bytes actually differ - an editor that exits without saving costs no
+    write, and on an object store no new version.
+
+    A path that does not exist yet opens empty and is created on save,
+    like opening a new file in any editor. Concurrent edits are last-write
+    wins; nothing here locks the object.
+    """
+    fs = _fs()
+    try:
+        before = fs.cat(path)
+    except PathNotFoundError:
+        before = None  # a new file: open empty, create it only if written to
+    except StorageError as exc:
+        _die('edit', exc)
+
+    with tempfile.TemporaryDirectory(prefix='sx-edit-') as staging:
+        staged = Path(staging) / fs.resolve(path).name
+        staged.write_bytes(before or b'')
+        launch_editor(staged)
+        after = staged.read_bytes()
+
+    if after == (before or b''):
+        console.print('[dim]unchanged[/dim]')
+        return
+    try:
+        fs.echo(after, path)
+    except StorageError as exc:
+        _die('edit', exc)
 
 
 # --- reading ---

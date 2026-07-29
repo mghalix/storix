@@ -1,4 +1,5 @@
 import re
+import sys
 
 from collections.abc import Generator
 
@@ -1437,3 +1438,332 @@ def test_an_error_naming_a_toml_table_survives_rendering(tmp_path, monkeypatch):
     result = run('config', 'validate')
 
     assert '[environments]' in _plain(result.stdout + result.stderr)
+
+
+class _ScriptedPrompt:
+    """A PromptSession stand-in that replays typed lines and interrupts.
+
+    Each script entry is ``(buffer_text, result)``: ``result`` is either a
+    line to return or an exception to raise, and ``buffer_text`` is what
+    the user had typed when it happened - which is what prompt_toolkit
+    leaves on ``default_buffer`` after a Ctrl+C.
+    """
+
+    def __init__(self, script, **_kwargs) -> None:
+        self._script = list(script)
+        self.default_buffer = type('B', (), {'text': ''})()
+
+    def prompt(self, *_args, **_kwargs):
+        typed, result = self._script.pop(0)
+        self.default_buffer.text = typed
+        if isinstance(result, type) and issubclass(result, BaseException):
+            raise result
+        return result
+
+
+def _run_shell_over(monkeypatch, fs, script) -> None:
+    from storix.cli import shell
+
+    monkeypatch.setattr(
+        shell, 'PromptSession', lambda **kwargs: _ScriptedPrompt(script, **kwargs)
+    )
+    shell.start_shell(fs)
+
+
+def _run_shell(monkeypatch, script) -> None:
+    _run_shell_over(monkeypatch, Storix(MemoryBackend()), script)
+
+
+def test_ctrl_c_clears_a_typed_line_then_exits_on_the_second_press(monkeypatch, capsys):
+    """Two presses, never three: the one that discards a half-typed line is
+    still the first of the pair, so the next one leaves."""
+    _run_shell(
+        monkeypatch,
+        [
+            ('cat a.tx', KeyboardInterrupt),  # 1: clears the line, warns
+            ('', KeyboardInterrupt),  # 2: exits
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert out.count('again to exit') == 1
+    assert 'bye' in out
+
+
+def test_a_command_between_interrupts_resets_the_exit_warning(monkeypatch, capsys):
+    """Given Ctrl+C then a real command, when Ctrl+C arrives again, then it
+    warns rather than exiting: the two presses have to be consecutive."""
+    _run_shell(
+        monkeypatch,
+        [
+            ('', KeyboardInterrupt),  # warns
+            ('', 'pwd'),  # resets
+            ('', KeyboardInterrupt),  # warns again, does not exit
+            ('', KeyboardInterrupt),  # now exits
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert out.count('again to exit') == 2
+    assert 'bye' in out
+
+
+def test_ctrl_d_still_leaves_immediately(monkeypatch, capsys):
+    """Ctrl+D is end-of-input, not an interrupt: one press, like any shell."""
+    _run_shell(monkeypatch, [('', EOFError)])
+
+    assert 'bye' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ('mode', 'fragment', 'expected'),
+    [
+        ('sensitive', 'li', False),  # the default: LICENSE is not offered
+        ('sensitive', 'LI', True),
+        ('insensitive', 'li', True),
+        ('insensitive', 'LI', True),
+        ('smart', 'li', True),  # no uppercase typed -> ignore case
+        ('smart', 'LI', True),  # uppercase typed, and it matches exactly
+        ('smart', 'Li', False),  # uppercase typed, so 'i' no longer matches 'I'
+    ],
+)
+def test_completion_case_preference(mode, fragment, expected, prefs_from):
+    from storix.cli.shell import _completion_matches
+
+    prefs_from(f'[cli]\ncompletion_case = "{mode}"\n')
+
+    assert _completion_matches('LICENSE', fragment) is expected
+
+
+def test_completion_case_defaults_to_smart():
+    """Modern shells ignore case on a lowercase prefix; sx follows."""
+    from storix.cli.config import CliPrefs
+
+    assert CliPrefs().completion_case == 'smart'
+
+
+def test_cd_dash_returns_and_echoes_the_directory():
+    run('mkdir', '/a', '/b')
+    run('cd', '/a')
+    run('cd', '/b')
+
+    back = run('cd', '-')
+
+    assert back.exit_code == 0
+    assert back.stdout.strip() == '/a'  # unix cd echoes where '-' landed
+    assert run('pwd').stdout.strip() == '/a'
+
+
+def test_cd_dash_before_any_move_stays_where_the_session_opened():
+    """No error path: a fresh session's previous directory is its start."""
+    result = run('cd', '-')
+
+    assert result.exit_code == 0
+    assert result.stdout.strip().endswith('/')
+    assert run('pwd').stdout.strip() == '/'
+
+
+@pytest.mark.parametrize(
+    ('line', 'expected'),
+    [
+        ('cat a.txt > b.txt', (['cat', 'a.txt'], 'b.txt', False)),
+        ('cat a.txt >b.txt', (['cat', 'a.txt'], 'b.txt', False)),
+        ('echo hi >> log.txt', (['echo', 'hi'], 'log.txt', True)),
+        ('echo hi >>log.txt', (['echo', 'hi'], 'log.txt', True)),
+        ('ls', (['ls'], None, False)),
+    ],
+)
+def test_split_redirect(line, expected):
+    import shlex
+
+    from storix.cli.shell import _split_redirect
+
+    assert _split_redirect(shlex.split(line)) == expected
+
+
+@pytest.mark.parametrize('line', ['cat a.txt >', 'cat a.txt > one two', 'ls > > x'])
+def test_split_redirect_rejects_a_target_it_cannot_name(line):
+    import shlex
+
+    from storix.cli.shell import _split_redirect
+
+    with pytest.raises(ValueError, match='redirect'):
+        _split_redirect(shlex.split(line))
+
+
+def test_shell_redirects_command_output_into_a_backend_file(monkeypatch, capsys):
+    fs = Storix(MemoryBackend())
+    fs.echo('hello\n', '/a.txt')
+
+    _run_shell_over(
+        monkeypatch,
+        fs,
+        [
+            ('', 'cat /a.txt > /copy.txt'),
+            ('', 'echo more >> /copy.txt'),
+            ('', EOFError),
+        ],
+    )
+
+    assert fs.cat('/copy.txt') == b'hello\nmore\n'
+
+
+def test_shell_redirection_reports_a_bad_target_instead_of_writing(monkeypatch, capsys):
+    fs = Storix(MemoryBackend())
+    fs.echo('hello\n', '/a.txt')
+
+    _run_shell_over(monkeypatch, fs, [('', 'cat /a.txt >'), ('', EOFError)])
+
+    assert 'redirect' in capsys.readouterr().out
+    assert not fs.exists('/copy.txt')
+
+
+def test_edit_writes_the_editors_changes_back(monkeypatch):
+    """The point of the command: edit a backend file with a local editor."""
+    run('echo', 'hello', '-f', '/a.txt')
+    monkeypatch.setenv('EDITOR', 'sed -i s/hello/edited/')
+
+    result = run('edit', '/a.txt')
+
+    assert result.exit_code == 0
+    assert run('cat', '/a.txt').stdout == 'edited\n'
+
+
+def test_edit_does_not_write_when_the_file_is_untouched(monkeypatch):
+    """A no-op edit must not cost a write (or a new version on an object
+    store), so the content decides, not the fact that an editor ran."""
+    run('echo', 'hello', '-f', '/a.txt')
+    monkeypatch.setenv('EDITOR', 'true')
+    writes: list[str] = []
+    real_echo = Storix.echo
+
+    def counting_echo(self, data, path, **kwargs):
+        writes.append(str(path))
+        return real_echo(self, data, path, **kwargs)
+
+    monkeypatch.setattr(Storix, 'echo', counting_echo)
+
+    result = run('edit', '/a.txt')
+
+    assert result.exit_code == 0
+    assert writes == []
+    assert 'unchanged' in result.stdout
+
+
+def test_edit_creates_a_missing_file_from_what_you_type(monkeypatch, tmp_path):
+    # sed cannot write into an empty file (no lines to act on), so this one
+    # needs an editor that just puts content there
+    script = tmp_path / 'fake_editor.py'
+    script.write_text(
+        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('new\\n')\n"
+    )
+    monkeypatch.setenv('EDITOR', f'{sys.executable} {script}')
+
+    result = run('edit', '/fresh.txt')
+
+    assert result.exit_code == 0
+    assert run('cat', '/fresh.txt').stdout == 'new\n'
+
+
+def test_edit_leaves_a_missing_file_missing_when_nothing_is_typed(monkeypatch):
+    monkeypatch.setenv('EDITOR', 'true')
+
+    result = run('edit', '/fresh.txt')
+
+    assert result.exit_code == 0
+    assert run('exists', '/fresh.txt').exit_code == 1
+
+
+def test_edit_refuses_a_directory(monkeypatch):
+    run('mkdir', '/docs')
+    monkeypatch.setenv('EDITOR', 'true')
+
+    result = run('edit', '/docs')
+
+    assert result.exit_code == 1
+    assert 'is a directory' in result.stderr
+
+
+def test_edit_says_which_variable_to_set_when_there_is_no_editor(monkeypatch):
+    run('echo', 'hello', '-f', '/a.txt')
+    monkeypatch.delenv('EDITOR', raising=False)
+    monkeypatch.delenv('VISUAL', raising=False)
+
+    result = run('edit', '/a.txt')
+
+    assert result.exit_code == 1
+    assert 'EDITOR' in result.stderr
+
+
+def test_editor_preference_beats_the_environment(prefs_from, monkeypatch):
+    """A user who names an editor for sx means it - and on a fresh Windows
+    shell it is the only way to have one."""
+    from storix.cli.render import resolve_editor
+
+    monkeypatch.setenv('EDITOR', 'vi')
+    monkeypatch.setenv('VISUAL', 'vim')
+    prefs_from('[cli]\neditor = "nvim"\n')
+
+    assert resolve_editor() == 'nvim'
+
+
+def test_visual_beats_editor_when_no_preference_is_set(monkeypatch):
+    from storix.cli.render import resolve_editor
+
+    monkeypatch.setenv('EDITOR', 'vi')
+    monkeypatch.setenv('VISUAL', 'vim')
+
+    assert resolve_editor() == 'vim'
+
+
+def test_windows_falls_back_to_notepad(monkeypatch):
+    """A fresh Windows shell has neither variable set but always has this."""
+    from storix.cli import render
+
+    monkeypatch.delenv('EDITOR', raising=False)
+    monkeypatch.delenv('VISUAL', raising=False)
+    monkeypatch.setattr(render.sys, 'platform', 'win32')
+
+    assert render.resolve_editor() == 'notepad'
+
+
+def test_unix_has_no_editor_fallback(monkeypatch):
+    """vi and nano are both plausible; choosing for someone is worse than
+    saying there is nothing to choose."""
+    from storix.cli import render
+
+    monkeypatch.delenv('EDITOR', raising=False)
+    monkeypatch.delenv('VISUAL', raising=False)
+    monkeypatch.setattr(render.sys, 'platform', 'linux')
+
+    assert render.resolve_editor() is None
+
+
+def test_edit_uses_the_configured_editor(prefs_from, monkeypatch, tmp_path):
+    script = tmp_path / 'fake_editor.py'
+    script.write_text(
+        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('via prefs\\n')\n"
+    )
+    monkeypatch.delenv('EDITOR', raising=False)
+    prefs_from(f'[cli]\neditor = "{sys.executable} {script}"\n')
+
+    assert run('edit', '/a.txt').exit_code == 0
+    assert run('cat', '/a.txt').stdout == 'via prefs\n'
+
+
+def test_cd_dash_marks_the_destination_with_the_jump_glyph(monkeypatch):
+    """zoxide's convention: the arrow says "you were moved here", so the
+    line does not read as one more piece of output."""
+    from storix.cli import app as app_module
+    from storix.cli.icons import Icons
+
+    run('mkdir', '/a')
+    run('cd', '/a')
+    monkeypatch.setattr(app_module, 'icons_enabled', lambda: True)
+    monkeypatch.setattr(
+        type(app_module.console), 'is_terminal', property(lambda _: True)
+    )
+
+    out = run('cd', '-').stdout
+
+    assert Icons.ARROW_JUMP in out
