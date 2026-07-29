@@ -10,8 +10,15 @@ project checkout and no virtual environment to activate:
 curl -LsSf https://storix.mghalix.com/install.sh | sh
 ```
 
+Cloud backends are optional, and `sx` installs them itself, so you pick nothing
+up front:
+
+```bash
+sx install s3    # or azure, gcs, and combinations of them
+```
+
 Every other way to install it (`uv tool`, `uv add`, `pip`, Windows PowerShell,
-picking provider extras) is on the
+selecting extras at install time) is on the
 [Installation](../get-started/installation.md#the-cli) page.
 
 ## Your first commands
@@ -56,6 +63,9 @@ sx config show --effective   # what this session will do, and where each value c
 sx config sources            # which files are read, in which order they win
 sx doctor                    # installation, config, and what it can reach
 ```
+
+`sx doctor` also lists which provider extras this install actually has, which
+is the question behind most "why can it not see my bucket" moments.
 
 None of them opens a connection or resolves a credential, so all three still
 answer when the connection is the thing that is broken.
