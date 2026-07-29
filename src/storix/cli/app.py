@@ -195,7 +195,9 @@ def ls(
     entry_stats: dict[str, RawStat] = {}
 
     if (time_sort and len(entries) > 1) or long:
-        fetched_stats = stat_all(fs, [base / e.name for e in entries])
+        # entry.path, not base / name: listing a file yields that one file,
+        # whose path is base itself
+        fetched_stats = stat_all(fs, [e.path for e in entries])
         entry_stats = {e.name: s for e, s in zip(entries, fetched_stats, strict=True)}
 
     if time_sort and len(entries) > 1:

@@ -451,6 +451,16 @@ def test_ls_long_format_outputs_kind_size_date_time():
     assert 'docs' in out
 
 
+def test_ls_long_format_on_a_file_lists_that_file():
+    run('echo', 'hello world', '-f', '/a.txt')
+
+    out = run('ls', '-l', '/a.txt')
+
+    assert out.exit_code == 0
+    assert 'a.txt' in out.stdout
+    assert 'a.txt/a.txt' not in out.stdout
+
+
 def test_icons_lookup_and_namespace():
     from storix.cli.icons import Icons, lookup_entry_decor
 
