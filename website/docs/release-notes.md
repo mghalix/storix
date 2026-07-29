@@ -1,5 +1,20 @@
 # Release Notes
 
+## [0.5.1] - 2026-07-29
+
+### What's Changed
+#### Features
+* feat(cli): sx install and sx uninstall manage provider extras by @mghalix in https://github.com/mghalix/storix/pull/62
+#### Fixes
+* fix(cli): report the provider extras this environment can import by @mghalix in https://github.com/mghalix/storix/pull/61
+* fix(cli): make sx ls -l work on a single file by @mghalix in https://github.com/mghalix/storix/pull/63
+#### Documentation
+* docs(website): use the full viewport width for the docs layout by @mghalix in https://github.com/mghalix/storix/pull/58
+* docs(website): give the sx CLI its own section by @mghalix in https://github.com/mghalix/storix/pull/59
+* docs(install): lead with sx install for picking backends by @mghalix in https://github.com/mghalix/storix/pull/64
+#### Other changes
+* docs(showcase): publish one stream three backends by @mghalix in https://github.com/mghalix/storix/pull/57
+
 ## [0.5.0] - 2026-07-25
 
 `sx` becomes a standalone tool: one command to install it on any operating
