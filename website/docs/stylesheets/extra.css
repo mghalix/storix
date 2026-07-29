@@ -81,6 +81,33 @@
   margin-left: 0.15rem;
 }
 
+/* Wide layout on large screens. The default 61rem grid strands the whole page
+   in a narrow column in the middle of the viewport. Instead: navigation pinned
+   near the left edge, the table of contents on the right, and the prose column
+   capped at a readable measure and centred in the space between them. */
+@media screen and (min-width: 76.25em) {
+  .md-grid {
+    max-width: 100%;
+  }
+  .md-header__inner,
+  .md-main__inner,
+  .md-footer__inner {
+    padding-left: 1.2rem;
+    padding-right: 1.2rem;
+  }
+  /* Both sidebars sit flush against their edge; the prose centres between them. */
+  .md-content {
+    max-width: 42rem;
+    margin-inline: auto;
+  }
+  /* A page without a table of contents still reserves its column, so the prose
+     lands in the same place on every page. */
+  .md-sidebar--secondary[hidden] {
+    display: block;
+    visibility: hidden;
+  }
+}
+
 /* Copy confirmation popup (md-dialog) and hover tooltips: match the theme
    instead of a bright default block. */
 .md-dialog,
