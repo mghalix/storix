@@ -1,5 +1,86 @@
 # Release Notes
 
+## [0.5.1] - 2026-07-29
+
+A release about `sx` telling the truth about itself. `sx doctor` reported every
+provider extra as installed whether or not it was, naming a provider whose
+extra was missing asked for credentials instead on Azure, and the only way to
+add a backend after installing was to rerun the installer with different
+flags. Now `sx install s3` adds one, `sx uninstall s3` removes it, and
+`doctor` answers from what this environment can actually import. See ADR 0031
+D15.
+
+### Added
+
+- **`sx install` and `sx uninstall`** (#62, ADR 0031 D15): provider extras are
+no longer only an install-time choice. `sx install s3`, `sx install
+azure,gcs`, `sx uninstall gcs`. Extras are cumulative: `uv tool install`
+replaces a tool's requirement rather than amending it, so the extras already
+present are read back from uv's receipt and restated, and adding `s3` never
+drops `azure`. The rewrite pins the running version, because adding a
+backend is not a moment to also move versions - that is `sx update`, done
+deliberately. Legal names come from the distribution's own `Provides-Extra`
+metadata, so a typo is refused before uv spends a resolve on it. `cli`
+cannot be uninstalled - an `sx` without it cannot run, and so cannot put it
+back - and the refusal names `uv tool uninstall storix` for the reader who
+wanted that instead. Like `sx update`, it refuses any installation it did
+not create, printing the manual command for that context. The missing-extra
+remedy becomes `sx install s3` on a uv tool install.
+
+### Fixed
+
+- **`sx doctor` reported every provider extra as installed** (#61): it asked
+`available_providers()`, which is the builder registry - the names
+`get_storage` accepts, not what this environment can import. A
+`storix[cli]`-only install listed `azure`, `gcs`, `local` and `s3` all as
+present with none of their engines there, which is the opposite of what the
+command exists for. It now probes the modules each extra installs.
+- **A missing Azure extra asked for credentials instead** (#61): `s3` and
+`gcs` import their engine before validating configuration, so an absent
+extra surfaced as one; `azure` validated first, so the same install answered
+`sx -p azure` with `missing configuration: container, account_name,
+credential` - not advice a reader with no SDK can act on. The check now runs
+once in `get_storage`, at the point every builder routes through, so the
+order no longer depends on the statement order inside each builder.
+**Library callers see this too**: `get_storage("azure")` without the extra
+now raises `ModuleNotFoundError`, which is what `get_storage("s3")` already
+did. Providers registered through `register_backend` bring their own
+dependencies and are never gated.
+- **`sx ls -l` on a single file** (#63): it died with `path '/a.txt/a.txt'
+does not exist`. The long and `-t` paths rebuilt each entry's path as
+`base / name`, which holds only when `base` is the directory being listed;
+listing a file yields one entry whose path is `base` itself, so the join
+appended the file's own name to it. Every other batched-stat caller already
+passed the path the port had returned.
+- **`install.sh --version` and `install.ps1 -Version`** (#61): both assembled
+`storix==0.5.0[cli]`, which is not a PEP 508 requirement - extras precede
+the version specifier - so pinning a version failed at the resolver with no
+local symptom. An automation test now runs the installer against a stub `uv`
+and asserts the argv it builds.
+
+### Documentation
+
+- **Installation leads with `sx install`** (#64): the page opened with a bare
+`curl | sh` and then four more curl lines carrying `--with`, `--all`,
+`--version` and `--help`, which predated any way to add a backend
+afterwards. Install once, then pick backends with `sx install`. The
+install-time selections moved into a collapsible note, kept rather than
+dropped because a scripted or unattended install has no second command to
+run.
+- **The sx CLI has its own section** (#59): `guide/cli.md` had grown to 627
+lines and 17 headings covering eight separate jobs, filed inside Guide
+between the library pages, so someone who came for the CLI had to find it
+inside the library documentation. It is now a top-level section, one page
+per job.
+- **The documentation uses the full viewport** (#58): Material caps every
+`.md-grid` element at 61rem, so header, navigation, prose and table of
+contents all sat in one narrow column marooned in the middle of a large
+screen. Above the desktop breakpoint the grid spans the viewport, with the
+prose column capped at a readable 42rem and centred between them.
+- **One stream, three backends** (#57): a runnable showcase streaming FFmpeg
+stdout to local storage, Azure Blob Storage and Cloudflare R2 through one
+session and one stream, with its own page and poster.
+
 ## [0.5.0] - 2026-07-25
 
 `sx` becomes a standalone tool: one command to install it on any operating
