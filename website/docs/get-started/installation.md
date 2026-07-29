@@ -162,7 +162,7 @@ sx -p azure ls /   # point it at a configured provider
 A globally installed `sx` discovers its configuration from three canonical
 files (a project `storix.toml`, `pyproject.toml`'s `[tool.storix]`, and the
 user file `~/.config/storix/config.toml`) plus the `STORIX_*` environment, so
-it does not need a cwd-local `.env`. See [The sx CLI](../guide/cli.md) for the
+it does not need a cwd-local `.env`. See [The sx CLI](../cli/index.md) for the
 flags, the precedence chain, and the secret policy.
 
 If you run the launcher without the `cli` extra, or name a provider whose extra
@@ -171,6 +171,6 @@ optional-dependency traceback (`uv tool install "storix[cli,s3]"` when it runs
 from a uv tool install).
 
 Tab completion, icons, transfer progress bars, and the persistent config file
-are covered in [The sx CLI](../guide/cli.md).
+are covered in [The sx CLI](../cli/index.md).
 
 Next: the [Quickstart](quickstart.md).
