@@ -69,7 +69,7 @@ answer when the connection is the thing that is broken.
 | [Transfers](transfers.md) | `push` and `pull`, progress bars, tuning, stopping cleanly |
 | [Configuration](configuration.md) | The precedence chain, the three files, `sx config` |
 | [Preferences and layers](preferences.md) | Icons, aliases, the always-on layer stack |
-| [doctor and update](maintenance.md) | Keeping a standalone install healthy |
+| [doctor, install and update](maintenance.md) | Keeping a standalone install healthy |
 
 Profiles and stages are shared with the library and have their own page:
 [Profiles and stages](../guide/profiles.md).

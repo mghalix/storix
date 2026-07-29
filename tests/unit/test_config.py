@@ -26,6 +26,8 @@ from storix.config import (
     config_provenance,
     configured_profile,
     find_project_config,
+    install_hint,
+    installed_extras,
     is_secret,
     resolve_profile,
     secret_fields,
@@ -687,3 +689,50 @@ def test_a_singular_environment_table_names_the_right_spelling(tmp_path, monkeyp
 
     assert 'environments' in str(exc_info.value)
     assert 'profiles.media.environments.dev' in str(exc_info.value)
+
+
+def test_installed_extras_reads_the_uv_receipt(tmp_path, monkeypatch):
+    """Given a uv tool layout, when read, then the requested extras come back.
+
+    The environment holds the resulting packages, not the request that
+    produced them; uv's receipt is the only place the answer exists.
+    """
+    (tmp_path / 'uv-receipt.toml').write_text(
+        '[tool]\nrequirements = [{ name = "storix", extras = ["cli", "s3"] }]\n',
+        encoding='utf-8',
+    )
+    monkeypatch.setattr(sys, 'prefix', str(tmp_path))
+
+    assert installed_extras() == frozenset({'cli', 's3'})
+
+
+def test_installed_extras_is_empty_without_a_receipt(tmp_path, monkeypatch):
+    """Given no receipt, when read, then it reports nothing rather than raising.
+
+    Every other installation kind reaches this, and the callers that care
+    check installation_kind() before acting on it.
+    """
+    monkeypatch.setattr(sys, 'prefix', str(tmp_path))
+
+    assert installed_extras() == frozenset()
+
+
+def test_a_uv_tool_install_is_told_to_use_sx_install(tmp_path, monkeypatch):
+    """Given a uv tool install, when an extra is missing, then sx offers itself.
+
+    sx can rewrite its own tool environment, so quoting a uv command the
+    reader has to retype is advice that predates the capability.
+    """
+    (tmp_path / 'uv-receipt.toml').write_text('[tool]\n', encoding='utf-8')
+    monkeypatch.setattr(sys, 'prefix', str(tmp_path))
+
+    assert install_hint('s3') == 'sx install s3'
+    # except for cli itself: sx cannot run to install what makes it run
+    assert 'uv tool install' in install_hint('cli')
+
+
+def test_a_project_install_still_gets_the_pip_form(tmp_path, monkeypatch):
+    """Given no receipt, when an extra is missing, then the remedy is pip."""
+    monkeypatch.setattr(sys, 'prefix', str(tmp_path))
+
+    assert 'pip install' in install_hint('s3')

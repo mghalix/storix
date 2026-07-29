@@ -1036,6 +1036,8 @@ def shell() -> None:
 # above the ones about sx itself; panels appear in registration order
 app.add_typer(config_cmds.config_app, rich_help_panel=_SETUP)
 app.command('update', rich_help_panel=_SETUP)(maintenance.update)
+app.command('install', rich_help_panel=_SETUP)(maintenance.install)
+app.command('uninstall', rich_help_panel=_SETUP)(maintenance.uninstall)
 app.command('doctor', rich_help_panel=_SETUP)(maintenance.doctor)
 
 

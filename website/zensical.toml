@@ -34,7 +34,7 @@ nav = [
     { "Transfers" = "cli/transfers.md" },
     { "Configuration" = "cli/configuration.md" },
     { "Preferences and layers" = "cli/preferences.md" },
-    { "doctor and update" = "cli/maintenance.md" },
+    { "doctor, install and update" = "cli/maintenance.md" },
   ] },
   { "Recipes" = [
     { "FastAPI" = "recipes/fastapi.md" },

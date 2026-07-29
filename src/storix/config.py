@@ -24,6 +24,7 @@ import tomllib
 import warnings
 
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final, Literal, cast, get_args
 
@@ -1301,11 +1302,50 @@ def upgrade_command() -> list[str] | None:
 def install_hint(extra: str) -> str:
     """The install command to add a missing optional ``extra``.
 
-    Context-aware (D7): a ``uv tool`` install gets the ``uv tool install``
-    form (which keeps ``sx`` on PATH); everything else gets the ``pip`` /
-    ``uv add`` project forms.
+    Context-aware (D7): a ``uv tool`` install is the one storix can drive
+    itself, so it gets ``sx install``; everything else gets the ``pip`` /
+    ``uv add`` project forms. The ``cli`` extra is the exception in both
+    directions, since ``sx`` cannot run to install what makes it run.
     """
     if _is_uv_tool():
-        bundle = 'cli' if extra == 'cli' else f'cli,{extra}'
-        return f'uv tool install "storix[{bundle}]"'
+        return (
+            'uv tool install "storix[cli]"' if extra == 'cli' else f'sx install {extra}'
+        )
     return f'pip install "storix[{extra}]" (or uv add "storix[{extra}]")'
+
+
+def declared_extras() -> frozenset[str]:
+    """Every extra this distribution declares, from its own metadata.
+
+    Read rather than listed, so an extra added to ``pyproject.toml`` is
+    installable through ``sx install`` the day it exists, and a name that
+    was never an extra is rejected before uv spends a resolve on it.
+    """
+    return frozenset(metadata.metadata('storix').get_all('Provides-Extra') or ())
+
+
+def installed_extras() -> frozenset[str]:
+    """The extras this ``uv tool`` installation was created with.
+
+    uv records the requested requirement in ``uv-receipt.toml``, which is
+    the only place the answer exists: the environment holds the resulting
+    packages, not the request that produced them. Reading it back is what
+    lets ``sx install`` add one extra without dropping the others.
+
+    Returns:
+        The recorded extras, or an empty set when there is no readable
+        receipt (not a uv tool install, or a layout storix does not know).
+    """
+    for prefix in (Path(sys.prefix), Path(sys.prefix).parent):
+        receipt = prefix / 'uv-receipt.toml'
+        if not receipt.is_file():
+            continue
+        try:
+            recorded = tomllib.loads(receipt.read_text(encoding='utf-8'))
+        except (OSError, tomllib.TOMLDecodeError):
+            return frozenset()
+        requirements = recorded.get('tool', {}).get('requirements', [])
+        for requirement in requirements:
+            if requirement.get('name') == 'storix':
+                return frozenset(requirement.get('extras') or ())
+    return frozenset()
