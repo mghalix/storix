@@ -155,3 +155,120 @@ def test_doctor_does_not_touch_the_network_by_default(sandbox, monkeypatch):
     run('doctor')
 
     assert not asked
+
+
+def test_install_adds_an_extra_without_dropping_the_others(sandbox, monkeypatch):
+    """Given a cli install, when adding s3, then cli survives the rewrite.
+
+    uv tool install replaces the requirement rather than amending it, so
+    the receipt has to be read back or every add is also a removal.
+    """
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(maintenance, 'installed_extras', lambda: frozenset({'cli'}))
+    monkeypatch.setattr(maintenance, 'installed_version', lambda: '0.5.0')
+    monkeypatch.setattr(maintenance, '_run', lambda argv: ran.append(list(argv)) or 0)
+
+    result = run('install', 's3')
+
+    assert result.exit_code == 0
+    assert ran == [['uv', 'tool', 'install', '--force', 'storix[cli,s3]==0.5.0']]
+
+
+def test_install_pins_the_running_version(sandbox, monkeypatch):
+    """Given an outdated install, when adding an extra, then it stays outdated.
+
+    Adding a backend is not a moment to also move versions; `sx update` is
+    the command that does that, deliberately and on its own.
+    """
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(maintenance, 'installed_extras', lambda: frozenset({'cli'}))
+    monkeypatch.setattr(maintenance, 'installed_version', lambda: '0.4.2')
+    monkeypatch.setattr(maintenance, '_run', lambda argv: ran.append(list(argv)) or 0)
+
+    run('install', 'gcs')
+
+    assert ran[0][-1].endswith('==0.4.2')
+
+
+def test_install_is_a_no_op_when_the_extra_is_already_there(sandbox, monkeypatch):
+    """Given s3 installed, when adding s3, then nothing is rewritten."""
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(
+        maintenance, 'installed_extras', lambda: frozenset({'cli', 's3'})
+    )
+    monkeypatch.setattr(maintenance, '_run', lambda argv: ran.append(list(argv)) or 0)
+
+    result = run('install', 's3')
+
+    assert result.exit_code == 0
+    assert 'already installed' in unwrapped(result.stdout)
+    assert ran == []
+
+
+def test_install_rejects_a_name_that_is_not_an_extra(sandbox, monkeypatch):
+    """Given a typo, when installing, then it stops before uv resolves.
+
+    uv would spend a full resolve and then name a package rather than the
+    typo, which is the slower half of a worse message.
+    """
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, '_run', lambda argv: ran.append(list(argv)) or 0)
+
+    result = run('install', 'sthree')
+
+    assert result.exit_code == 2
+    assert 'no such extra' in unwrapped(result.stderr)
+    assert 's3' in unwrapped(result.stderr)
+    assert ran == []
+
+
+def test_install_refuses_an_installation_it_did_not_make(sandbox, monkeypatch):
+    """Given a virtualenv, when installing, then it prints the manual way.
+
+    The same rail as `sx update`: rewriting someone else's environment is
+    the one thing this must never do on a guess.
+    """
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'virtualenv')
+    monkeypatch.setattr(maintenance, 'installed_extras', lambda: frozenset())
+
+    result = run('install', 's3')
+
+    assert result.exit_code == 2
+    assert 'will not modify' in unwrapped(result.stderr)
+    assert 'pip install' in unwrapped(result.stderr)
+
+
+def test_uninstall_removes_one_extra_and_keeps_the_rest(sandbox, monkeypatch):
+    """Given cli, s3 and gcs, when removing s3, then cli and gcs remain."""
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(
+        maintenance, 'installed_extras', lambda: frozenset({'cli', 's3', 'gcs'})
+    )
+    monkeypatch.setattr(maintenance, 'installed_version', lambda: '0.5.0')
+    monkeypatch.setattr(maintenance, '_run', lambda argv: ran.append(list(argv)) or 0)
+
+    result = run('uninstall', 's3')
+
+    assert result.exit_code == 0
+    assert ran == [['uv', 'tool', 'install', '--force', 'storix[cli,gcs]==0.5.0']]
+
+
+def test_uninstall_refuses_to_remove_the_extra_that_makes_sx_run(sandbox, monkeypatch):
+    """Given cli named, when removing, then it refuses and says how to go.
+
+    Dropping cli leaves an sx that cannot start, and therefore no command
+    left to put it back with.
+    """
+    ran: list[list[str]] = []
+    monkeypatch.setattr(maintenance, 'installation_kind', lambda: 'uv-tool')
+    monkeypatch.setattr(maintenance, '_run', lambda argv: ran.append(list(argv)) or 0)
+
+    result = run('uninstall', 'cli')
+
+    assert result.exit_code == 2
+    assert 'uv tool uninstall storix' in unwrapped(result.stderr)
+    assert ran == []

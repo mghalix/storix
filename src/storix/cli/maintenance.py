@@ -1,9 +1,11 @@
-"""``sx update`` and ``sx doctor`` (ADR 0031 D11, D12).
+"""``sx update``, ``sx install`` and ``sx doctor`` (ADR 0031 D11, D12, D15).
 
-Neither command owns knowledge of its own. ``update`` drives the package
-manager that installed storix and never rewrites its own files; ``doctor``
-prints what the loader, the factory, and the updater already know, so a
-diagnosis can never disagree with the thing it is diagnosing.
+No command here owns knowledge of its own. ``update`` and ``install``
+drive the package manager that installed storix and never rewrite its own
+files; the extra set they work from is uv's receipt, not a record storix
+keeps. ``doctor`` prints what the loader, the factory, and the updater
+already know, so a diagnosis can never disagree with the thing it is
+diagnosing.
 """
 
 from __future__ import annotations
@@ -23,10 +25,12 @@ from storix.config import (
     PROVIDER_MODELS,
     available_profiles,
     config_provenance,
+    declared_extras,
     extra_installed,
     find_project_config,
     find_user_config,
     installation_kind,
+    installed_extras,
     is_secret,
     resolve_profile,
     upgrade_command,
@@ -99,6 +103,103 @@ def update(
         )
         raise typer.Exit(2)
     raise typer.Exit(_run(argv))
+
+
+def _extras_argument(extras: str) -> list[str]:
+    """Split and validate a comma-separated extras argument.
+
+    Args:
+        extras: The argument as typed, for example ``s3`` or ``azure,gcs``.
+
+    Returns:
+        The named extras, in the order given, without duplicates.
+
+    Raises:
+        Exit: If a name is not an extra this distribution declares. uv
+            would otherwise spend a full resolve before saying so, and its
+            message names a package rather than the typo.
+    """
+    declared = declared_extras()
+    named = [name.strip() for name in extras.split(',') if name.strip()]
+    unknown = [name for name in named if name not in declared]
+    if unknown or not named:
+        known = ', '.join(sorted(declared - {'core'}))
+        subject = f'no such extra: {", ".join(unknown)}' if unknown else 'name an extra'
+        err.print(f'[red]sx: {subject}[/red]\navailable: {known}')
+        raise typer.Exit(2)
+    return list(dict.fromkeys(named))
+
+
+def _reinstall(extras: frozenset[str]) -> None:
+    """Recreate this tool installation with exactly ``extras``.
+
+    Pinned to the running version: adding a backend is not a moment to
+    also move versions, which is what ``sx update`` is for. ``--force`` is
+    what makes uv rebuild an environment that already exists, and is the
+    same flag the published installer uses.
+
+    Args:
+        extras: The complete extra set the installation should end up with.
+
+    Raises:
+        Exit: Always - with uv's exit code, or 2 when this installation is
+            not one storix may rewrite.
+    """
+    kind = installation_kind()
+    if kind != 'uv-tool':
+        bundle = ','.join(sorted(extras))
+        err.print(
+            f'[yellow]sx: storix runs from a {kind} install, which sx will not '
+            f'modify. Change its extras the way you installed it:\n'
+            f'  pip install "storix[{bundle}]"[/yellow]'
+        )
+        raise typer.Exit(2)
+    spec = f'storix[{",".join(sorted(extras))}]=={installed_version()}'
+    raise typer.Exit(_run(['uv', 'tool', 'install', '--force', spec]))
+
+
+def install(
+    extras: Annotated[
+        str,
+        typer.Argument(help='provider extras to add, comma separated (s3, azure)'),
+    ],
+) -> None:
+    """Add provider extras to this installation, keeping the ones it has."""
+    named = _extras_argument(extras)
+    # cli is what makes sx runnable at all: whatever the receipt says, an
+    # installation sx just rewrote has to still have a command in it
+    target = installed_extras() | {'cli', *named}
+    if target == installed_extras():
+        console.print(f'already installed: {", ".join(named)}')
+        return
+    _reinstall(target)
+
+
+def uninstall(
+    extras: Annotated[
+        str,
+        typer.Argument(help='provider extras to remove, comma separated'),
+    ],
+) -> None:
+    """Remove provider extras from this installation, keeping the rest.
+
+    Removes extras only. To remove storix itself: ``uv tool uninstall
+    storix``.
+    """
+    named = _extras_argument(extras)
+    if 'cli' in named:
+        err.print(
+            '[red]sx: the cli extra is what makes sx runnable; removing it '
+            'would leave no command to reinstall it with.[/red]\n'
+            'To remove storix entirely: uv tool uninstall storix'
+        )
+        raise typer.Exit(2)
+    current = installed_extras()
+    target = current - set(named)
+    if target == current:
+        console.print(f'not installed: {", ".join(named)}')
+        return
+    _reinstall(target)
 
 
 def doctor(

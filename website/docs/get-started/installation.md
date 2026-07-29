@@ -167,8 +167,9 @@ flags, the precedence chain, and the secret policy.
 
 If you run the launcher without the `cli` extra, or name a provider whose extra
 is missing, it exits with the exact install command instead of an
-optional-dependency traceback (`uv tool install "storix[cli,s3]"` when it runs
-from a uv tool install).
+optional-dependency traceback. On a uv tool install that command is `sx install
+s3`: extras can be added after the fact, without rerunning the installer. See
+[doctor, install and update](../cli/maintenance.md).
 
 Tab completion, icons, transfer progress bars, and the persistent config file
 are covered in [The sx CLI](../cli/index.md).

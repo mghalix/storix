@@ -570,10 +570,46 @@ documentation callout. No deprecation period or compatibility flag: a
 zero-config default flip is cleanly describable, and a flag would
 outlive its usefulness.
 
+### D15. `sx install` and `sx uninstall` manage provider extras
+
+D2 shipped provider extras and D13 shipped an installer that selects
+them at install time, which left adding one afterwards as a matter of
+rerunning the curl pipeline with a different `--with`. `sx install s3`
+and `sx uninstall s3` close that, on the same rails as D11: they drive
+uv, they never rewrite storix's own files, and they refuse any
+installation kind other than `uv tool` with the manual command for that
+context.
+
+The extra set they operate on is uv's, not storix's. `uv tool install`
+replaces a tool's requirement rather than amending it, so adding one
+extra means restating all of them; the receipt (`uv-receipt.toml`,
+already the D11 detection signal) records exactly what was requested,
+so it is read back rather than tracked. storix keeps no installation
+state of its own, which is what stops the two from disagreeing.
+
+The rewrite pins the running version. Adding a backend is not a moment
+to also move versions: that is D11's job, done deliberately and
+visibly, and an implicit upgrade on the way to installing `s3` is the
+kind of surprise that makes a tool untrustworthy for the next thing.
+
+Two names are treated specially. `cli` cannot be uninstalled, because
+an `sx` without it cannot run and therefore cannot put it back; the
+refusal names `uv tool uninstall storix` for the reader who wanted
+that instead. And the D7 remedy for a missing extra becomes `sx
+install s3`, since quoting a command the reader has to retype predates
+the capability, except for `cli` itself, which by the same argument
+must stay a `uv tool install` line.
+
+The legal names are read from the distribution's own
+`Provides-Extra` metadata rather than listed, so an extra added to
+`pyproject.toml` is installable the day it exists, and a typo is
+rejected before uv spends a resolve on it.
+
 ## Staging
 
 Six pull requests, one architectural direction, each independently
 reviewable and releasable. Versioning per ADR 0021 (0.x shift-down).
+D15 arrived after the plan below, as a follow-up PATCH.
 
 ```
 PR 1  feat(config): unified configuration sources and CLI overrides
