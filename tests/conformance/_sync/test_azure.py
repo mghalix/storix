@@ -12,23 +12,31 @@ from pathlib import PurePosixPath as P
 
 import pytest
 
+from azure.core import MatchConditions
 from azure.core.exceptions import (
+    AzureError,
     ClientAuthenticationError,
     HttpResponseError,
     ResourceExistsError,
+    ResourceModifiedError,
     ResourceNotFoundError,
 )
+from azure.storage.filedatalake import FileProperties
 
 from storix._sync.backends.azure import _HNS_HINT, AzureBackend, _translate
+from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
     ConfigurationError,
     DirectoryNotEmptyError,
     PathNotFoundError,
     PermissionDeniedError,
+    PreconditionFailedError,
     StorageError,
+    UnsupportedOperationError,
 )
-from storix.models import RawStat
+from storix.models import Capabilities, RawStat
+from storix.preconditions import IF_MATCH_ABSENT
 from storix.utils.time import utcnow
 
 
@@ -212,3 +220,273 @@ def test_write_stream_batches_tiny_yields_into_append_requests(
         (b'i', 8, 1),
     ]
     assert client.flushed_at == 9
+
+
+class _RecordingFileClient:
+    """dfs file client stub that remembers the keywords each request carried.
+
+    Narrow on purpose: it reimplements nothing the SDK does, so the
+    assertions are about the requests the backend issues and about which
+    request carries a precondition.
+    """
+
+    def __init__(self, create_error: AzureError | None = None) -> None:
+        """Record requests, optionally failing the create.
+
+        Args:
+            create_error: SDK failure the create should raise, if any.
+        """
+        self.create_kwargs: dict[str, object] | None = None
+        self.flush_kwargs: dict[str, object] | None = None
+        self._create_error = create_error
+
+    def create_file(self, **kwargs: object) -> None:
+        self.create_kwargs = kwargs
+        if self._create_error is not None:
+            raise self._create_error
+
+    def append_data(self, chunk: bytes, **kwargs: object) -> None:
+        assert chunk
+
+    def flush_data(self, offset: int, **kwargs: object) -> None:
+        self.flush_kwargs = {'offset': offset, **kwargs}
+
+
+def _file_stat() -> RawStat:
+    """A RawStat standing for a file already occupying the target path."""
+    now = utcnow()
+    return RawStat(kind=PathKind.FILE, size=3, created=now, modified=now)
+
+
+def _backend_over(
+    monkeypatch: pytest.MonkeyPatch,
+    client: _RecordingFileClient,
+    *,
+    existing: RawStat | None = None,
+) -> AzureBackend:
+    """An ADLS backend driving the recording client instead of an account.
+
+    Args:
+        monkeypatch: The patcher installing the stubs.
+        client: The recording file client the write should drive.
+        existing: What ``stat`` reports at the target path, or ``None`` for
+            a path nothing occupies yet.
+    """
+
+    class Filesystem:
+        def get_file_client(self, key: str) -> _RecordingFileClient:
+            assert key == 'docs/a.txt'
+            return client
+
+    def stat(path: P) -> RawStat:
+        if existing is None:
+            raise PathNotFoundError(path)
+        return existing
+
+    backend = AzureBackend('raw', account_name='acct', credential='token')
+    monkeypatch.setattr(backend, 'stat', stat)
+    monkeypatch.setattr(backend, '_filesystem', Filesystem())
+    return backend
+
+
+def test_capabilities_advertise_both_precondition_forms():
+    """Given the dfs create takes both conditions, then both are advertised."""
+    assert AzureBackend.capabilities.conditional_writes is True
+    assert AzureBackend.capabilities.exclusive_create is True
+
+
+def test_stat_reports_the_response_etag_as_the_version(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given a properties response, when stat runs, then its ETag is the version.
+
+    Assembled from the raw header names the SDK model reads, which is what
+    shows the validator riding the response ``stat`` already parses rather
+    than a second request.
+    """
+    now = utcnow()
+    props = FileProperties(
+        **{
+            'ETag': '"0xABC"',
+            'Last-Modified': now,
+            'x-ms-creation-time': now,
+            'Content-Length': 3,
+            'metadata': {},
+        }
+    )
+
+    class FileClient:
+        def get_file_properties(self) -> FileProperties:
+            return props
+
+    class Filesystem:
+        def get_file_client(self, key: str) -> FileClient:
+            assert key == 'docs/a.txt'
+            return FileClient()
+
+    backend = AzureBackend('raw', account_name='acct', credential='token')
+    monkeypatch.setattr(backend, '_filesystem', Filesystem())
+
+    raw = backend.stat(PATH)
+
+    assert raw.version == '"0xABC"'
+
+
+def test_a_version_precondition_rides_on_the_create(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given a version, when writing, then the create carries If-Match for it.
+
+    The create is the request that truncates an occupied path, so gating
+    that one is what keeps a lost race from destroying stored content, and
+    the flush stays unconditional.
+    """
+    client = _RecordingFileClient()
+    backend = _backend_over(monkeypatch, client, existing=_file_stat())
+
+    backend.write_stream(
+        PATH, _astream(b'new'), mode='w', content_type=None, if_match='"0xOLD"'
+    )
+
+    assert client.create_kwargs == {
+        'metadata': None,
+        'etag': '"0xOLD"',
+        'match_condition': MatchConditions.IfNotModified,
+    }
+    assert client.flush_kwargs == {'offset': 3, 'content_settings': None}
+
+
+def test_an_exclusive_create_rides_on_the_create(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given IF_MATCH_ABSENT, when writing, then the create sends If-None-Match."""
+    client = _RecordingFileClient()
+    backend = _backend_over(monkeypatch, client)
+
+    backend.write_stream(
+        PATH, _astream(b'mine'), mode='w', content_type=None, if_match=IF_MATCH_ABSENT
+    )
+
+    assert client.create_kwargs == {
+        'metadata': None,
+        'match_condition': MatchConditions.IfMissing,
+    }
+
+
+def test_an_unconditional_write_sends_no_condition(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given no precondition, when writing, then the create is exactly as before.
+
+    The default has to issue the requests it always has, so no existing
+    write pays for the feature.
+    """
+    client = _RecordingFileClient()
+    backend = _backend_over(monkeypatch, client, existing=_file_stat())
+
+    backend.write_stream(PATH, _astream(b'plain'), mode='w', content_type=None)
+
+    assert client.create_kwargs == {'metadata': None}
+
+
+def test_a_stale_version_becomes_a_precondition_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given the service refuses If-Match, when writing, then storix reports it."""
+    client = _RecordingFileClient(ResourceModifiedError(message='ConditionNotMet'))
+    backend = _backend_over(monkeypatch, client, existing=_file_stat())
+
+    with pytest.raises(PreconditionFailedError):
+        backend.write_stream(
+            PATH, _astream(b'lost'), mode='w', content_type=None, if_match='"0xOLD"'
+        )
+
+
+def test_a_lost_exclusive_create_becomes_a_precondition_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given an occupied path, when creating exclusively, then storix reports it.
+
+    ``If-None-Match: *`` loses as an already-exists, which under a
+    precondition means the precondition failed rather than that the caller
+    asked to create the same path twice.
+    """
+    client = _RecordingFileClient(ResourceExistsError(message='PathAlreadyExists'))
+    backend = _backend_over(monkeypatch, client)
+
+    with pytest.raises(PreconditionFailedError):
+        backend.write_stream(
+            PATH,
+            _astream(b'second'),
+            mode='w',
+            content_type=None,
+            if_match=IF_MATCH_ABSENT,
+        )
+
+
+def test_a_bare_412_becomes_a_precondition_failure(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given a 412 carrying no known code, when a condition was sent, then it loses."""
+    failure = HttpResponseError(message='precondition failed')
+    failure.status_code = 412
+    backend = _backend_over(
+        monkeypatch, _RecordingFileClient(failure), existing=_file_stat()
+    )
+
+    with pytest.raises(PreconditionFailedError):
+        backend.write_stream(
+            PATH, _astream(b'lost'), mode='w', content_type=None, if_match='"0xOLD"'
+        )
+
+
+def test_an_unconditional_collision_stays_already_exists(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given no precondition, when the create collides, then it is not a 412.
+
+    The precondition translation is gated on one having been sent, so
+    ordinary failures keep their established meaning.
+    """
+    client = _RecordingFileClient(ResourceExistsError(message='PathAlreadyExists'))
+    backend = _backend_over(monkeypatch, client)
+
+    with pytest.raises(AlreadyExistsError):
+        backend.write_stream(PATH, _astream(b'x'), mode='w', content_type=None)
+
+
+def test_a_precondition_is_refused_on_append(monkeypatch: pytest.MonkeyPatch):
+    """Given mode='a', when a precondition accompanies it, then nothing is sent."""
+    client = _RecordingFileClient()
+    backend = _backend_over(monkeypatch, client, existing=_file_stat())
+
+    with pytest.raises(ValueError, match='if_match'):
+        backend.write_stream(
+            PATH,
+            _astream(b'more'),
+            mode='a',
+            content_type=None,
+            if_match=IF_MATCH_ABSENT,
+        )
+
+    assert client.create_kwargs is None
+
+
+def test_the_capability_gate_refuses_an_unadvertised_form(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Given a backend advertising neither form, when one is asked, then it raises.
+
+    Shows the shared gate reading the instance's own capabilities rather
+    than being short-circuited by how the precondition is wired.
+    """
+    client = _RecordingFileClient()
+    backend = _backend_over(monkeypatch, client, existing=_file_stat())
+    monkeypatch.setattr(backend, 'capabilities', Capabilities())
+
+    with pytest.raises(UnsupportedOperationError, match='conditional_writes'):
+        backend.write_stream(
+            PATH, _astream(b'x'), mode='w', content_type=None, if_match='"0xOLD"'
+        )
+
+    assert client.create_kwargs is None
