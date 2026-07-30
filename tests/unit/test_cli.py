@@ -1266,14 +1266,22 @@ def test_local_completions_space_escaping(monkeypatch, tmp_path):
         'caf\xe9 \U0001f4c1.txt',  # an accent and an emoji, escaped or not
     ],
 )
-def test_escaped_name_round_trips_through_the_parser(name):
+def test_escaped_name_round_trips_to_the_command(name):
     """Given an awkward entry name, when it is escaped for insertion at the
-    prompt, then parsing that line yields the one original name back."""
-    from storix.cli.shell import _escape_shell_path, _parse_input
+    prompt, then the command receives the one original name back.
+
+    Asserted on the argv the command is handed, not on the tokens in
+    between: an escaped wildcard stays marked through ``_parse_input`` so
+    the glob step knows not to expand it, and the mark is removed on the
+    way out. Checking the intermediate form would pin an implementation
+    detail rather than the contract, which is that a completed name names
+    the file it came from.
+    """
+    from storix.cli.shell import _escape_shell_path, _expand_globs, _parse_input
 
     line = f'cat {_escape_shell_path(name)}'
 
-    assert _parse_input(line, {}) == ['cat', name]
+    assert _expand_globs(_parse_input(line, {})) == ['cat', name]
 
 
 def test_escaping_backslashes_each_character_a_shell_would_read_as_syntax():
@@ -1294,17 +1302,22 @@ def test_escaping_leaves_non_ascii_names_as_they_are():
     assert _escape_shell_path('caf\xe9-\U0001f4c1.txt') == 'caf\xe9-\U0001f4c1.txt'
 
 
-def test_completion_offers_a_wildcard_name_the_parser_returns_intact():
+def test_completion_offers_a_wildcard_name_that_reaches_the_command_intact():
     """Given a backend file whose name contains a wildcard, when completion
-    offers it, then parsing the offered text names that file alone."""
-    from storix.cli.shell import _get_remote_completions, _parse_input
+    offers it, then the command receives that file alone.
+
+    The sibling exists so the assertion means something: an unescaped
+    ``report*.md`` would expand to both.
+    """
+    from storix.cli.shell import _expand_globs, _get_remote_completions, _parse_input
 
     run('touch', '/report*.md', '/report-final.md')
 
     offered = [completion.text for completion in _get_remote_completions('rep')]
 
     assert offered == ['report\\*.md', 'report-final.md']
-    assert _parse_input(f'cat {offered[0]}', {}) == ['cat', 'report*.md']
+    argv = _expand_globs(_parse_input(f'cat {offered[0]}', {}))
+    assert argv == ['cat', 'report*.md']
 
 
 def test_expand_alias_subcommand_expansion():
