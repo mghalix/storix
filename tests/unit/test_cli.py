@@ -6,6 +6,7 @@ import re
 import sys
 
 from collections.abc import Generator
+from contextlib import contextmanager
 
 import pytest
 
@@ -903,6 +904,152 @@ class _Pipe(io.BytesIO):
     def read(self, size: int | None = -1, /) -> bytes:
         self.reads.append(size)
         return super().read(size)
+
+
+class _StdinPipe:
+    """Stand-in for stdin fed by a pipe: not a terminal, bytes underneath."""
+
+    def __init__(self, data: bytes) -> None:
+        self.buffer = _Pipe(data)
+
+    def isatty(self) -> bool:
+        return False
+
+
+class _TtyStdout(io.StringIO):
+    """Stand-in for a terminal on stdout, carrying both of its layers.
+
+    ``isatty`` is what every close-the-line decision reads, and the
+    commands write data through ``buffer`` while the mark goes through the
+    text layer, so a stub needs both to show what the terminal received.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.buffer = io.BytesIO()
+
+    def isatty(self) -> bool:
+        return True
+
+    def received(self) -> str:
+        """What reached the terminal: the data, then whatever closed it.
+
+        Data is always written before the mark, and a real stdout keeps that
+        order because both layers funnel into the one descriptor.
+        """
+        return self.buffer.getvalue().decode() + self.getvalue()
+
+
+@contextmanager
+def tty_stdout() -> Generator[_TtyStdout]:
+    """stdout as a terminal, for the commands that write straight to it.
+
+    A ``PromptSession`` is not involved: the decision under test is
+    ``isatty`` on the stream, and that is all a stub has to answer. The
+    swap cannot come from a fixture, because pytest reinstalls its own
+    capture on ``sys.stdout`` when the call phase begins.
+    """
+    stdout = _TtyStdout()
+    original = sys.stdout
+    sys.stdout = stdout
+    try:
+        yield stdout
+    finally:
+        sys.stdout = original
+
+
+def _visible(output: str) -> str:
+    """``output`` with its SGR escapes dropped, leaving what is read."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', output)
+
+
+def test_echo_n_marks_the_open_line_on_a_terminal_but_not_when_captured():
+    """Given -n, when a terminal receives it, then a mark closes the line.
+
+    -n means "no trailing newline in the data", and captured output is held
+    to that exactly. A terminal gets the line closed so the next prompt
+    starts fresh, plus the mark that says the data stopped mid-line, which
+    a bare closing newline would have hidden.
+    """
+    with tty_stdout() as terminal:
+        cli.echo('hi', None, no_newline=True)
+
+    assert _visible(terminal.received()) == 'hi%\n'
+    assert run('echo', '-n', 'hi').stdout_bytes == b'hi'  # captured stays exact
+
+
+def test_echo_leaves_a_newline_terminated_line_unmarked():
+    """Given no -n, when a terminal receives it, then nothing is added.
+
+    The data ended its own line, so there is nothing to report.
+    """
+    with tty_stdout() as terminal:
+        cli.echo('hi', None)
+
+    assert terminal.received() == 'hi\n'
+
+
+def test_the_open_line_mark_is_styled_rather_than_a_bare_character(monkeypatch):
+    """Given -n, when a terminal receives it, then the mark is inverse video.
+
+    A plain '%' would read as a percent sign the command printed. Inverse
+    video (SGR 7) is how zsh keeps its own mark apart from output.
+    """
+    # rich reads TERM to decide whether it can style at all, and a dumb
+    # terminal legitimately gets no inverse video
+    monkeypatch.setenv('TERM', 'xterm-256color')
+
+    with tty_stdout() as terminal:
+        cli.echo('hi', None, no_newline=True)
+
+    assert '\x1b[7m' in terminal.received()
+
+
+@pytest.mark.parametrize(
+    ('piped', 'no_newline', 'expected'),
+    [(b'open', False, 'open%\n'), (b'clean\n', True, 'clean\n')],
+)
+def test_echo_marks_a_pipe_by_its_own_last_byte(
+    monkeypatch, piped, no_newline, expected
+):
+    """Given piped data, when a terminal receives it, then its bytes decide.
+
+    A pipe is copied verbatim, so neither -n nor the newline a text operand
+    gets ever applied to it. The mark has to follow the data both ways
+    round: otherwise -n marks a pipe that ended cleanly, and its absence
+    claims a newline that is not there.
+    """
+    monkeypatch.setattr(sys, 'stdin', _StdinPipe(piped))
+
+    with tty_stdout() as terminal:
+        cli.echo(None, None, no_newline=no_newline)
+
+    assert _visible(terminal.received()) == expected
+
+
+def test_cat_marks_a_file_that_ends_mid_line():
+    """Given a file with no trailing newline, when catted, then it is marked.
+
+    Whether a stored file's last byte is a newline is a fact about the
+    file, and a silent closing newline made the two kinds look identical.
+    """
+    run('echo', '-n', 'hi', '-f', '/open.txt')
+
+    with tty_stdout() as terminal:
+        cli.cat(['/open.txt'])
+
+    assert _visible(terminal.received()) == 'hi%\n'
+    assert run('cat', '/open.txt').stdout_bytes == b'hi'  # captured stays exact
+
+
+def test_cat_leaves_a_newline_terminated_file_unmarked():
+    """Given a file ending in a newline, when catted, then nothing is added."""
+    run('echo', 'hi', '-f', '/clean.txt')
+
+    with tty_stdout() as terminal:
+        cli.cat(['/clean.txt'])
+
+    assert terminal.received() == 'hi\n'
 
 
 def test_echo_appends_a_newline_without_n():
@@ -2986,32 +3133,3 @@ def test_left_aligning_the_menu_tolerates_a_session_without_a_layout():
     from storix.cli.shell import _left_align_menu
 
     _left_align_menu(type('S', (), {})())
-
-
-def test_echo_n_closes_the_line_on_a_terminal_but_not_when_captured():
-    """Given -n, when a terminal receives it, then the prompt starts fresh.
-
-    -n means "do not write a newline into the data", and captured output is
-    held to that exactly. A terminal has no data to be exact for, so it gets
-    the closing newline that keeps the next prompt off the output line, which
-    is the rule cat already follows.
-    """
-    import io
-    import sys as sys_module
-
-    from storix.cli import app as app_module
-
-    class _Tty(io.StringIO):
-        def isatty(self) -> bool:
-            return True
-
-    tty = _Tty()
-    original = sys_module.stdout
-    sys_module.stdout = tty
-    try:
-        app_module.echo('hi', None, no_newline=True)
-    finally:
-        sys_module.stdout = original
-
-    assert tty.getvalue() == 'hi\n'  # closed for the prompt
-    assert run('echo', '-n', 'hi').stdout == 'hi'  # captured stays exact
