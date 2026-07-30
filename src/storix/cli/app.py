@@ -614,6 +614,12 @@ def echo(
             # raise MarkupError on a lone '[/]') and wrap at the console width
             sys.stdout.write(payload)
         sys.stdout.flush()
+        # same rule cat follows: a terminal gets a closing newline so the next
+        # prompt starts on a fresh line, and anything captured stays
+        # byte-exact. Without it, -n leaves the prompt welded to the output.
+        if not payload.endswith('\n') and sys.stdout.isatty():
+            sys.stdout.write('\n')
+            sys.stdout.flush()
         return
     try:
         _fs().echo(

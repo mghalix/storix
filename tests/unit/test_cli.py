@@ -2458,3 +2458,32 @@ def test_left_aligning_the_menu_tolerates_a_session_without_a_layout():
     from storix.cli.shell import _left_align_menu
 
     _left_align_menu(type('S', (), {})())
+
+
+def test_echo_n_closes_the_line_on_a_terminal_but_not_when_captured():
+    """Given -n, when a terminal receives it, then the prompt starts fresh.
+
+    -n means "do not write a newline into the data", and captured output is
+    held to that exactly. A terminal has no data to be exact for, so it gets
+    the closing newline that keeps the next prompt off the output line, which
+    is the rule cat already follows.
+    """
+    import io
+    import sys as sys_module
+
+    from storix.cli import app as app_module
+
+    class _Tty(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    tty = _Tty()
+    original = sys_module.stdout
+    sys_module.stdout = tty
+    try:
+        app_module.echo('hi', None, no_newline=True)
+    finally:
+        sys_module.stdout = original
+
+    assert tty.getvalue() == 'hi\n'  # closed for the prompt
+    assert run('echo', '-n', 'hi').stdout == 'hi'  # captured stays exact
