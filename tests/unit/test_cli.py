@@ -1,10 +1,12 @@
 import dataclasses
 import datetime as dt
 import importlib
+import io
 import re
 import sys
 
 from collections.abc import Generator
+from contextlib import contextmanager
 
 import pytest
 
@@ -17,6 +19,7 @@ from storix import Storix
 from storix.backends import MemoryBackend
 from storix.cli import app as cli
 from storix.cli.state import reset_session
+from storix.constants import DEFAULT_SOURCE_READ_SIZE
 
 
 runner = CliRunner()
@@ -657,6 +660,184 @@ def test_listing_commands_reject_an_unknown_sort_key(command):
     assert all(key in result.output for key in ('name', 'time', 'size'))
 
 
+def _mixed_arguments() -> None:
+    """/a.txt (2 bytes), /b.txt (3), /d1/{x,y} and /d2/z."""
+    run('echo', 'a', '-f', '/a.txt')
+    run('echo', 'bb', '-f', '/b.txt')
+    run('mkdir', '/d1', '/d2')
+    run('touch', '/d1/x', '/d1/y', '/d2/z')
+
+
+def test_ls_groups_file_arguments_before_each_directory_block():
+    """Given files and directories named in one ls,
+    When it lists them,
+    Then the files come out as one leading group and each directory follows
+    under its own header, one blank line apart, as unix ls prints them."""
+    _mixed_arguments()
+
+    out = run('ls', '/b.txt', '/d1', '/a.txt', '/d2').stdout
+
+    assert out.splitlines() == [
+        'a.txt  b.txt',
+        '',
+        '/d1:',
+        'x  y',
+        '',
+        '/d2:',
+        'z',
+    ]
+
+
+def test_ls_heads_a_block_only_when_more_than_one_argument_is_given():
+    """Given a single directory argument,
+    When ls lists it,
+    Then no header names it, and the same directory does get one as soon as
+    a second argument needs telling apart."""
+    _mixed_arguments()
+
+    alone = run('ls', '/d1').stdout
+
+    assert alone.splitlines() == ['x  y']
+    assert '/d1:' in run('ls', '/d1', '/d2').stdout
+
+
+def test_ls_orders_directory_arguments_by_name_and_inverts_them_with_reverse():
+    """Given directory arguments written out of order,
+    When ls lists them, and then lists them again with -r,
+    Then the blocks come out by name, and -r inverts that order."""
+    _mixed_arguments()
+
+    forward = [
+        line for line in run('ls', '/d2', '/d1').stdout.splitlines() if ':' in line
+    ]
+    inverted = [
+        line
+        for line in run('ls', '-r', '/d2', '/d1').stdout.splitlines()
+        if ':' in line
+    ]
+
+    assert forward == ['/d1:', '/d2:']
+    assert inverted == ['/d2:', '/d1:']
+
+
+def test_ls_batches_the_long_listing_stats_across_every_argument(monkeypatch):
+    """Given several directory arguments to a long listing,
+    When ls fetches the stats its columns need,
+    Then it fetches them in one batch for all of them, not one batch each."""
+    _mixed_arguments()
+    batches: list[int] = []
+    real_stat_all = cli.stat_all
+
+    def counting_stat_all(fs, paths):
+        batched = list(paths)
+        batches.append(len(batched))
+        return real_stat_all(fs, batched)
+
+    monkeypatch.setattr(cli, 'stat_all', counting_stat_all)
+
+    result = run('ls', '-l', '/d1', '/d2')
+
+    assert result.exit_code == 0
+    assert batches == [3]  # x, y and z, in one round trip's worth of latency
+
+
+def test_ls_batches_the_folder_glyph_lookups_across_every_argument(monkeypatch):
+    """Given several directory arguments whose entries include directories,
+    When ls resolves the empty/full folder glyph for them,
+    Then every argument's lookups run in one concurrent batch."""
+    run('mkdir', '-p', '/d1/sub', '/d2/sub')
+    monkeypatch.setenv('STORIX_CLI_ICONS', '1')
+    from storix.cli.config import load_prefs
+
+    load_prefs.cache_clear()
+    batches: list[list[str]] = []
+    real_concurrent = cli.concurrent
+
+    def counting_concurrent(thunks, **kwargs):
+        collected = list(thunks)
+        batches.append([thunk.func.__name__ for thunk in collected])
+        return real_concurrent(collected, **kwargs)
+
+    monkeypatch.setattr(cli, 'concurrent', counting_concurrent)
+
+    result = run('ls', '/d1', '/d2')
+
+    assert result.exit_code == 0
+    glyphs = [names for names in batches if 'empty_all' in names]
+    assert glyphs == [['empty_all', 'empty_all']]  # both arguments, one batch
+
+
+@pytest.mark.parametrize('command', ['ls', 'du', 'stat', 'tree', 'find'])
+def test_listing_commands_refuse_every_argument_when_one_is_missing(command):
+    """Given a missing path among valid ones,
+    When any listing command is given all of them,
+    Then it reports the missing one and prints nothing about the valid ones,
+    unlike coreutils, which reports each argument as it reaches it."""
+    _mixed_arguments()
+
+    result = run(command, '/a.txt', '/nope', '/d1')
+
+    assert result.exit_code == 1
+    assert 'does not exist' in result.stderr
+    assert result.stdout == ''
+
+
+def test_du_reports_each_argument_in_the_order_it_was_written():
+    """Given files and directories named in one du,
+    When it reports their usage,
+    Then each argument gets its own report in argument order, with no header
+    and no combined total, as unix du does."""
+    _mixed_arguments()
+
+    lines = _du_lines(run('du', '/b.txt', '/d1', '/a.txt').stdout)
+
+    assert lines == [['3', '/b.txt'], ['0', '/d1'], ['2', '/a.txt']]
+
+
+def test_stat_prints_one_block_per_argument_in_order():
+    """Given two files named in one stat,
+    When it reports them,
+    Then each gets its own block, in argument order, and neither block needs
+    a header because it already names its own path (as unix stat does)."""
+    _mixed_arguments()
+
+    out = run('stat', '/b.txt', '/a.txt').stdout
+
+    assert [line for line in out.splitlines() if 'File:' in line] == [
+        '  File: b.txt',
+        '  File: a.txt',
+    ]
+
+
+def test_tree_prints_a_tree_per_argument_and_one_combined_count():
+    """Given two directories named in one tree,
+    When it renders them,
+    Then each is rooted separately and the closing count is the total over
+    both, as unix tree reports it."""
+    _mixed_arguments()
+
+    out = run('tree', '/d1', '/d2').stdout
+
+    assert '/d1' in out
+    assert '/d2' in out
+    assert _tree_names(out) == ['x', 'y', 'z']
+    assert '2 directories, 3 files' in out  # both roots, counted once
+
+
+def test_find_searches_each_argument_in_turn():
+    """Given two directories named in one find,
+    When it searches them,
+    Then each argument's whole subtree is printed before the next argument's,
+    in the order the arguments were written."""
+    _mixed_arguments()
+
+    lines = run('find', '/d2', '/d1', '--type', 'f').stdout.splitlines()
+
+    # unordered within one argument: find streams the backend's listing order
+    assert lines[:1] == ['/d2/z']
+    assert sorted(lines[1:]) == ['/d1/x', '/d1/y']
+
+
 def test_cat_reproduces_file_bytes_exactly():
     """`sx cat f > copy` must be byte-identical: no wrapping, no tab expansion."""
     long_line = 'x' * 300
@@ -701,6 +882,282 @@ def test_echo_prints_text_literally():
 
     assert unbalanced.exit_code == 0
     assert unbalanced.stdout == 'a[/]b\n'
+
+
+class _Pipe(io.BytesIO):
+    """Stand-in for the process pipe, with its reads on the record.
+
+    ``CliRunner`` installs any ``input`` that can ``read`` as the buffer
+    under the text layer it puts on ``sys.stdin``, so this object is
+    exactly what the command pulls from, and it answers ``isatty`` for the
+    whole session.
+    """
+
+    def __init__(self, data: bytes = b'', *, tty: bool = False) -> None:
+        super().__init__(data)
+        self.reads: list[int | None] = []
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        self.reads.append(size)
+        return super().read(size)
+
+
+class _StdinPipe:
+    """Stand-in for stdin fed by a pipe: not a terminal, bytes underneath."""
+
+    def __init__(self, data: bytes) -> None:
+        self.buffer = _Pipe(data)
+
+    def isatty(self) -> bool:
+        return False
+
+
+class _TtyStdout(io.StringIO):
+    """Stand-in for a terminal on stdout, carrying both of its layers.
+
+    ``isatty`` is what every close-the-line decision reads, and the
+    commands write data through ``buffer`` while the mark goes through the
+    text layer, so a stub needs both to show what the terminal received.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.buffer = io.BytesIO()
+
+    def isatty(self) -> bool:
+        return True
+
+    def received(self) -> str:
+        """What reached the terminal: the data, then whatever closed it.
+
+        Data is always written before the mark, and a real stdout keeps that
+        order because both layers funnel into the one descriptor.
+        """
+        return self.buffer.getvalue().decode() + self.getvalue()
+
+
+@contextmanager
+def tty_stdout() -> Generator[_TtyStdout]:
+    """stdout as a terminal, for the commands that write straight to it.
+
+    A ``PromptSession`` is not involved: the decision under test is
+    ``isatty`` on the stream, and that is all a stub has to answer. The
+    swap cannot come from a fixture, because pytest reinstalls its own
+    capture on ``sys.stdout`` when the call phase begins.
+    """
+    stdout = _TtyStdout()
+    original = sys.stdout
+    sys.stdout = stdout
+    try:
+        yield stdout
+    finally:
+        sys.stdout = original
+
+
+def _visible(output: str) -> str:
+    """``output`` with its SGR escapes dropped, leaving what is read."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', output)
+
+
+def test_echo_n_marks_the_open_line_on_a_terminal_but_not_when_captured():
+    """Given -n, when a terminal receives it, then a mark closes the line.
+
+    -n means "no trailing newline in the data", and captured output is held
+    to that exactly. A terminal gets the line closed so the next prompt
+    starts fresh, plus the mark that says the data stopped mid-line, which
+    a bare closing newline would have hidden.
+    """
+    with tty_stdout() as terminal:
+        cli.echo('hi', None, no_newline=True)
+
+    assert _visible(terminal.received()) == 'hi%\n'
+    assert run('echo', '-n', 'hi').stdout_bytes == b'hi'  # captured stays exact
+
+
+def test_echo_leaves_a_newline_terminated_line_unmarked():
+    """Given no -n, when a terminal receives it, then nothing is added.
+
+    The data ended its own line, so there is nothing to report.
+    """
+    with tty_stdout() as terminal:
+        cli.echo('hi', None)
+
+    assert terminal.received() == 'hi\n'
+
+
+def test_the_open_line_mark_is_styled_rather_than_a_bare_character(monkeypatch):
+    """Given -n, when a terminal receives it, then the mark is inverse video.
+
+    A plain '%' would read as a percent sign the command printed. Inverse
+    video (SGR 7) is how zsh keeps its own mark apart from output.
+    """
+    # rich reads TERM to decide whether it can style at all, and a dumb
+    # terminal legitimately gets no inverse video
+    monkeypatch.setenv('TERM', 'xterm-256color')
+
+    with tty_stdout() as terminal:
+        cli.echo('hi', None, no_newline=True)
+
+    assert '\x1b[7m' in terminal.received()
+
+
+@pytest.mark.parametrize(
+    ('piped', 'no_newline', 'expected'),
+    [(b'open', False, 'open%\n'), (b'clean\n', True, 'clean\n')],
+)
+def test_echo_marks_a_pipe_by_its_own_last_byte(
+    monkeypatch, piped, no_newline, expected
+):
+    """Given piped data, when a terminal receives it, then its bytes decide.
+
+    A pipe is copied verbatim, so neither -n nor the newline a text operand
+    gets ever applied to it. The mark has to follow the data both ways
+    round: otherwise -n marks a pipe that ended cleanly, and its absence
+    claims a newline that is not there.
+    """
+    monkeypatch.setattr(sys, 'stdin', _StdinPipe(piped))
+
+    with tty_stdout() as terminal:
+        cli.echo(None, None, no_newline=no_newline)
+
+    assert _visible(terminal.received()) == expected
+
+
+def test_cat_marks_a_file_that_ends_mid_line():
+    """Given a file with no trailing newline, when catted, then it is marked.
+
+    Whether a stored file's last byte is a newline is a fact about the
+    file, and a silent closing newline made the two kinds look identical.
+    """
+    run('echo', '-n', 'hi', '-f', '/open.txt')
+
+    with tty_stdout() as terminal:
+        cli.cat(['/open.txt'])
+
+    assert _visible(terminal.received()) == 'hi%\n'
+    assert run('cat', '/open.txt').stdout_bytes == b'hi'  # captured stays exact
+
+
+def test_cat_leaves_a_newline_terminated_file_unmarked():
+    """Given a file ending in a newline, when catted, then nothing is added."""
+    run('echo', 'hi', '-f', '/clean.txt')
+
+    with tty_stdout() as terminal:
+        cli.cat(['/clean.txt'])
+
+    assert terminal.received() == 'hi\n'
+
+
+def test_echo_appends_a_newline_without_n():
+    """Given no -n, when echoing to either sink, then one newline ends it."""
+    assert run('echo', 'hi').stdout_bytes == b'hi\n'
+
+    run('echo', 'hi', '-f', '/a.txt')
+
+    assert run('cat', '-b', '/a.txt').stdout_bytes == b'hi\n'
+
+
+def test_echo_n_prints_without_the_trailing_newline():
+    """Given -n, when printing, then the text stands alone, like echo -n."""
+    assert run('echo', '-n', 'hi').stdout_bytes == b'hi'
+
+
+def test_echo_n_writes_a_file_without_the_trailing_newline():
+    """Given -n and -f, when writing, then the file holds the text only.
+
+    The gap this closes: no other flag produced a file whose last byte is
+    not a newline.
+    """
+    assert run('echo', '-n', 'hi', '-f', '/a.txt').exit_code == 0
+
+    assert run('cat', '-b', '/a.txt').stdout_bytes == b'hi'
+
+
+def test_echo_keeps_a_lone_dash_literal():
+    """Given a dash as the text, when echoing, then a dash is printed.
+
+    The text argument is content, not a file name, so the usual stdin
+    spelling would cost the only way to write a dash.
+    """
+    assert run('echo', '-').stdout_bytes == b'-\n'
+
+
+def test_echo_writes_a_pipe_verbatim():
+    """Given piped bytes and no text, when -f is given, then they are stored.
+
+    Arbitrary bytes are not text: nothing decodes them, and nothing
+    appends the newline that a text operand would get.
+    """
+    payload = b'\xff\xfe\x00 not utf-8'
+
+    result = runner.invoke(cli.app, ['echo', '-f', '/raw.bin'], input=_Pipe(payload))
+
+    assert result.exit_code == 0
+    assert run('cat', '-b', '/raw.bin').stdout_bytes == payload
+
+
+def test_echo_prints_a_pipe_verbatim():
+    """Given piped bytes and no -f, when echoing, then stdout gets them raw."""
+    payload = b'\x00\x9c binary'
+
+    result = runner.invoke(cli.app, ['echo'], input=_Pipe(payload))
+
+    assert result.exit_code == 0
+    assert result.stdout_bytes == payload
+
+
+def test_echo_n_leaves_piped_data_unchanged():
+    """Given -n on a pipe, when writing, then the bytes match the pipe.
+
+    Piped data never grows a newline, so -n asks for what already holds.
+    """
+    payload = b'ends without a newline'
+
+    result = runner.invoke(
+        cli.app, ['echo', '-n', '-f', '/raw.bin'], input=_Pipe(payload)
+    )
+
+    assert result.exit_code == 0
+    assert run('cat', '-b', '/raw.bin').stdout_bytes == payload
+
+
+def test_echo_pulls_a_large_pipe_in_bounded_reads():
+    """Given a pipe past one read size, when written, then reads stay bounded.
+
+    A pipe larger than memory has to reach the backend in pieces, so the
+    stream itself is handed over: every pull asks for a fixed size, and a
+    materializing ``read()`` or ``read(-1)`` would show up here as an
+    unbounded request.
+    """
+    payload = b'p' * (2 * DEFAULT_SOURCE_READ_SIZE + 7)
+    pipe = _Pipe(payload)
+
+    result = runner.invoke(cli.app, ['echo', '-f', '/big.bin'], input=pipe)
+
+    assert result.exit_code == 0
+    pulls = [size for size in pipe.reads if size]  # the runner probes with read(0)
+    assert len(pulls) > 2
+    assert all(size == DEFAULT_SOURCE_READ_SIZE for size in pulls)
+    assert run('cat', '-b', '/big.bin').stdout_bytes == payload
+
+
+def test_echo_without_text_at_a_terminal_prints_one_newline():
+    """Given a terminal, when no text is given, then only a newline prints.
+
+    A terminal is the user typing, not data: the REPL would otherwise
+    swallow the next prompt line, and unix echo with no operands prints
+    just the newline.
+    """
+    pipe = _Pipe(b'not data', tty=True)
+
+    result = runner.invoke(cli.app, ['echo'], input=pipe)
+
+    assert result.stdout_bytes == b'\n'
+    assert not [size for size in pipe.reads if size]  # the runner probes read(0)
 
 
 def test_tree_on_a_file_counts_one_file_and_no_directory():
@@ -782,9 +1239,7 @@ def test_push_and_pull_paths_with_spaces(tmp_path):
 
 
 def test_local_completions_space_escaping(monkeypatch, tmp_path):
-    from storix.cli.shell import _escape_shell_path, _get_local_completions
-
-    assert _escape_shell_path('Black Bird') == 'Black\\ Bird'
+    from storix.cli.shell import _get_local_completions
 
     monkeypatch.setattr('pathlib.Path.cwd', lambda: tmp_path)
     (tmp_path / 'Black Bird').mkdir()
@@ -792,6 +1247,77 @@ def test_local_completions_space_escaping(monkeypatch, tmp_path):
     completions = list(_get_local_completions('Bl'))
     assert len(completions) == 1
     assert completions[0].text == 'Black\\ Bird/'
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'report*.md',  # a wildcard is part of this name, not a pattern
+        'who?.txt',
+        'Black Bird',
+        "it's here.txt",
+        'say "hi".txt',
+        'take [1].log',
+        'back\\slash.txt',
+        'weird\\ name.txt',  # a backslash and a space together
+        '-leading-dash.txt',
+        '!$&;|`~^(){}*?',  # nothing but punctuation
+        'tab\there.txt',
+        'caf\xe9 \U0001f4c1.txt',  # an accent and an emoji, escaped or not
+    ],
+)
+def test_escaped_name_round_trips_to_the_command(name):
+    """Given an awkward entry name, when it is escaped for insertion at the
+    prompt, then the command receives the one original name back.
+
+    Asserted on the argv the command is handed, not on the tokens in
+    between: an escaped wildcard stays marked through ``_parse_input`` so
+    the glob step knows not to expand it, and the mark is removed on the
+    way out. Checking the intermediate form would pin an implementation
+    detail rather than the contract, which is that a completed name names
+    the file it came from.
+    """
+    from storix.cli.shell import _escape_shell_path, _expand_globs, _parse_input
+
+    line = f'cat {_escape_shell_path(name)}'
+
+    assert _expand_globs(_parse_input(line, {})) == ['cat', name]
+
+
+def test_escaping_backslashes_each_character_a_shell_would_read_as_syntax():
+    """Given names carrying a space, a wildcard and a literal backslash, when
+    they are escaped, then each of those characters gains a backslash."""
+    from storix.cli.shell import _escape_shell_path
+
+    assert _escape_shell_path('Black Bird') == 'Black\\ Bird'
+    assert _escape_shell_path('report*.md') == 'report\\*.md'
+    assert _escape_shell_path('back\\slash') == 'back\\\\slash'
+
+
+def test_escaping_leaves_non_ascii_names_as_they_are():
+    """Given a name of non-ascii characters, when it is escaped, then it is
+    unchanged, because no tokenizer or glob reads them as syntax."""
+    from storix.cli.shell import _escape_shell_path
+
+    assert _escape_shell_path('caf\xe9-\U0001f4c1.txt') == 'caf\xe9-\U0001f4c1.txt'
+
+
+def test_completion_offers_a_wildcard_name_that_reaches_the_command_intact():
+    """Given a backend file whose name contains a wildcard, when completion
+    offers it, then the command receives that file alone.
+
+    The sibling exists so the assertion means something: an unescaped
+    ``report*.md`` would expand to both.
+    """
+    from storix.cli.shell import _expand_globs, _get_remote_completions, _parse_input
+
+    run('touch', '/report*.md', '/report-final.md')
+
+    offered = [completion.text for completion in _get_remote_completions('rep')]
+
+    assert offered == ['report\\*.md', 'report-final.md']
+    argv = _expand_globs(_parse_input(f'cat {offered[0]}', {}))
+    assert argv == ['cat', 'report*.md']
 
 
 def test_expand_alias_subcommand_expansion():
@@ -1994,6 +2520,356 @@ def test_shell_redirection_reports_a_bad_target_instead_of_writing(monkeypatch, 
 
     assert 'redirect' in capsys.readouterr().out
     assert not fs.exists('/copy.txt')
+
+
+@pytest.fixture
+def globbable():
+    """A session a pattern has something to select from.
+
+    Two ``.txt`` files, one ``.md`` beside them, a dotfile, and a
+    subdirectory holding two more ``.md`` files, so a match can be told from
+    everything a pattern should have left out.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('alpha\n', '/a.txt')
+    fs.echo('beta\n', '/b.txt')
+    fs.echo('gamma\n', '/c.md')
+    fs.echo('secret\n', '/.env')
+    fs.mkdir('/sub')
+    fs.echo('one\n', '/sub/one.md')
+    fs.echo('two\n', '/sub/two.md')
+    return fs
+
+
+def test_a_pattern_expands_to_every_match_in_argument_order(monkeypatch, globbable):
+    """Given a pattern two files match, when the line runs, then the command
+    receives both, sorted.
+
+    Concatenated into a file because that is what makes the order of the
+    expansion observable.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat *.txt > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'alpha\nbeta\n'
+
+
+def test_a_pattern_matching_one_path_expands_to_that_path(monkeypatch, globbable):
+    """Given a pattern one file matches, when the line runs, then the command
+    receives that file and not its siblings."""
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat *.md > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'gamma\n'
+
+
+def test_a_pattern_matching_nothing_stops_the_line(monkeypatch, capsys, globbable):
+    """Given a pattern with no match, when the line runs, then no command runs
+    and the report names the pattern.
+
+    The command could be ``rm``, so an unmatched pattern is refused instead of
+    handed on as a literal path: ``/new.txt`` is never created.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'touch /new.txt *.tmp'), ('', EOFError)]
+    )
+
+    assert 'no matches: *.tmp' in capsys.readouterr().out
+    assert not globbable.exists('/new.txt')
+
+
+def test_a_pattern_under_a_missing_directory_matches_nothing(
+    monkeypatch, capsys, globbable
+):
+    """Given a pattern whose directory is absent, when the line runs, then it
+    reports no match rather than a failed listing."""
+    _run_shell_over(monkeypatch, globbable, [('', 'cat nosuch/*.md'), ('', EOFError)])
+
+    assert 'no matches: nosuch/*.md' in capsys.readouterr().out
+
+
+def test_a_token_without_a_wildcard_reaches_the_command_as_typed():
+    """Given plain paths, when the line is expanded, then they are unchanged.
+
+    Relative stays relative: expansion selects paths, it does not resolve
+    them, which the command and the core already do.
+    """
+    from storix.cli.shell import _expand_globs
+
+    argv = ['cat', 'a.txt', 'sub/one.md']
+
+    assert _expand_globs(argv) == ['cat', 'a.txt', 'sub/one.md']
+
+
+def test_an_option_token_is_left_alone(globbable):
+    """Given an option beside a pattern, when the line is expanded, then only
+    the pattern grows.
+
+    A leading ``-`` is an option however it is spelled, so it is not a path
+    position even when it holds a wildcard.
+    """
+    from storix.cli.shell import _expand_globs
+
+    cli.use_fs(globbable)
+
+    assert _expand_globs(['ls', '-l', '--exclude=*.txt', '*.txt']) == [
+        'ls',
+        '-l',
+        '--exclude=*.txt',
+        '/a.txt',
+        '/b.txt',
+    ]
+
+
+def test_a_redirect_target_is_not_expanded(monkeypatch, globbable):
+    """Given a wildcard in a redirect target, when the line runs, then the file
+    written carries that name.
+
+    A target names a file being written, not one to be found.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat a.txt > /out*.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out*.txt') == b'alpha\n'
+
+
+@pytest.mark.parametrize('line', ["cat '*.txt'", 'cat "*.txt"', 'cat \\*.txt'])
+def test_a_quoted_wildcard_is_a_plain_character(line, globbable):
+    """Given a protected wildcard, when the line is expanded, then it is not.
+
+    ``shlex.split`` strips the quotes, so the protected wildcards are marked
+    before the split for the two spellings to stay distinguishable.
+    """
+    from storix.cli.shell import _expand_globs, _parse_input
+
+    cli.use_fs(globbable)
+
+    assert _expand_globs(_parse_input(line, {})) == ['cat', '*.txt']
+
+
+def test_a_wildcard_does_not_reach_a_hidden_path(monkeypatch, capsys, globbable):
+    """Given a dotfile, when a pattern that spans it expands, then it is not
+    among the matches.
+
+    A leading dot has to be explicit, the pathlib and shell rule.
+    """
+    _run_shell_over(monkeypatch, globbable, [('', 'cat *env'), ('', EOFError)])
+
+    assert 'no matches: *env' in capsys.readouterr().out
+
+
+def test_a_pattern_that_names_the_dot_reaches_a_hidden_path(monkeypatch, globbable):
+    """Given a dotfile, when the pattern spells its leading dot, then it
+    matches."""
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat .e* > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'secret\n'
+
+
+def test_a_pattern_with_a_directory_component_matches_inside_it(monkeypatch, globbable):
+    """Given files in a subdirectory, when the pattern names it, then the
+    matches come from there and nowhere else.
+
+    ``/c.md`` sits beside ``sub`` and is left out.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat sub/*.md > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'one\ntwo\n'
+
+
+def test_an_absolute_pattern_matches_from_the_directory_it_names(globbable):
+    """Given a session inside a subdirectory, when an absolute pattern expands,
+    then it matches from the root it names.
+
+    A pattern is matched against a path relative to the directory the glob
+    walks, so an absolute one is unmatchable until that directory comes from
+    the pattern itself.
+    """
+    from storix.cli.shell import _expand_globs
+
+    globbable.cd('/sub')
+    cli.use_fs(globbable)
+
+    assert _expand_globs(['cat', '/*.txt']) == ['cat', '/a.txt', '/b.txt']
+
+
+def _press_tab(line: str) -> str:
+    """The line after Tab, run through the handler the key is bound to.
+
+    A real ``Buffer`` over a ``Document``, which needs neither a terminal nor
+    a running loop: constructing a ``PromptSession`` under pytest raises
+    ``io.UnsupportedOperation`` because prompt_toolkit builds its input
+    eagerly and stdin is not a terminal.
+
+    Args:
+        line: The line as typed, with the cursor at its end.
+    """
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.document import Document
+
+    from storix.cli.shell import _expand_on_line
+
+    buffer = Buffer(document=Document(line, len(line)))
+    _expand_on_line(buffer)
+    return buffer.text
+
+
+def test_tab_replaces_a_pattern_with_every_name_it_matches(globbable):
+    """Given a pattern two files match, when Tab lands, then both names are on
+    the line in place of it.
+
+    Seeing the selection before running anything is the point of expanding on
+    the key rather than only on Enter.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat *.txt') == 'cat a.txt b.txt '
+
+
+def test_tab_replaces_a_single_match_with_that_name_alone(globbable):
+    """Given a pattern one file matches, when Tab lands, then the line carries
+    that name and no trailing space.
+
+    A single name is often a path being completed a component at a time, so
+    the cursor stays against it; several names are a finished expansion.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat *.md') == 'cat c.md'
+
+
+def test_tab_on_a_pattern_with_no_match_leaves_the_line_as_typed(globbable):
+    """Given a pattern nothing matches, when Tab lands, then the line is
+    unchanged.
+
+    The pattern is the only thing the user can correct, so it is kept; zsh
+    rings the bell and leaves the word alone here too.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('rm *.tmp') == 'rm *.tmp'
+
+
+@pytest.mark.parametrize('line', ["cat '*.md'", 'cat "*.md"', 'cat \\*.md'])
+def test_tab_does_not_expand_a_protected_wildcard(line, globbable):
+    """Given a quoted or escaped wildcard, when Tab lands, then nothing
+    expands.
+
+    The quotes are what make the wildcard a plain character, the same
+    decision the line makes on Enter.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab(line) == line
+
+
+@pytest.mark.parametrize('line', ['c*', 'ls -l --exclude=*.txt'])
+def test_tab_expands_no_word_outside_a_path_position(line, globbable):
+    """Given a wildcard in the command name or an option, when Tab lands, then
+    the line is unchanged.
+
+    A wildcard in the command name is a command that does not exist, and a
+    leading ``-`` is an option however it is spelled: the two positions
+    expansion leaves alone on Enter as well.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab(line) == line
+
+
+def test_tab_leaves_a_word_without_a_wildcard_to_the_completer(globbable):
+    """Given a plain fragment, when Tab lands, then expansion declines it and
+    ordinary completion still offers the entry.
+
+    The binding is conditional so that the completion path is untouched by
+    the expansion: a word with no live wildcard is not this key's business.
+    """
+    from storix.cli.shell import _get_remote_completions, _pattern_at_cursor
+
+    cli.use_fs(globbable)
+
+    assert _pattern_at_cursor('cat a.t') is None
+    assert [c.text for c in _get_remote_completions('a.t')] == ['a.txt']
+
+
+def test_tab_binds_the_expansion_to_a_filtered_key():
+    """Given the shell bindings, when Tab is bound, then it carries a filter.
+
+    An unconditional binding would take the key from prompt_toolkit's own
+    completion, which every word that is not a pattern still needs.
+    """
+    from prompt_toolkit.filters import Condition
+
+    from storix.cli.shell import _ExitHint, _key_bindings
+
+    bindings = [
+        binding
+        for binding in _key_bindings(_ExitHint(_FakeSession())).bindings
+        if binding.keys == ('c-i',)
+    ]
+
+    assert len(bindings) == 1
+    assert isinstance(bindings[0].filter, Condition)
+
+
+def test_an_expanded_name_with_a_space_survives_a_re_parse(globbable):
+    """Given a matched name holding a space, when Tab expands it, then the line
+    still tokenizes back to that one name.
+
+    An expansion that is not re-parseable would split the name in two the
+    moment the line runs.
+    """
+    from storix.cli.shell import _parse_input
+
+    globbable.echo('spaced\n', '/two words.md')
+    cli.use_fs(globbable)
+
+    line = _press_tab('cat *words*')
+
+    assert line == 'cat two\\ words.md'
+    assert _parse_input(line, {}) == ['cat', 'two words.md']
+
+
+def test_tab_keeps_the_directory_the_pattern_named(globbable):
+    """Given a pattern with a directory component, when Tab lands, then the
+    names keep it.
+
+    ``/c.md`` sits beside ``sub`` and is not among them.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat sub/*.md') == 'cat sub/one.md sub/two.md '
+
+
+def test_tab_expands_to_names_relative_to_where_the_session_is(globbable):
+    """Given a session inside a subdirectory, when Tab expands a relative
+    pattern, then the names are relative too.
+
+    Matching answers in absolute paths, and a deep cwd would turn a short
+    line into a column of full paths for names the cwd already fixes.
+    """
+    globbable.cd('/sub')
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat *.md') == 'cat one.md two.md '
+
+
+def test_tab_expands_a_pattern_written_absolute_to_absolute_names(globbable):
+    """Given an absolute pattern, when Tab lands, then the names are absolute.
+
+    What the user wrote decides the depth, which is what a shell shows.
+    """
+    globbable.cd('/sub')
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat /*.txt') == 'cat /a.txt /b.txt '
 
 
 def test_edit_writes_the_editors_changes_back(monkeypatch):

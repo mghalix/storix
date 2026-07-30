@@ -10,15 +10,18 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import posixpath
 import shlex
 
+from itertools import takewhile
 from typing import TYPE_CHECKING, Final
 
 import click
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.filters import completion_is_selected
+from prompt_toolkit.filters import Condition, completion_is_selected
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -44,8 +47,9 @@ from .state import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
+    from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
     from prompt_toolkit.key_binding.key_processor import KeyPressEvent
@@ -55,6 +59,21 @@ if TYPE_CHECKING:
 
 
 _MAX_CWD = 30
+
+_WILDCARDS: Final[str] = '*?'
+"""The glob metacharacters a prompt token is scanned for.
+
+``**`` is two of the first; the across-directories meaning of the pair
+comes from the core glob, which is what does the matching."""
+
+_QUOTED: Final[str] = '\x00'
+"""Marks a wildcard the user quoted, so tokenizing cannot lose the quotes.
+
+``shlex.split`` strips quotes, so ``'*.txt'`` and ``*.txt`` reach the
+tokens as one string and a pattern that was protected is indistinguishable
+from one that was meant. Marking the protected wildcards before the split
+and dropping the marks after keeps the two apart without a second
+tokenizer. A control character because no prompt line can contain one."""
 
 _BUILTINS: dict[str, str] = {
     'clear': 'clear the screen',
@@ -224,8 +243,25 @@ def _holds_multi_column_menu(container: object) -> bool:
     return False
 
 
+def _cursor_on_pattern() -> bool:
+    """Whether Tab is sitting on a word that expands instead of completing."""
+    document = get_app().current_buffer.document
+    return _pattern_at_cursor(document.text_before_cursor) is not None
+
+
 def _key_bindings(hint: _ExitHint) -> KeyBindings:
-    """Bind completion acceptance and the two-press exit keys.
+    """Bind glob expansion, completion acceptance, and the two exit keys.
+
+    Tab: a pattern is expanded on the line rather than offered as a
+    completion candidate, because the two are different operations.
+    Completion proposes candidates for one word and inserts the one chosen;
+    expansion replaces one word with however many words it matched, which no
+    single candidate can express - a candidate carrying the whole joined list
+    would show one unreadable menu row, and picking a second one would
+    replace the first expansion rather than add to it. That is why zsh
+    expands in its line editor too. The filter is what keeps the ordinary
+    path intact: with no unquoted wildcard under the cursor this binding is
+    inactive and prompt_toolkit's own Tab handles the key.
 
     Enter: prompt_toolkit's default runs the line the moment you press Enter
     on a menu entry, so tab-completing a path and pressing Enter executes a
@@ -241,6 +277,15 @@ def _key_bindings(hint: _ExitHint) -> KeyBindings:
         hint: The shared "press again" state both keys drive.
     """
     bindings = KeyBindings()
+
+    @bindings.add('c-i', filter=Condition(_cursor_on_pattern))
+    def _expand(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        # the matching walk runs here rather than in the completion thread
+        # `complete_in_thread` provides, so a pattern over a large tree holds
+        # the prompt for as long as the walk takes; it is the same walk the
+        # line pays on Enter, and moving it off the loop would mean rewriting
+        # the buffer from another thread
+        _expand_on_line(event.current_buffer)
 
     @bindings.add('enter', filter=completion_is_selected)
     def _accept(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
@@ -275,18 +320,47 @@ def _key_bindings(hint: _ExitHint) -> KeyBindings:
     return bindings
 
 
+_UNESCAPED_PUNCTUATION: Final[str] = '_@%+=:,./-'
+"""The ASCII punctuation a completed name may carry with no backslash.
+
+The set `shlex.quote` calls safe, which is the punctuation no tokenizer,
+glob, or redirect operator reads as syntax."""
+
+
 def _escape_shell_path(name: str) -> str:
-    """Escape spaces and shell special characters for CLI completion."""
-    return (
-        name.replace(' ', '\\ ')
-        .replace('(', '\\(')
-        .replace(')', '\\)')
-        .replace('[', '\\[')
-        .replace(']', '\\]')
-        .replace("'", "\\'")
-        .replace('"', '\\"')
-        .replace('&', '\\&')
-        .replace('$', '\\$')
+    """Quote one path component so tokenizing the line returns it unchanged.
+
+    The contract is the round trip: `_parse_input` on what this produces
+    yields exactly `name`. That is stated as a rule (backslash every ASCII
+    character that is neither alphanumeric nor `_UNESCAPED_PUNCTUATION`)
+    rather than a list of the characters noticed so far, because a list is
+    silently short until a filename finds the gap. A glob wildcard was one
+    such gap: `report*.md` inserted bare is a pattern over the directory
+    rather than the file that was picked.
+
+    A literal backslash is why this cannot be a chain of replacements. It has
+    to be escaped too, and escaping any other character first makes the
+    backslashes just inserted indistinguishable from the one in the name, so
+    a name carrying both a backslash and a space arrived as two tokens.
+
+    Non-ASCII is left alone. It is syntax to no tokenizer, and a backslash
+    before every accent or emoji only makes the line unreadable.
+
+    Args:
+        name: An entry name, or a POSIX path of them, as the backend or the
+            host filesystem reports it. The `/` separator is safe punctuation
+            and stays unescaped. A Windows host separator never reaches here,
+            because a directory prefix the user typed is passed through as
+            typed rather than escaped.
+
+    Returns:
+        The name as a single shell token.
+    """
+    return ''.join(
+        char
+        if char.isalnum() or not char.isascii() or char in _UNESCAPED_PUNCTUATION
+        else f'\\{char}'
+        for char in name
     )
 
 
@@ -615,10 +689,233 @@ def _strip_padding(output: bytes) -> bytes:
     return stripped.encode('utf-8')
 
 
+def _mark_quoted(line: str) -> str:
+    """Mark every quoted or escaped wildcard in ``line`` as a literal.
+
+    Runs before ``shlex.split`` because the split is where the quotes go:
+    the scan tracks only quote and escape state, which is all that decides
+    whether a wildcard was protected, and leaves the tokenizing to shlex.
+
+    Args:
+        line: The line as typed.
+    """
+    marked: list[str] = []
+    quote = ''
+    escaped = False
+    for char in line:
+        if (escaped or quote) and char in _WILDCARDS:
+            marked.append(_QUOTED)
+        if escaped:
+            escaped = False
+        elif char == '\\' and quote != "'":
+            escaped = True
+        elif quote:
+            quote = '' if char == quote else quote
+        elif char in '\'"':
+            quote = char
+        marked.append(char)
+    return ''.join(marked)
+
+
+def _unmark(token: str) -> str:
+    """Drop the literal marks, leaving the token as it was written."""
+    return token.replace(_QUOTED, '')
+
+
+def _is_pattern(token: str) -> bool:
+    """Whether ``token`` holds a wildcard that was not quoted."""
+    return any(
+        char in _WILDCARDS and token[index - 1 : index] != _QUOTED
+        for index, char in enumerate(token)
+    )
+
+
+def _match(pattern: str) -> list[str]:
+    """Match ``pattern`` against the session, as sorted absolute paths.
+
+    The leading wildcard-free segments become the glob's base rather than
+    part of the pattern it walks: an absolute pattern is matched against a
+    path relative to that base and so could never match from the cwd, and
+    ``sub/*.md`` walks ``sub`` instead of every sibling of it.
+
+    Hidden entries join the candidates only when the pattern's last segment
+    asks for them with a leading dot, which is the pathlib and shell rule.
+
+    The core glob walks the whole subtree below the base and tests every
+    entry, so a shallow pattern still costs a full recursive listing. A
+    bounded walk belongs in that glob, where every caller gets it, rather
+    than in a second matcher here.
+
+    Args:
+        pattern: One prompt token, known to hold an unquoted wildcard.
+
+    Returns:
+        The matching paths in sorted order, empty when nothing matched.
+    """
+    segments = pattern.split('/')
+    fixed = list(takewhile(lambda segment: not _is_pattern(segment), segments))
+    base = '/'.join(fixed) or ('/' if pattern.startswith('/') else None)
+    tail = '/'.join(segments[len(fixed) :])
+    try:
+        matches = current_fs().glob(
+            tail, base, all=tail.rpartition('/')[2].startswith('.')
+        )
+        return sorted(str(path) for path in matches)
+    except StorageError:
+        # a base that is not there is a pattern matching nothing rather than
+        # a line that failed, which is what a shell reports for `nosuch/*`
+        return []
+
+
+def _expand_globs(argv: list[str]) -> list[str]:
+    """Replace the glob patterns in ``argv`` with what they match.
+
+    The outer shell cannot do this: the paths are in the backend, so a
+    pattern typed at the prompt reaches the command untouched and the
+    command reports a path that never existed. Expanding the whole line here
+    instead of per command is what makes it uniform, and is where a shell
+    does it too.
+
+    The command name and any option token are left alone, because a pattern
+    is only a pattern in a path position: a wildcard in the command name is
+    a command that does not exist, which Click says better than a matcher
+    can, and a leading ``-`` is an option however it is spelled. A redirect
+    target is already split off by the time this runs and stays literal for
+    the same reason: it names a file being written, not one to be found.
+
+    Args:
+        argv: The tokenized line, with any redirect already split off.
+
+    Returns:
+        The line with each pattern replaced by its matches in argument
+        order, and every quoted wildcard restored as a plain character.
+
+    Raises:
+        ValueError: If a pattern matches nothing.
+    """
+    if not argv:
+        return argv
+    expanded = [_unmark(argv[0])]
+    for token in argv[1:]:
+        if token.startswith('-') or not _is_pattern(token):
+            expanded.append(_unmark(token))
+            continue
+        matches = _match(token)
+        if not matches:
+            msg = f'no matches: {token}'
+            raise ValueError(msg)
+        expanded.extend(matches)
+    return expanded
+
+
 def _parse_input(line: str, aliases: dict[str, str]) -> list[str]:
-    """Parse a prompt line into tokenized argv, expanding aliases if defined."""
-    argv = shlex.split(line)
+    """Parse a prompt line into tokenized argv, expanding aliases if defined.
+
+    The tokens carry the literal marks ``_mark_quoted`` left, which
+    ``_expand_globs`` reads and removes.
+    """
+    argv = shlex.split(_mark_quoted(line))
     return expand_alias(argv, aliases) if (argv and aliases) else argv
+
+
+def _last_word(text: str) -> str:
+    """The trailing word of ``text``, exactly as it was typed.
+
+    The extent to replace on the line, which the tokens cannot give: they
+    have already lost the quotes and escapes the buffer still holds. Split on
+    the last space the user did not escape, so a path written with an escaped
+    space stays one word.
+    """
+    for index in range(len(text) - 1, -1, -1):
+        if text[index].isspace() and text[index - 1 : index] != '\\':
+            return text[index + 1 :]
+    return text
+
+
+def _pattern_at_cursor(text: str) -> tuple[str, str] | None:
+    """The word at the cursor and the pattern it holds, or None.
+
+    Returns the word as typed together with the token it tokenizes to, which
+    is the form ``_match`` wants (marks included, as ``_expand_globs`` passes
+    them).
+
+    None means Tab completes instead of expanding, which is every word
+    without an unquoted wildcard, plus three that hold one and are still not
+    patterns: a word carrying a quote (the quotes are what make the wildcard
+    a plain character, and a matcher that never sees them cannot tell), the
+    command name (a wildcard there is a command that does not exist, which
+    Click says better than a matcher can), and an option (a leading ``-`` is
+    an option however it is spelled). The last two are the positions
+    ``_expand_globs`` leaves alone on Enter as well.
+
+    Args:
+        text: The line up to the cursor.
+    """
+    word = _last_word(text)
+    if not word or word.startswith('-') or '"' in word or "'" in word:
+        return None
+    if not text[: len(text) - len(word)].strip():
+        return None
+    try:
+        tokens = shlex.split(_mark_quoted(word))
+    except ValueError:
+        # an unfinished escape is a word still being typed, not a pattern
+        return None
+    if not tokens or not _is_pattern(tokens[0]):
+        return None
+    return word, tokens[0]
+
+
+def _expansion(matches: Sequence[str], pattern: str) -> str:
+    """The text ``matches`` become on the line, at the depth as typed.
+
+    ``_match`` answers in absolute paths, and putting those back on the line
+    would lose what the user chose to write: ``ls *.md`` in a deep directory
+    would grow into a line of full paths for names the cwd already fixes.
+    Only a pattern written absolute expands to absolute names, which is what
+    a shell shows.
+
+    The names are escaped rather than quoted, so one holding a space survives
+    the tokenizer the line goes back through, and a trailing space follows
+    several of them: an expansion to more than one name is finished, where a
+    single one is often a path being completed a component at a time.
+
+    Args:
+        matches: The absolute paths the pattern matched.
+        pattern: The token that matched them, as it was typed.
+    """
+    if pattern.startswith('/'):
+        names = list(matches)
+    else:
+        cwd = str(current_fs().pwd())
+        names = [posixpath.relpath(match, cwd) for match in matches]
+    line = ' '.join(_escape_shell_path(name) for name in names)
+    return f'{line} ' if len(names) > 1 else line
+
+
+def _expand_on_line(buffer: Buffer) -> None:
+    """Replace the pattern at the cursor with what it matches, in place.
+
+    Seeing the names before the line runs is the point: an expansion that
+    only ever happened on Enter leaves the user to trust that ``rm *.tmp``
+    selected what they meant.
+
+    A pattern that matches nothing is left alone, pattern and all, rather
+    than emptied. zsh does the same, and the alternative destroys the one
+    thing the user can correct.
+
+    Args:
+        buffer: The prompt buffer whose line is rewritten.
+    """
+    at_cursor = _pattern_at_cursor(buffer.document.text_before_cursor)
+    if at_cursor is None:
+        return
+    word, pattern = at_cursor
+    matches = _match(pattern)
+    if not matches:
+        return
+    buffer.delete_before_cursor(len(word))
+    buffer.insert_text(_expansion(matches, pattern))
 
 
 def _banner(fs: Storix) -> None:
@@ -712,6 +1009,17 @@ def _run_line(command: click.Command, line: str, aliases: dict[str, str]) -> boo
     if not argv:
         console.print('[red]parse error: redirect needs a command[/red]')
         return True
+
+    try:
+        argv = _expand_globs(argv)
+    except ValueError as exc:
+        # nothing runs on an unmatched pattern: the command could be `rm`,
+        # and handing it the pattern would either report a path that never
+        # existed or address a literal `*` object
+        console.print(f'[red]{exc}[/red]')
+        return True
+    if redirect is not None:
+        redirect = _unmark(redirect)
 
     name = argv[0]
     if name in {'exit', 'quit'}:
