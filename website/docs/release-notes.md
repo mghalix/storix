@@ -1,5 +1,19 @@
 # Release Notes
 
+## [0.5.2] - 2026-07-30
+
+### What's Changed
+#### Features
+* feat(core): cd('-') returns to the previous directory by @mghalix in https://github.com/mghalix/storix/pull/69
+* feat(core): conditional writes for safe concurrent updates by @mghalix in https://github.com/mghalix/storix/pull/71
+* feat(cli): shell ergonomics - interrupts, completion, editing, redirection by @mghalix in https://github.com/mghalix/storix/pull/70
+* feat(core): conditional writes on the native ADLS backend by @mghalix in https://github.com/mghalix/storix/pull/73
+* feat(core): StorixPath remembers being written as a directory by @mghalix in https://github.com/mghalix/storix/pull/75
+* feat(cli): one sort vocabulary for ls and tree by @mghalix in https://github.com/mghalix/storix/pull/76
+#### Fixes
+* fix(cli): print file bytes verbatim and align listings with unix by @mghalix in https://github.com/mghalix/storix/pull/66
+* fix(core): a trailing separator asserts a directory by @mghalix in https://github.com/mghalix/storix/pull/74
+
 ## [0.5.1] - 2026-07-29
 
 A release about `sx` telling the truth about itself. `sx doctor` reported every
