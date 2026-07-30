@@ -1,9 +1,12 @@
+import importlib
 import re
+import sys
 
 from collections.abc import Generator
 
 import pytest
 
+from rich.color import ColorSystem
 from typer.testing import CliRunner
 
 import storix.cli as cli_entry
@@ -451,7 +454,7 @@ def test_ls_long_format_outputs_kind_size_date_time():
     assert 'docs' in out
 
 
-def test_ls_long_format_on_a_file_lists_that_file():
+def test_ls_long_format_on_a_file_lists_that_file(exit_keys):
     """Like unix ls, `ls -l FILE` reports the file, not FILE/FILE."""
     run('echo', 'hello world', '-f', '/a.txt')
 
@@ -1437,3 +1440,706 @@ def test_an_error_naming_a_toml_table_survives_rendering(tmp_path, monkeypatch):
     result = run('config', 'validate')
 
     assert '[environments]' in _plain(result.stdout + result.stderr)
+
+
+class _ScriptedPrompt:
+    """A PromptSession stand-in that replays typed lines and interrupts.
+
+    Each script entry is ``(buffer_text, result)``: ``result`` is either a
+    line to return or an exception to raise, and ``buffer_text`` is what
+    the user had typed when it happened - which is what prompt_toolkit
+    leaves on ``default_buffer`` after a Ctrl+C.
+    """
+
+    def __init__(self, script, **_kwargs) -> None:
+        self._script = list(script)
+        self.default_buffer = type('B', (), {'text': ''})()
+
+    def prompt(self, *_args, **_kwargs):
+        typed, result = self._script.pop(0)
+        self.default_buffer.text = typed
+        if isinstance(result, type) and issubclass(result, BaseException):
+            raise result
+        return result
+
+
+def _run_shell_over(monkeypatch, fs, script) -> None:
+    from storix.cli import shell
+
+    monkeypatch.setattr(
+        shell, 'PromptSession', lambda **kwargs: _ScriptedPrompt(script, **kwargs)
+    )
+    shell.start_shell(fs)
+
+
+def _run_shell(monkeypatch, script) -> None:
+    _run_shell_over(monkeypatch, Storix(MemoryBackend()), script)
+
+
+class _FakeApp:
+    """Enough of prompt_toolkit's Application for the exit-key bindings."""
+
+    def __init__(self) -> None:
+        self.redraws = 0
+        self.exited_with: type[BaseException] | None = None
+        self.tasks: list[object] = []
+
+    def invalidate(self) -> None:
+        self.redraws += 1
+
+    def create_background_task(self, coro) -> None:
+        # kept rather than awaited, so a test can fire one expiry on demand
+        self.tasks.append(coro)
+
+    def close_tasks(self) -> None:
+        for coro in self.tasks:
+            coro.close()
+        self.tasks.clear()
+
+    def exit(self, *, exception=None) -> None:
+        self.exited_with = exception
+
+
+class _FakeSession:
+    """A prompt session stand-in exposing only the toolbar and the app."""
+
+    def __init__(self) -> None:
+        self.bottom_toolbar: str | None = None
+        self.app = _FakeApp()
+
+
+class _FakeEvent:
+    """A key press carrying a buffer and the app the handler talks to."""
+
+    def __init__(self, app: _FakeApp, text: str = '') -> None:
+        self.app = app
+        self.current_buffer = _FakeBuffer(text)
+
+
+class _FakeBuffer:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.complete_state = None
+
+    def reset(self) -> None:
+        self.text = ''
+
+
+@pytest.fixture
+def exit_keys():
+    """The hint plus the c-c and c-d handlers bound over it.
+
+    A fixture rather than a helper so the teardown closes any expiry
+    coroutine a test armed and did not fire: an un-awaited one is collected
+    later and reported against whichever test happens to be running then.
+    """
+    from storix.cli.shell import _ExitHint, _key_bindings
+
+    session = _FakeSession()
+    hint = _ExitHint(session)
+    handlers = {
+        binding.keys[0]: binding.handler for binding in _key_bindings(hint).bindings
+    }
+    yield session, hint, handlers
+    session.app.close_tasks()
+
+
+def test_ctrl_c_shows_its_hint_under_the_prompt_instead_of_printing_it(
+    exit_keys, capsys
+):
+    """Given one Ctrl+C, when it lands, then the hint is the prompt toolbar.
+
+    Printing it would push a fresh prompt out below the message; the
+    toolbar keeps it under the line being typed.
+    """
+    session, _hint, handlers = exit_keys
+
+    handlers['c-c'](_FakeEvent(session.app))
+
+    assert session.bottom_toolbar is not None
+    assert 'again to exit' in session.bottom_toolbar
+    assert 'again to exit' not in capsys.readouterr().out
+    assert session.app.exited_with is None
+
+
+def test_ctrl_c_clears_a_typed_line_and_that_press_still_counts(exit_keys):
+    """Given a half-typed line, when Ctrl+C lands, then it clears and arms.
+
+    Two presses, never three: the one that discards the line is still the
+    first of the pair.
+    """
+    session, _hint, handlers = exit_keys
+    event = _FakeEvent(session.app, 'cat a.tx')
+
+    handlers['c-c'](event)
+
+    assert event.current_buffer.text == ''
+    assert session.bottom_toolbar is not None
+    assert session.app.exited_with is None
+
+
+def test_a_second_ctrl_c_exits_and_takes_the_hint_with_it(exit_keys):
+    """Given an armed hint, when Ctrl+C repeats, then the shell leaves."""
+    session, _hint, handlers = exit_keys
+    handlers['c-c'](_FakeEvent(session.app))
+
+    handlers['c-c'](_FakeEvent(session.app))
+
+    assert session.app.exited_with is EOFError
+    assert session.bottom_toolbar is None
+
+
+def test_ctrl_d_does_nothing_at_all_while_the_line_has_text(exit_keys):
+    """Given text on the line, when Ctrl+D lands, then nothing happens.
+
+    A terminal delivers the pending line on Ctrl+D and reports end of input
+    only on an empty one, so there is nothing to clear and nothing to warn
+    about.
+    """
+    session, _hint, handlers = exit_keys
+    event = _FakeEvent(session.app, 'half typed')
+
+    handlers['c-d'](event)
+
+    assert event.current_buffer.text == 'half typed'
+    assert session.bottom_toolbar is None
+    assert session.app.exited_with is None
+
+
+def test_ctrl_d_twice_on_an_empty_line_exits(exit_keys):
+    """Given an empty line, when Ctrl+D repeats, then the shell leaves."""
+    session, _hint, handlers = exit_keys
+
+    handlers['c-d'](_FakeEvent(session.app))
+    assert session.bottom_toolbar is not None
+    handlers['c-d'](_FakeEvent(session.app))
+
+    assert session.app.exited_with is EOFError
+
+
+def test_the_two_exit_keys_do_not_satisfy_each_other(exit_keys):
+    """Given Ctrl+C then Ctrl+D, when both land, then neither exits.
+
+    "Press Ctrl+C again" means that key; a different key is a different
+    intention, and guessing would exit on a keystroke nobody repeated.
+    """
+    session, _hint, handlers = exit_keys
+
+    handlers['c-c'](_FakeEvent(session.app))
+    handlers['c-d'](_FakeEvent(session.app))
+
+    assert session.app.exited_with is None
+    assert 'Ctrl+D' in (session.bottom_toolbar or '')
+
+
+def test_a_lapsed_hint_no_longer_exits(exit_keys):
+    """Given a hint that timed out, when the key repeats, then it re-arms.
+
+    The pair has to be a pair: a press now and another one minutes later
+    are two intentions, not an exit.
+    """
+    session, hint, handlers = exit_keys
+    handlers['c-c'](_FakeEvent(session.app))
+
+    hint.disarm()  # what the expiry does when it fires
+    handlers['c-c'](_FakeEvent(session.app))
+
+    assert session.app.exited_with is None
+    assert session.bottom_toolbar is not None
+
+
+def test_a_later_press_supersedes_an_earlier_expiry(exit_keys, monkeypatch):
+    """Given a re-arm, when the first expiry fires, then the hint survives.
+
+    Otherwise the second press inherits the first press's countdown and the
+    hint vanishes while it is still the live one.
+    """
+    import asyncio
+
+    from storix.cli import shell
+
+    monkeypatch.setattr(shell, '_HINT_SECONDS', 0)
+    session, _hint, handlers = exit_keys
+    # a different key re-arms; the same key twice would exit instead
+    handlers['c-c'](_FakeEvent(session.app))
+    handlers['c-d'](_FakeEvent(session.app))
+    first_expiry = session.app.tasks[0]
+
+    asyncio.run(first_expiry)
+
+    assert session.bottom_toolbar is not None
+    assert 'Ctrl+D' in session.bottom_toolbar
+
+
+def test_an_expiry_that_is_still_the_live_one_clears_the_hint(exit_keys, monkeypatch):
+    """Given no second press, when the expiry fires, then the row goes away."""
+    import asyncio
+
+    from storix.cli import shell
+
+    monkeypatch.setattr(shell, '_HINT_SECONDS', 0)
+    session, _hint, handlers = exit_keys
+    handlers['c-c'](_FakeEvent(session.app))
+
+    asyncio.run(session.app.tasks[0])
+
+    assert session.bottom_toolbar is None
+
+
+@pytest.mark.parametrize(
+    ('mode', 'fragment', 'expected'),
+    [
+        ('sensitive', 'li', False),  # the default: LICENSE is not offered
+        ('sensitive', 'LI', True),
+        ('insensitive', 'li', True),
+        ('insensitive', 'LI', True),
+        ('smart', 'li', True),  # no uppercase typed -> ignore case
+        ('smart', 'LI', True),  # uppercase typed, and it matches exactly
+        ('smart', 'Li', False),  # uppercase typed, so 'i' no longer matches 'I'
+    ],
+)
+def test_completion_case_preference(mode, fragment, expected, prefs_from):
+    from storix.cli.shell import _completion_matches
+
+    prefs_from(f'[cli]\ncompletion_case = "{mode}"\n')
+
+    assert _completion_matches('LICENSE', fragment) is expected
+
+
+def test_completion_case_defaults_to_smart():
+    """Modern shells ignore case on a lowercase prefix; sx follows."""
+    from storix.cli.config import CliPrefs
+
+    assert CliPrefs().completion_case == 'smart'
+
+
+def test_cd_dash_returns_and_echoes_the_directory():
+    run('mkdir', '/a', '/b')
+    run('cd', '/a')
+    run('cd', '/b')
+
+    back = run('cd', '-')
+
+    assert back.exit_code == 0
+    assert back.stdout.strip() == '/a'  # unix cd echoes where '-' landed
+    assert run('pwd').stdout.strip() == '/a'
+
+
+def test_cd_dash_before_any_move_stays_where_the_session_opened():
+    """No error path: a fresh session's previous directory is its start."""
+    result = run('cd', '-')
+
+    assert result.exit_code == 0
+    assert result.stdout.strip().endswith('/')
+    assert run('pwd').stdout.strip() == '/'
+
+
+@pytest.mark.parametrize(
+    ('line', 'expected'),
+    [
+        ('cat a.txt > b.txt', (['cat', 'a.txt'], 'b.txt', False)),
+        ('cat a.txt >b.txt', (['cat', 'a.txt'], 'b.txt', False)),
+        ('echo hi >> log.txt', (['echo', 'hi'], 'log.txt', True)),
+        ('echo hi >>log.txt', (['echo', 'hi'], 'log.txt', True)),
+        ('ls', (['ls'], None, False)),
+    ],
+)
+def test_split_redirect(line, expected):
+    import shlex
+
+    from storix.cli.shell import _split_redirect
+
+    assert _split_redirect(shlex.split(line)) == expected
+
+
+@pytest.mark.parametrize('line', ['cat a.txt >', 'cat a.txt > one two', 'ls > > x'])
+def test_split_redirect_rejects_a_target_it_cannot_name(line):
+    import shlex
+
+    from storix.cli.shell import _split_redirect
+
+    with pytest.raises(ValueError, match='redirect'):
+        _split_redirect(shlex.split(line))
+
+
+def test_shell_redirects_command_output_into_a_backend_file(monkeypatch, capsys):
+    fs = Storix(MemoryBackend())
+    fs.echo('hello\n', '/a.txt')
+
+    _run_shell_over(
+        monkeypatch,
+        fs,
+        [
+            ('', 'cat /a.txt > /copy.txt'),
+            ('', 'echo more >> /copy.txt'),
+            ('', EOFError),
+        ],
+    )
+
+    assert fs.cat('/copy.txt') == b'hello\nmore\n'
+
+
+def test_shell_redirection_writes_text_not_a_rendering(monkeypatch, capsys):
+    """Given a styled listing, when redirected, then the file holds no escapes.
+
+    The console is built at import time, so under a real terminal rich
+    caches a color system and keeps emitting escapes even once stdout has
+    been replaced by a buffer. Pytest's stdout is a pipe, where nothing is
+    ever styled, so the cached value has to be set here for this to be a
+    test of anything.
+    """
+    from storix.cli.render import console
+
+    monkeypatch.setattr(console, '_color_system', ColorSystem.TRUECOLOR)
+    fs = Storix(MemoryBackend())
+    fs.mkdir('/docs')
+    fs.echo('hello\n', '/a.txt')
+
+    _run_shell_over(monkeypatch, fs, [('', 'ls -l > /out.txt'), ('', EOFError)])
+
+    written = fs.cat('/out.txt').decode()
+    assert '\x1b[' not in written
+    assert 'a.txt' in written
+    assert not any(line.endswith((' ', '\t')) for line in written.splitlines())
+
+
+def test_shell_redirection_reports_a_bad_target_instead_of_writing(monkeypatch, capsys):
+    fs = Storix(MemoryBackend())
+    fs.echo('hello\n', '/a.txt')
+
+    _run_shell_over(monkeypatch, fs, [('', 'cat /a.txt >'), ('', EOFError)])
+
+    assert 'redirect' in capsys.readouterr().out
+    assert not fs.exists('/copy.txt')
+
+
+def test_edit_writes_the_editors_changes_back(monkeypatch):
+    """The point of the command: edit a backend file with a local editor."""
+    run('echo', 'hello', '-f', '/a.txt')
+    monkeypatch.setenv('EDITOR', 'sed -i s/hello/edited/')
+
+    result = run('edit', '/a.txt')
+
+    assert result.exit_code == 0
+    assert run('cat', '/a.txt').stdout == 'edited\n'
+
+
+def test_edit_does_not_write_when_the_file_is_untouched(monkeypatch):
+    """A no-op edit must not cost a write (or a new version on an object
+    store), so the content decides, not the fact that an editor ran."""
+    run('echo', 'hello', '-f', '/a.txt')
+    monkeypatch.setenv('EDITOR', 'true')
+    writes: list[str] = []
+    real_echo = Storix.echo
+
+    def counting_echo(self, data, path, **kwargs):
+        writes.append(str(path))
+        return real_echo(self, data, path, **kwargs)
+
+    monkeypatch.setattr(Storix, 'echo', counting_echo)
+
+    result = run('edit', '/a.txt')
+
+    assert result.exit_code == 0
+    assert writes == []
+    assert 'unchanged' in result.stdout
+
+
+def test_edit_creates_a_missing_file_from_what_you_type(monkeypatch, tmp_path):
+    # sed cannot write into an empty file (no lines to act on), so this one
+    # needs an editor that just puts content there
+    script = tmp_path / 'fake_editor.py'
+    script.write_text(
+        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('new\\n')\n"
+    )
+    monkeypatch.setenv('EDITOR', f'{sys.executable} {script}')
+
+    result = run('edit', '/fresh.txt')
+
+    assert result.exit_code == 0
+    assert run('cat', '/fresh.txt').stdout == 'new\n'
+
+
+def test_edit_leaves_a_missing_file_missing_when_nothing_is_typed(monkeypatch):
+    monkeypatch.setenv('EDITOR', 'true')
+
+    result = run('edit', '/fresh.txt')
+
+    assert result.exit_code == 0
+    assert run('exists', '/fresh.txt').exit_code == 1
+
+
+def test_edit_refuses_a_directory(monkeypatch):
+    run('mkdir', '/docs')
+    monkeypatch.setenv('EDITOR', 'true')
+
+    result = run('edit', '/docs')
+
+    assert result.exit_code == 1
+    assert 'is a directory' in result.stderr
+
+
+def test_edit_says_which_variable_to_set_when_there_is_no_editor(monkeypatch):
+    run('echo', 'hello', '-f', '/a.txt')
+    monkeypatch.delenv('EDITOR', raising=False)
+    monkeypatch.delenv('VISUAL', raising=False)
+
+    result = run('edit', '/a.txt')
+
+    assert result.exit_code == 1
+    assert 'EDITOR' in result.stderr
+
+
+def test_editor_preference_beats_the_environment(prefs_from, monkeypatch):
+    """A user who names an editor for sx means it - and on a fresh Windows
+    shell it is the only way to have one."""
+    from storix.cli.render import resolve_editor
+
+    monkeypatch.setenv('EDITOR', 'vi')
+    monkeypatch.setenv('VISUAL', 'vim')
+    prefs_from('[cli]\neditor = "nvim"\n')
+
+    assert resolve_editor() == 'nvim'
+
+
+def test_visual_beats_editor_when_no_preference_is_set(monkeypatch):
+    from storix.cli.render import resolve_editor
+
+    monkeypatch.setenv('EDITOR', 'vi')
+    monkeypatch.setenv('VISUAL', 'vim')
+
+    assert resolve_editor() == 'vim'
+
+
+def test_windows_falls_back_to_notepad(monkeypatch):
+    """A fresh Windows shell has neither variable set but always has this."""
+    from storix.cli import render
+
+    monkeypatch.delenv('EDITOR', raising=False)
+    monkeypatch.delenv('VISUAL', raising=False)
+    monkeypatch.setattr(render.sys, 'platform', 'win32')
+
+    assert render.resolve_editor() == 'notepad'
+
+
+def test_unix_has_no_editor_fallback(monkeypatch):
+    """vi and nano are both plausible; choosing for someone is worse than
+    saying there is nothing to choose."""
+    from storix.cli import render
+
+    monkeypatch.delenv('EDITOR', raising=False)
+    monkeypatch.delenv('VISUAL', raising=False)
+    monkeypatch.setattr(render.sys, 'platform', 'linux')
+
+    assert render.resolve_editor() is None
+
+
+def test_edit_uses_the_configured_editor(prefs_from, monkeypatch, tmp_path):
+    script = tmp_path / 'fake_editor.py'
+    script.write_text(
+        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('via prefs\\n')\n"
+    )
+    monkeypatch.delenv('EDITOR', raising=False)
+    prefs_from(f'[cli]\neditor = "{sys.executable} {script}"\n')
+
+    assert run('edit', '/a.txt').exit_code == 0
+    assert run('cat', '/a.txt').stdout == 'via prefs\n'
+
+
+def test_cd_dash_marks_the_destination_with_the_jump_glyph(monkeypatch):
+    """zoxide's convention: the arrow says "you were moved here", so the
+    line does not read as one more piece of output."""
+    from storix.cli import app as app_module
+    from storix.cli.icons import Icons
+
+    run('mkdir', '/a')
+    run('cd', '/a')
+    monkeypatch.setattr(app_module, 'icons_enabled', lambda: True)
+    monkeypatch.setattr(
+        type(app_module.console), 'is_terminal', property(lambda _: True)
+    )
+
+    out = run('cd', '-').stdout
+
+    assert Icons.ARROW_JUMP in out
+
+
+@pytest.mark.parametrize(
+    'style_str',
+    [
+        'class:completion-menu',
+        'class:completion-menu.completion',
+        'class:completion-menu.meta.completion',
+        'class:completion-menu.multi-column-meta',
+        'class:scrollbar.background',
+        'class:bottom-toolbar',
+        'class:bottom-toolbar.text',
+    ],
+)
+def test_the_prompt_paints_no_background_of_its_own(style_str):
+    """Given a terminal the user made transparent, when the prompt draws, then
+    it stays transparent.
+
+    Every prompt_toolkit default here paints an opaque grey or a reversed
+    bar, which becomes a slab over the terminal's own surface.
+    """
+    from prompt_toolkit.styles import merge_styles
+    from prompt_toolkit.styles.defaults import default_ui_style
+
+    from storix.cli.shell import _MENU_STYLE
+
+    merged = merge_styles([default_ui_style(), _MENU_STYLE])
+
+    attrs = merged.get_attrs_for_style_str(style_str)
+
+    assert attrs.bgcolor in {'default', ''}, style_str
+    assert not attrs.reverse, style_str
+
+
+def test_a_menu_entry_keeps_a_readable_foreground():
+    """Given a transparent background, when an entry renders, then its text is
+    not the black the grey default paired with."""
+    from prompt_toolkit.styles import merge_styles
+    from prompt_toolkit.styles.defaults import default_ui_style
+
+    from storix.cli.shell import _MENU_STYLE
+
+    merged = merge_styles([default_ui_style(), _MENU_STYLE])
+
+    plain = merged.get_attrs_for_style_str('class:completion-menu.completion')
+    directory = merged.get_attrs_for_style_str(
+        'class:completion-menu.completion fg:ansibrightblue bold'
+    )
+
+    assert plain.color == ''  # the terminal's own foreground
+    assert directory.color == 'ansibrightblue'  # the entry's type color survives
+
+
+def test_the_selected_entry_inverts_rather_than_choosing_colors():
+    """Given a selection, when it highlights, then it reverses the entry.
+
+    A chosen pair would fight both the terminal theme and the per-entry
+    color a directory carries; reversing follows both.
+    """
+    from prompt_toolkit.styles import merge_styles
+    from prompt_toolkit.styles.defaults import default_ui_style
+
+    from storix.cli.shell import _MENU_STYLE
+
+    merged = merge_styles([default_ui_style(), _MENU_STYLE])
+
+    attrs = merged.get_attrs_for_style_str(
+        'class:completion-menu.completion.current fg:ansibrightblue bold'
+    )
+
+    assert attrs.reverse
+    assert attrs.color == 'ansibrightblue'
+
+
+def test_the_completion_menu_is_a_grid_not_a_column():
+    """Given many entries, when the menu opens, then it uses the shell grid.
+
+    A single tall column pushes a directory of twenty entries off the line
+    it is completing.
+    """
+    from prompt_toolkit.shortcuts import CompleteStyle
+
+    from storix.cli import shell
+
+    captured: dict[str, object] = {}
+
+    class _Recorder:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+            self.default_buffer = type('B', (), {'text': ''})()
+            self.key_bindings = None
+            self.bottom_toolbar = None
+
+        def prompt(self, *_args, **_kwargs) -> str:
+            raise EOFError
+
+    shell.PromptSession = _Recorder  # type: ignore[misc]
+    try:
+        shell.start_shell(Storix(MemoryBackend()))
+    finally:
+        importlib.reload(shell)
+
+    assert captured['complete_style'] is CompleteStyle.MULTI_COLUMN
+
+
+def test_completions_follow_the_order_a_shell_lists_them_in():
+    """Given dunder modules, when completions sort, then punctuation is ignored.
+
+    Byte order opens a python package with a block of underscores;
+    glibc collation under a UTF-8 locale, which coreutils `ls` and a zsh
+    completion list both follow, files them by their letters.
+    """
+    from storix.cli.shell import _completion_order
+
+    names = [
+        'azblob.py',
+        'azure.py',
+        'base.py',
+        'gcs.py',
+        'generic.py',
+        '__init__.py',
+        'local.py',
+        'memory.py',
+        'opendal.py',
+        '_proto.py',
+        '__pycache__',
+        's3.py',
+    ]
+
+    # the exact output of `/usr/bin/ls` over these names under en_US.UTF-8
+    assert sorted(names, key=_completion_order) == names
+
+
+def test_completions_still_break_ties_case_insensitively():
+    """Given mixed case, when completions sort, then case does not decide."""
+    from storix.cli.shell import _completion_order
+
+    assert sorted(['Zebra.txt', 'apple.txt'], key=_completion_order) == [
+        'apple.txt',
+        'Zebra.txt',
+    ]
+
+
+def test_the_completion_grid_starts_at_the_left_edge():
+    """Given a menu float anchored at the caret, when adjusted, then it is not.
+
+    prompt_toolkit floats the menu at the cursor, which pushes the grid
+    right and wastes the width to its left; every shell lists from column
+    zero.
+
+    The float is built here rather than taken from a real session:
+    constructing one needs a terminal and a running event loop, and at the
+    dependency floor it refuses outright when pytest has replaced stdin.
+    """
+    from prompt_toolkit.layout.containers import Float, FloatContainer, Window
+    from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
+
+    from storix.cli.shell import _left_align_menu, _menu_floats
+
+    anchored = Float(content=MultiColumnCompletionsMenu(), xcursor=True, ycursor=True)
+    container = FloatContainer(content=Window(), floats=[anchored])
+    session = type('S', (), {'layout': type('L', (), {'container': container})()})()
+
+    assert list(_menu_floats(session)) == [anchored]
+
+    _left_align_menu(session)
+
+    assert anchored.xcursor is False
+    assert anchored.left == 0
+    # the row still sits directly under the prompt line
+    assert anchored.ycursor is True
+
+
+def test_left_aligning_the_menu_tolerates_a_session_without_a_layout():
+    """Given no layout, when adjusted, then nothing raises.
+
+    A cosmetic adjustment must never be what stops the prompt opening.
+    """
+    from storix.cli.shell import _left_align_menu
+
+    _left_align_menu(type('S', (), {})())

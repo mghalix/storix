@@ -7,17 +7,27 @@ enabled (``--no-icons`` / persistent prefs), mirroring eza's ``--icons=auto``.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
+from contextlib import contextmanager
 from math import ceil
 from typing import TYPE_CHECKING, Final
+
+import typer
 
 from rich.console import Console
 from rich.text import Text
 
+from .config import load_prefs
 from .icons import lookup_entry_decor
 from .state import icons_enabled
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+    from pathlib import Path
     from typing import Literal
 
     from storix.models import DirEntry
@@ -27,6 +37,73 @@ if TYPE_CHECKING:
 
 console = Console()
 err = Console(stderr=True)
+
+
+@contextmanager
+def unstyled() -> Generator[None]:
+    """Render through ``console`` with no styling, for output leaving the terminal.
+
+    Unix colors for a terminal and writes plain text for anything else, and
+    a file or a pipe is the "anything else". Redirecting stdout is not
+    enough on its own: rich resolves ``color_system='auto'`` once when the
+    console is constructed, and that console is built at import time while
+    stdout is still the terminal, so the cached answer keeps emitting
+    escapes into a file that was never a terminal. ``no_color`` is also not
+    enough - it removes color and leaves ``dim`` and ``bold``.
+
+    Nulling the color system is what actually gates styling in rich's
+    renderer, and there is no public setter for it.
+    """
+    # ponytail: private attribute, for want of a documented one; rich has no
+    # setter for color_system, and a second Console cannot be substituted
+    # because every command imported this one by name
+    previous = console._color_system  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+    console._color_system = None  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+    try:
+        yield
+    finally:
+        console._color_system = previous  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
+
+
+def resolve_editor() -> str | None:
+    """The editor command to open files with, or None if there is none.
+
+    In order: the ``[cli] editor`` preference, because a user who set it
+    for sx means it; then ``$VISUAL`` over ``$EDITOR``, the long-standing
+    convention where the former names an editor that can hold a terminal,
+    which is what a blocking hand-off needs; then ``notepad`` on Windows,
+    where a fresh shell has neither variable set but does always have
+    that. No such last resort on unix: ``vi`` and ``nano`` are both
+    plausible and picking one for someone is worse than saying so.
+    """
+    configured = load_prefs().editor
+    if configured:
+        return configured
+    inherited = os.environ.get('VISUAL') or os.environ.get('EDITOR')
+    if inherited:
+        return inherited
+    return 'notepad' if sys.platform == 'win32' else None
+
+
+def launch_editor(path: Path) -> None:
+    """Open ``path`` in the user's editor and wait for it to close.
+
+    Args:
+        path: The local file to open.
+
+    Raises:
+        Exit: If no editor can be determined, since guessing which editor
+            a user wants is not a thing to be clever about.
+    """
+    editor = resolve_editor()
+    if editor is None:
+        err.print(
+            '[red]sx: no editor configured[/red]\n'
+            'set $VISUAL or $EDITOR, or put [cyan]editor = "nvim"[/cyan] under '
+            '[cyan][cli][/cyan] in your config ([cyan]sx config edit[/cyan])'
+        )
+        raise typer.Exit(1)
+    subprocess.run([*editor.split(), str(path)], check=False)  # noqa: S603
 
 
 def entry_decor(entry: DirEntry, *, dir_state: DirState = 'closed') -> tuple[str, str]:
