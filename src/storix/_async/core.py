@@ -90,7 +90,7 @@ def _direct_fd(dest: BinarySink) -> int | None:
     if not isinstance(dest, io.FileIO | io.BufferedWriter | io.BufferedRandom):
         return None
     try:
-        # our writes bypass this buffer; it must not land on top of them
+        # storix writes bypass this buffer; it must not land on top of them
         dest.flush()
         return dest.fileno()
     except (OSError, UnsupportedOperation):

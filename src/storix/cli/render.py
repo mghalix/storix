@@ -54,7 +54,7 @@ def unstyled() -> Generator[None]:
     Nulling the color system is what actually gates styling in rich's
     renderer, and there is no public setter for it.
     """
-    # ponytail: private attribute, for want of a documented one; rich has no
+    # a private attribute, for want of a documented one: rich has no
     # setter for color_system, and a second Console cannot be substituted
     # because every command imported this one by name
     previous = console._color_system  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]

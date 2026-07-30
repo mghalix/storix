@@ -244,8 +244,8 @@ class OpendalBackend(BackendBase):
 
     def _to_raw(self, md: Metadata) -> RawStat:
         """Shape opendal metadata into the port's RawStat."""
-        # ponytail: services without timestamps (memory) fall back to
-        # utcnow() at stat time; real stores (s3, gcs) report last_modified
+        # services without timestamps (memory) fall back to utcnow() at
+        # stat time; real stores (s3, gcs) report last_modified
         timestamp = md.last_modified or utcnow()
         metadata = md.user_metadata
         return RawStat(
@@ -348,8 +348,8 @@ class OpendalBackend(BackendBase):
 
         key = self._key(path)
         if raw is not None and mode == 'a':
-            # ponytail: append is emulated as read + concat + rewrite; few
-            # object stores append natively (cap.write_can_append if it matters)
+            # append is emulated as read + concat + rewrite; few object
+            # stores append natively (cap.write_can_append if it matters)
             effective = raw.metadata if metadata is None else metadata
             options = self._write_options(content_type, effective)
             try:
