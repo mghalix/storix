@@ -112,6 +112,7 @@ class BackendBase(abc.ABC):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write complete contents through a native stream by default.
 
@@ -128,6 +129,7 @@ class BackendBase(abc.ABC):
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
 
     async def write_stream(
@@ -139,11 +141,18 @@ class BackendBase(abc.ABC):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Collect a chunk stream for a whole-object write implementation.
 
         This compatibility fallback materializes the full payload. Override it
         whenever the provider supports bounded streaming.
+
+        A precondition is passed through to the concrete write, never
+        emulated here: the only emulation available is stat, compare, then
+        write, which reopens exactly the race a precondition exists to
+        close, so a backend without ``conditional_writes`` gets no
+        imitation of it (ADR 0033).
 
         Raises:
             NotImplementedError: If neither write method is implemented.
@@ -159,6 +168,7 @@ class BackendBase(abc.ABC):
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
 
     @abc.abstractmethod

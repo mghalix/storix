@@ -95,6 +95,7 @@ class LayerBase:
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write complete contents through this layer's stream path."""
         from ..backends import generic
@@ -106,6 +107,7 @@ class LayerBase:
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
 
     def write_stream(
@@ -117,6 +119,7 @@ class LayerBase:
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a file from a bounded chunk stream.
 
@@ -131,6 +134,7 @@ class LayerBase:
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
 
     def delete(self, path: PurePosixPath) -> None:

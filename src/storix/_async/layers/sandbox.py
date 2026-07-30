@@ -141,6 +141,7 @@ class SandboxLayer:
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write complete contents under sandbox translation."""
         try:
@@ -150,6 +151,7 @@ class SandboxLayer:
                 mode=mode,
                 content_type=content_type,
                 metadata=metadata,
+                if_match=if_match,
             )
         except PathError as exc:
             raise self._rescope(exc) from None
@@ -163,6 +165,7 @@ class SandboxLayer:
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a file from a bounded chunk stream.
 
@@ -178,6 +181,7 @@ class SandboxLayer:
                 mode=mode,
                 content_type=content_type,
                 metadata=metadata,
+                if_match=if_match,
             )
         except PathError as exc:
             raise self._rescope(exc) from None

@@ -18,9 +18,11 @@ from storix.errors import (
     IsADirectoryError,
     NotADirectoryError,
     PathNotFoundError,
+    PreconditionFailedError,
     UnsupportedOperationError,
 )
 from storix.models import DirEntry, FileProperties
+from storix.preconditions import IF_MATCH_ABSENT
 
 
 @pytest.fixture(params=['memory', 'local'])
@@ -1203,3 +1205,86 @@ def test_download_into_a_transforming_sink_stays_sequential(tmp_path, monkeypatc
         fs.download('/big.bin', sink, ranges=4)
 
     assert gzip.decompress(archive.read_bytes()) == payload
+
+
+def test_echo_hands_back_the_version_stat_reported():
+    """Given a version from stat, when echoing with it, then the write lands."""
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+
+    version = (fs.stat('/a.txt')).version
+    fs.echo('two', '/a.txt', if_match=version)
+
+    assert fs.cat('/a.txt') == b'two'
+
+
+def test_echo_refuses_a_write_whose_version_moved():
+    """Given a replaced file, when echoing the old version, then it raises.
+
+    The losing writer is told, instead of destroying an update it never
+    saw.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+    stale = (fs.stat('/a.txt')).version
+    fs.echo('two', '/a.txt')
+
+    with pytest.raises(PreconditionFailedError):
+        fs.echo('three', '/a.txt', if_match=stale)
+
+    assert fs.cat('/a.txt') == b'two'
+
+
+def test_echo_does_not_retry_a_failed_precondition():
+    """Given a lost precondition, when it fails, then nothing is rewritten.
+
+    Recovering is the caller's decision, so the core neither loops nor
+    merges.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+    stale = (fs.stat('/a.txt')).version
+    fs.echo('two', '/a.txt')
+
+    with pytest.raises(PreconditionFailedError):
+        fs.echo('three', '/a.txt', if_match=stale)
+
+    assert (fs.stat('/a.txt')).version != stale
+    assert fs.cat('/a.txt') == b'two'
+
+
+def test_echo_creates_exclusively_when_asked():
+    """Given an occupied path, when creating exclusively, then it is refused."""
+    fs = Storix(MemoryBackend())
+    fs.echo('first', '/a.txt')
+
+    with pytest.raises(PreconditionFailedError):
+        fs.echo('second', '/a.txt', if_match=IF_MATCH_ABSENT)
+
+    fs.echo('mine', '/b.txt', if_match=IF_MATCH_ABSENT)
+
+    assert fs.cat('/a.txt') == b'first'
+    assert fs.cat('/b.txt') == b'mine'
+
+
+def test_echo_rejects_a_precondition_on_append():
+    """Given mode='a', when a precondition accompanies it, then it is rejected."""
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+    version = (fs.stat('/a.txt')).version
+
+    with pytest.raises(ValueError, match='if_match'):
+        fs.echo('two', '/a.txt', mode='a', if_match=version)
+
+
+def test_a_directory_reports_no_version():
+    """Given a directory, when stat'd, then it carries no validator.
+
+    A precondition names file content; there is nothing to compare for a
+    directory, so reporting a token would invite a write that cannot mean
+    anything.
+    """
+    fs = Storix(MemoryBackend())
+    fs.mkdir('/d')
+
+    assert (fs.stat('/d')).version is None

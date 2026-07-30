@@ -41,6 +41,7 @@ from storix.errors import (
     UnsupportedOperationError,
 )
 from storix.models import Capabilities, Entry, RawStat
+from storix.preconditions import validate_precondition
 
 from .base import BackendBase
 
@@ -248,13 +249,22 @@ class AzureBackend(BackendBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write batched range appends, then flush the completed file.
 
         Raises:
-            ValueError: If ``chunk_size`` is zero or negative.
+            ValueError: If ``chunk_size`` is zero or negative, or if
+                ``if_match`` accompanies ``mode='a'``.
+            UnsupportedOperationError: If ``if_match`` is given at all. The
+                ADLS SDK can carry a precondition on the flush that
+                completes a file, but this backend does not yet wire one, so
+                it refuses rather than accepting an argument it would ignore
+                (ADR 0033). Azure Blob accounts get it through the opendal
+                backend today.
         """
         size = resolve_chunk_size(chunk_size, self.default_write_chunk_size)
+        validate_precondition(if_match, mode=mode, capabilities=self.capabilities)
         offset = 0
         try:
             raw = self.stat(path)

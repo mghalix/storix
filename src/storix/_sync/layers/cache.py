@@ -391,6 +391,7 @@ class CacheLayer(LayerBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a bounded stream, then evict the affected entries.
 
@@ -405,6 +406,7 @@ class CacheLayer(LayerBase):
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
         self._evict(path)
 

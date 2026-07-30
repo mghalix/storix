@@ -1224,6 +1224,7 @@ class Storix:
         mode: EchoMode = 'w',
         content_type: str | None = None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write data into a file, creating it if missing.
 
@@ -1241,11 +1242,19 @@ class Storix:
             mode: ``'w'`` to replace or ``'a'`` to append.
             content_type: Optional media type for capable backends.
             metadata: Optional replacement metadata for capable backends.
+            if_match: Optional write precondition (ADR 0033): a ``version``
+                from a previous ``stat`` writes only while the stored file
+                still carries it, and ``IF_MATCH_ABSENT`` writes only while
+                nothing exists at ``path``. What to do when it fails is the
+                caller's decision, so nothing here retries.
 
         Raises:
-            ValueError: If ``chunk_size`` is zero or negative.
+            ValueError: If ``chunk_size`` is zero or negative, or if
+                ``if_match`` accompanies ``mode='a'``.
             UnsupportedOperationError: If requested metadata or content type
-                is not supported by the backend stack.
+                is not supported by the backend stack, or if the precondition
+                form asked for is not.
+            PreconditionFailedError: If ``if_match`` no longer holds.
             PathNotFoundError: If the destination parent does not exist.
             IsADirectoryError: If the destination is a directory.
         """
@@ -1263,6 +1272,7 @@ class Storix:
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
 
     def mkdir(

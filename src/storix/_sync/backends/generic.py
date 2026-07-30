@@ -42,6 +42,7 @@ def write(
     mode: EchoMode,
     content_type: str | None,
     metadata: Mapping[str, str] | None = None,
+    if_match: str | None = None,
 ) -> None:
     """Wrap complete contents as a one-item stream for ``write_stream``."""
     backend.write_stream(
@@ -50,6 +51,7 @@ def write(
         mode=mode,
         content_type=content_type,
         metadata=metadata,
+        if_match=if_match,
     )
 
 

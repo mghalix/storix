@@ -19,8 +19,10 @@ from storix.errors import (
     IsADirectoryError,
     NotADirectoryError,
     PathNotFoundError,
+    PreconditionFailedError,
 )
 from storix.models import Capabilities, Entry, RawStat
+from storix.preconditions import IF_MATCH_ABSENT, validate_precondition
 from storix.utils.time import utcnow
 
 from .base import BackendBase
@@ -42,14 +44,48 @@ class _Node:
     created: dt.datetime
     modified: dt.datetime
     metadata: dict[str, str] | None = None
+    revision: int = 0
+    """Bumped on every content write, so ``version`` changes even when two
+    writes land in the same clock tick (ADR 0033). A counter rather than a
+    hash: a validator is opaque, and only equality is ever asked of it."""
 
     @property
     def is_dir(self) -> bool:
         return self.data is None
 
     @property
+    def version(self) -> str:
+        """The opaque validator for this node's current content."""
+        return str(self.revision)
+
+    @property
     def size(self) -> int:
         return 0 if self.data is None else len(self.data)
+
+
+def _check_precondition(
+    path: PurePosixPath, node: _Node | None, if_match: str | None
+) -> None:
+    """Apply a validated precondition against the node currently stored.
+
+    Args:
+        path: The path being written, for the error message.
+        node: What is stored there now, or None when nothing is.
+        if_match: The precondition, already validated as supported.
+
+    Raises:
+        PreconditionFailedError: If the path is occupied when the write
+            asked for an exclusive create, is absent when the write named
+            a version, or carries a different version.
+    """
+    if if_match is None:
+        return
+    if if_match == IF_MATCH_ABSENT:
+        if node is not None:
+            raise PreconditionFailedError(path)
+        return
+    if node is None or node.is_dir or node.version != if_match:
+        raise PreconditionFailedError(path)
 
 
 class MemoryBackend(BackendBase):
@@ -69,6 +105,8 @@ class MemoryBackend(BackendBase):
         bulk_listing=True,
         provisioning=True,
         ranged_reads=True,
+        conditional_writes=True,
+        exclusive_create=True,
     )
 
     _nodes: dict[PurePosixPath, _Node]
@@ -138,16 +176,26 @@ class MemoryBackend(BackendBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a file from a bounded chunk stream.
 
+        The precondition is checked and applied without awaiting in
+        between, which is what makes it atomic here: this backend is the
+        store, and nothing else runs on this event loop meanwhile.
+
         Raises:
-            ValueError: If ``chunk_size`` is zero or negative.
+            ValueError: If ``chunk_size`` is zero or negative, or if
+                ``if_match`` accompanies ``mode='a'``.
+            PreconditionFailedError: If ``if_match`` no longer holds.
         """
         resolve_chunk_size(chunk_size, self.default_write_chunk_size)
+        validate_precondition(if_match, mode=mode, capabilities=self.capabilities)
         payload = await collect(data)
         now = utcnow()
         node = self._nodes.get(path)
+        # after the last await: the check and the write below are one step
+        _check_precondition(path, node, if_match)
 
         if node is None or mode == 'w':
             if node is not None and node.data is None:
@@ -157,6 +205,7 @@ class MemoryBackend(BackendBase):
                 created=now,
                 modified=now,
                 metadata=dict(metadata) if metadata else None,
+                revision=0 if node is None else node.revision + 1,
             )
             return
 
@@ -165,6 +214,7 @@ class MemoryBackend(BackendBase):
 
         node.data.extend(payload)
         node.modified = now
+        node.revision += 1
         if metadata is not None:
             node.metadata = dict(metadata)
 
@@ -213,6 +263,7 @@ class MemoryBackend(BackendBase):
             created=node.created,
             modified=node.modified,
             metadata=dict(node.metadata) if node.metadata else None,
+            version=None if node.is_dir else node.version,
         )
 
     @override
