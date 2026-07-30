@@ -1,5 +1,3 @@
-import os
-
 from collections.abc import Generator
 
 from storix.types import StorixPath, StrPathLike
@@ -14,17 +12,16 @@ def is_file_approx(p: StrPathLike) -> bool:
     """Guess whether a path names a file, judging only by its shape.
 
     Args:
-        p: The path as written. The trailing-separator test below reads the
-            argument before it becomes a ``StorixPath``, because that
-            conversion normalizes the separator away: converting first left
-            the check unreachable, and reported ``a.txt/`` as a file.
+        p: The path as written. A trailing separator decides on its own and
+            outranks the suffix, so ``a.txt/`` is a directory.
     """
-    # trailing separator means "this is a directory" (POSIX and Windows)
-    if os.fspath(p).endswith(('/', '\\')):
+    target = StorixPath(p)
+    # trailing separator means "this is a directory"
+    if target.named_as_directory:
         return False
 
     # if it has a suffix (e.g. ".txt", ".json"), we assume it's a file.
-    return bool(StorixPath(p).suffix)
+    return bool(target.suffix)
 
 
 def is_dir_approx(p: StrPathLike) -> bool:

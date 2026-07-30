@@ -59,3 +59,33 @@ def test_a_trailing_separator_names_a_directory_whatever_the_suffix() -> None:
     assert is_file_approx('a.txt/') is False
     assert is_dir_approx('a.txt/') is True
     assert is_file_approx('a.txt') is True
+
+
+def test_named_as_directory_reads_the_path_as_written() -> None:
+    """Given a trailing separator, when the path is built, then it remembers.
+
+    str() cannot answer this: the separator is normalized out of the
+    rendered form, so the question is asked of the segments as given.
+    """
+    assert StorixPath('nodir/').named_as_directory is True
+    assert StorixPath('nodir').named_as_directory is False
+    assert str(StorixPath('nodir/')) == 'nodir'  # still normalized
+
+
+def test_named_as_directory_survives_every_way_of_building_the_path() -> None:
+    """Given the same name by several routes, when asked, then all agree."""
+    from pathlib import PurePosixPath
+
+    assert StorixPath(StorixPath('nodir/')).named_as_directory is True
+    assert StorixPath(PurePosixPath('nodir/')).named_as_directory is True
+    assert (StorixPath('a') / 'nodir/').named_as_directory is True
+    assert StorixPath('a').joinpath('nodir/').named_as_directory is True
+
+
+def test_a_derived_path_asserts_nothing() -> None:
+    """Given a path derived from one, when asked, then it makes no claim.
+
+    Only the segment someone wrote can carry the separator.
+    """
+    assert StorixPath('nodir/x').parent.named_as_directory is False
+    assert (StorixPath('nodir/') / 'x').named_as_directory is False

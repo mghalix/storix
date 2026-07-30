@@ -152,17 +152,20 @@ def _named_as_directory(path: StrPathLike) -> str | None:
     """The path as written, when it was written as a directory.
 
     A trailing separator is a shell's way of saying "this name is a
-    directory", and it is the one piece of intent that resolving a path
-    destroys: ``PurePosixPath('nodir/')`` is ``PurePosixPath('nodir')``, so
-    the question has to be asked of the argument as it arrived. The text is
-    returned rather than a flag because an error about it should quote what
-    was typed, separator and all.
+    directory". The text is returned rather than a flag because an error
+    about it should quote what was typed, separator and all.
+
+    Converting to a ``StorixPath`` first is what makes this work for every
+    argument type: pathlib keeps its segments as they were given, so a
+    string, a ``StorixPath`` and a stdlib ``PurePosixPath`` all preserve the
+    assertion through the conversion, and none of them has to be handled
+    separately.
 
     Args:
         path: The argument as the caller wrote it.
     """
-    written = os.fspath(path)
-    return written if written.endswith(('/', os.sep)) else None
+    target = StorixPath(path)
+    return f'{target}/' if target.named_as_directory else None
 
 
 class Storix:

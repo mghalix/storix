@@ -1365,18 +1365,35 @@ async def test_a_rename_without_a_slash_is_unchanged():
     assert await fs.cat('/b.txt') == b'one'
 
 
-async def test_a_path_object_destination_carries_no_assertion():
-    """Given a StorixPath, when used as a destination, then it renames.
+async def test_a_path_object_destination_carries_the_assertion_too():
+    """Given a StorixPath written with a separator, when used, then it asserts.
 
-    pathlib normalizes a trailing separator away at construction, so a
-    caller handing over a path object has already discarded the assertion
-    and cannot be held to it.
+    A normalized path prints without the separator, but pathlib keeps its
+    segments as they were given, so the assertion survives construction and
+    a path object is held to it exactly like a string.
     """
     from storix.types import StorixPath
 
     fs = Storix(MemoryBackend())
     await fs.echo('one', '/a.txt')
 
-    await fs.cp('/a.txt', StorixPath('/b.txt/'))
+    with pytest.raises(NotADirectoryError):
+        await fs.cp('/a.txt', StorixPath('/nodir/'))
+
+    assert not await fs.exists('/nodir')
+
+
+async def test_a_derived_path_makes_no_assertion():
+    """Given a parent of a path, when used as a destination, then it renames.
+
+    An assertion made about one path is not an assertion about another: the
+    parent of ``nodir/x`` is a name nobody wrote a separator on.
+    """
+    from storix.types import StorixPath
+
+    fs = Storix(MemoryBackend())
+    await fs.echo('one', '/a.txt')
+
+    await fs.cp('/a.txt', StorixPath('/b.txt/x').parent)
 
     assert await fs.cat('/b.txt') == b'one'
