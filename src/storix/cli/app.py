@@ -80,7 +80,7 @@ from .state import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, Mapping
+    from collections.abc import Callable, Generator, Iterator, Mapping, Sequence
     from pathlib import PurePosixPath
     from types import FrameType
 
@@ -175,14 +175,181 @@ class _ListingSort(StorixEnum):
     SIZE = auto()
 
 
-def _listing_order(entry: DirEntry) -> tuple[str, str]:
-    """Sort key for a displayed listing: case-insensitive, like ls and eza.
+def _listing_order(name: str) -> tuple[str, str]:
+    """Sort key for a displayed name: case-insensitive, like ls and eza.
 
     Byte order would file every capitalized name above every lowercase one
     (``Zebra.txt`` before ``a.txt``), which neither coreutils under a UTF-8
     locale nor eza does. The exact name breaks ties so the order is total.
+
+    Args:
+        name: An entry name, or a path argument as it was written.
     """
-    return entry.name.lower(), entry.name
+    return name.lower(), name
+
+
+def _needs_stat(entry: DirEntry, sort: _ListingSort) -> bool:
+    """Whether ordering by ``sort`` still needs a stat for ``entry``.
+
+    A time order needs every entry's modification time. A size order needs
+    only a file whose listing did not carry its size, since a directory has
+    no size of its own to compete on.
+
+    Args:
+        entry: The entry about to be ordered.
+        sort: The key it will be ordered by.
+    """
+    return sort is _ListingSort.TIME or (not entry.is_dir and entry.size is None)
+
+
+def _arguments(fs: Storix, paths: Sequence[str] | None) -> list[tuple[str, StorixPath]]:
+    """Each path argument as it was written, beside its resolved target.
+
+    No argument at all means the session cwd, the one implicit target the
+    listing commands have always had; it is labelled by its absolute path,
+    since the user wrote no name for it to be reported under.
+
+    Args:
+        fs: Session the arguments resolve against.
+        paths: The path arguments, empty or ``None`` for the cwd.
+    """
+    if not paths:
+        cwd = fs.resolve()
+        return [(str(cwd), cwd)]
+    return [(path, fs.resolve(path)) for path in paths]
+
+
+def _checked_stats(
+    cmd: str, fs: Storix, targets: Sequence[StorixPath]
+) -> list[RawStat]:
+    """Stat every argument in one batch, refusing the run if any is bad.
+
+    sx checks every argument before it acts on any of them, where coreutils
+    takes them one at a time and reports failures as it goes: ``sx du a nope``
+    reports nothing where unix du reports ``a`` first. Deliberate, and the
+    same contract ``cat`` already keeps. One concurrent batch, so K arguments
+    cost one round trip's latency rather than K.
+
+    Args:
+        cmd: Command name the failure is reported under.
+        fs: Session to stat through.
+        targets: The resolved arguments.
+
+    Raises:
+        SystemExit: Through ``_die`` if any argument cannot be stat'd.
+    """
+    try:
+        return stat_all(fs, targets)
+    except StorageError as exc:
+        _die(cmd, exc)
+
+
+def _scan(fs: Storix, target: StorixPath, *, all: bool) -> list[DirEntry]:
+    """One argument's listing, materialized so it can be run in a batch.
+
+    A thunk over this is what lets several arguments list concurrently; a
+    lazy iterator handed to ``concurrent`` would do its I/O back on the
+    calling thread, one argument at a time.
+
+    Args:
+        fs: Session to list through.
+        target: The resolved argument to list.
+        all: Include hidden (dot-prefixed) entries.
+    """
+    return list(fs.scandir(target, all=all))
+
+
+type _ListingBlock = tuple[str | None, list[DirEntry], Mapping[str, bool | None]]
+"""One printed section of an ``ls``: its header (``None`` for the group of
+file arguments, and for a lone argument, which ls never heads), its
+entries, and the emptiness of whichever of them are directories."""
+
+
+def _listing_blocks(
+    fs: Storix,
+    arguments: Sequence[tuple[str, StorixPath]],
+    listings: Sequence[list[DirEntry]],
+    *,
+    reverse: bool,
+    show_empty: bool,
+) -> list[_ListingBlock]:
+    """Group ``ls`` arguments into the sections unix ls prints.
+
+    The plain files come first as one unheaded group, then the directories
+    each under their own ``name:`` header, ordered by the argument as it was
+    written. A header appears only when there is more than one argument to
+    tell apart.
+
+    Args:
+        fs: Session the emptiness lookups go through.
+        arguments: Each argument as written, beside its resolved target.
+        listings: Each argument's entries, aligned with ``arguments``.
+        reverse: Invert the order of the directory sections, as ls -r does.
+        show_empty: Whether the folder glyph needs each directory's emptiness.
+    """
+    files: list[DirEntry] = []
+    directories: list[tuple[str, StorixPath, list[DirEntry]]] = []
+    for (shown, target), entries in zip(arguments, listings, strict=True):
+        # a file argument lists as itself, so an entry whose path is the
+        # argument proves the argument was not a directory; a directory's
+        # entries always sit below it
+        if len(entries) == 1 and entries[0].path == target:
+            files.append(entries[0])
+        else:
+            directories.append((shown, target, entries))
+    directories.sort(key=lambda item: _listing_order(item[0]))
+    if reverse:
+        directories.reverse()
+
+    empty: list[Mapping[str, bool | None]] = [{} for _ in directories]
+    if show_empty:
+        names = [[e.name for e in entries if e.is_dir] for _, _, entries in directories]
+        # one batch across every argument, not one listing per argument
+        batched = concurrent(
+            partial(empty_all, fs, base, group)
+            for (_, base, _), group in zip(directories, names, strict=True)
+        )
+        empty = [
+            dict(zip(group, flags, strict=True))
+            for group, flags in zip(names, batched, strict=True)
+        ]
+
+    headed = len(arguments) > 1
+    blocks: list[_ListingBlock] = [(None, files, {})] if files else []
+    blocks += [
+        (f'{shown}:' if headed else None, entries, flags)
+        for (shown, _, entries), flags in zip(directories, empty, strict=True)
+    ]
+    return blocks
+
+
+def _long_table(
+    entries: Sequence[DirEntry],
+    stats: Mapping[StorixPath, RawStat],
+    label: Callable[[DirEntry], Text],
+) -> Table:
+    """The ``ls -l`` columns for one block: kind, size, mtime, name.
+
+    Args:
+        entries: The block's entries, in the order they print.
+        stats: The stat batch every entry's size and mtime is read from.
+        label: Renders one entry's icon and name.
+    """
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column()  # kind ('d' or '-')
+    table.add_column(justify='right')  # size
+    table.add_column(style='dim')  # date & time
+    table.add_column()  # icon + name
+    for entry in entries:
+        s = stats[entry.path]
+        kind = Text('d' if entry.is_dir else '-', style='dim')
+        if entry.is_dir:
+            size_text = Text('-', style='dim')
+        else:
+            size_text = Text(human_size(s.size), style='green')
+        mtime_text = Text(s.modified.strftime('%d %b %H:%M'), style='dim')
+        table.add_row(kind, size_text, mtime_text, label(entry))
+    return table
 
 
 def _sorted_entries(
@@ -191,7 +358,7 @@ def _sorted_entries(
     sort: _ListingSort,
     *,
     reverse: bool = False,
-    stats: Mapping[str, RawStat] | None = None,
+    stats: Mapping[StorixPath, RawStat] | None = None,
 ) -> list[DirEntry]:
     """Order one directory's entries by the key the listing commands share.
 
@@ -211,22 +378,20 @@ def _sorted_entries(
         entries: One directory's entries, in any order.
         sort: Key to order by.
         reverse: Invert the chosen order, as ``ls -r`` and ``tree -r`` do.
-        stats: Stats the caller already holds, keyed by entry name.
+        stats: Stats the caller already holds, keyed by entry path. Keyed by
+            path rather than by name because ``ls`` orders one group of file
+            arguments that may come from different directories, where two
+            entries can share a basename.
 
     Raises:
         StorageError: If a stat the chosen key needs cannot be read.
     """
-    ordered = sorted(entries, key=_listing_order)
+    ordered = sorted(entries, key=lambda e: _listing_order(e.name))
     if sort is not _ListingSort.NAME and len(ordered) > 1:
         known = dict(stats or {})
-        needed = [
-            e
-            for e in ordered
-            if e.name not in known
-            and (sort is _ListingSort.TIME or (not e.is_dir and e.size is None))
-        ]
+        needed = [e for e in ordered if e.path not in known and _needs_stat(e, sort)]
         known |= {
-            e.name: s
+            e.path: s
             for e, s in zip(needed, stat_all(fs, [e.path for e in needed]), strict=True)
         }
 
@@ -237,12 +402,12 @@ def _sorted_entries(
             # identically in both commands
             if entry.is_dir:
                 return -1
-            batched = known.get(entry.name)
+            batched = known.get(entry.path)
             # absent from the batch means the listing carried the size
             return batched.size if batched is not None else (entry.size or 0)
 
         if sort is _ListingSort.TIME:
-            ordered.sort(key=lambda e: known[e.name].modified, reverse=True)
+            ordered.sort(key=lambda e: known[e.path].modified, reverse=True)
         else:
             ordered.sort(key=size_of, reverse=True)
     if reverse:
@@ -255,7 +420,7 @@ def _sorted_entries(
 
 @app.command(rich_help_panel=_NAVIGATE)
 def ls(
-    path: Annotated[str | None, typer.Argument()] = None,
+    paths: Annotated[list[str] | None, typer.Argument()] = None,
     *,
     long: Annotated[bool, typer.Option('-l', '--long')] = False,
     all_: Annotated[bool, typer.Option('-a', '--all')] = False,
@@ -273,77 +438,89 @@ def ls(
 ) -> None:
     """List directory contents (hidden entries need -a).
 
-    --sort orders entries by name (default), time (newest first) or size
-    (largest first, directories last); -t is the coreutils shorthand for
-    --sort time and -r inverts whichever order was chosen.
+    Several arguments list the way unix ls does: the plain files first as
+    one group, then each directory under its own ``name:`` header with a
+    blank line between blocks, and no header at all for a single argument.
+    Every argument is read and grouped before anything prints, so one
+    unreadable argument refuses the whole listing rather than half of it.
+
+    --sort orders the entries within each block by name (default), time
+    (newest first) or size (largest first, directories last); -t is the
+    coreutils shorthand for --sort time. Directory arguments are always
+    ordered by name, whatever --sort says, since ordering them by a stat
+    would cost a round trip nothing else here needs. -r inverts both the
+    entry order and the order of the directory blocks.
 
     The per-entry backend lookups a listing does not carry for free -
     directory emptiness (the folder glyph), mtime (``-t``), a missing file
     size (``-l``, ``--sort size``) - are batched concurrently
-    (``state.empty_all`` / ``stat_all``), so a directory of N entries on a
-    cloud backend costs one round trip's worth of latency, not N.
+    (``state.empty_all`` / ``stat_all``) across every argument at once, so
+    K arguments over N entries on a cloud backend cost one round trip's
+    worth of latency, not K x N.
     """
     fs = _fs()
-    base = fs.resolve(path)
+    arguments = _arguments(fs, paths)
     try:
-        entries = list(fs.scandir(path, all=all_))
-    except StorageError as exc:
-        _die('ls', exc)
-
-    show_empty = icons_enabled() and load_prefs().dir_contents
-    empty: dict[str, bool | None] = {}
-    if show_empty:
-        dir_names = [e.name for e in entries if e.is_dir]
-        empty = dict(zip(dir_names, empty_all(fs, base, dir_names), strict=True))
-
-    entry_stats: dict[str, RawStat] = {}
-    # -t is the shorthand, so it wins when both ways of asking are given
-    order = _ListingSort.TIME if time_sort else sort
-    try:
-        if long:
-            # entry.path, not base / name: listing a file yields that one
-            # file, whose path is base itself
-            fetched_stats = stat_all(fs, [e.path for e in entries])
-            entry_stats = {
-                e.name: s for e, s in zip(entries, fetched_stats, strict=True)
-            }
-        # the -l batch already covers every mtime and size, so sorting by
-        # one of them reuses it instead of paying for a second pass
-        entries = _sorted_entries(
-            fs, entries, order, reverse=reverse, stats=entry_stats
+        # one batch for every argument's listing, not one round trip each
+        listings = concurrent(
+            partial(_scan, fs, target, all=all_) for _, target in arguments
         )
     except StorageError as exc:
         _die('ls', exc)
 
-    def label(entry: DirEntry) -> Text:
+    show_empty = icons_enabled() and load_prefs().dir_contents
+    blocks = _listing_blocks(
+        fs, arguments, listings, reverse=reverse, show_empty=show_empty
+    )
+
+    # -t is the shorthand, so it wins when both ways of asking are given
+    order = _ListingSort.TIME if time_sort else sort
+    needed = [
+        entry
+        for _, entries, _ in blocks
+        for entry in entries
+        if long
+        or (
+            order is not _ListingSort.NAME
+            and len(entries) > 1
+            and _needs_stat(entry, order)
+        )
+    ]
+    try:
+        # every block's stats in one batch, so the ordering below and the -l
+        # columns both read from it instead of paying per block
+        stats = dict(
+            zip(
+                (entry.path for entry in needed),
+                stat_all(fs, [entry.path for entry in needed]),
+                strict=True,
+            )
+        )
+    except StorageError as exc:
+        _die('ls', exc)
+
+    def label(entry: DirEntry, flags: Mapping[str, bool | None]) -> Text:
         if entry.is_dir and show_empty:
-            is_empty = empty.get(entry.name)
+            is_empty = flags.get(entry.name)
             populated = None if is_empty is None else not is_empty
             state = dir_state_of(populated=populated)
         else:
             state = 'closed'
         return entry_label(entry, dir_state=state)
 
-    if not long:
-        cells = [label(entry) for entry in entries]
-        console.print(Columns(cells, padding=(0, 2))) if cells else None
-        return
-
-    table = Table(show_header=False, box=None, pad_edge=False)
-    table.add_column()  # kind ('d' or '-')
-    table.add_column(justify='right')  # size
-    table.add_column(style='dim')  # date & time
-    table.add_column()  # icon + name
-    for entry in entries:
-        s = entry_stats[entry.name]
-        kind = Text('d' if entry.is_dir else '-', style='dim')
-        if entry.is_dir:
-            size_text = Text('-', style='dim')
-        else:
-            size_text = Text(human_size(s.size), style='green')
-        mtime_text = Text(s.modified.strftime('%d %b %H:%M'), style='dim')
-        table.add_row(kind, size_text, mtime_text, label(entry))
-    console.print(table)
+    for index, (header, entries, flags) in enumerate(blocks):
+        if index:  # ls separates its blocks with one blank line
+            console.print()
+        if header is not None:
+            console.print(f'[bold blue]{escape(header)}[/bold blue]')
+        ordered = _sorted_entries(fs, entries, order, reverse=reverse, stats=stats)
+        decorate = partial(label, flags=flags)
+        if long:
+            console.print(_long_table(ordered, stats, decorate))
+        elif ordered:
+            console.print(
+                Columns([decorate(entry) for entry in ordered], padding=(0, 2))
+            )
 
 
 @app.command(rich_help_panel=_NAVIGATE)
@@ -417,7 +594,7 @@ class _LevelBuffer:
 
 @app.command(rich_help_panel=_NAVIGATE)
 def tree(
-    path: Annotated[str | None, typer.Argument()] = None,
+    paths: Annotated[list[str] | None, typer.Argument()] = None,
     *,
     all_: Annotated[bool, typer.Option('-a', '--all')] = False,
     level: Annotated[
@@ -441,24 +618,22 @@ def tree(
     -L caps the depth and -l adds eza-style size and kind columns. Siblings
     take the same ordering as ls: --sort by name (default), time (newest
     first) or size (largest first, directories last), and -r inverts it.
+
+    Several arguments each get their own tree, in the order they were
+    written, and the closing count is the combined total over all of them,
+    as unix tree reports it. Every argument is checked before the first
+    line prints, so a bad one refuses them all.
     """
     fs = _fs()
     if level is not None and level < 1:
         _die('tree', ValueError(f'level must be at least 1, got {level}'))
-    # one core walk carries the traversal (concurrent, depth-bounded);
-    # everything below is presentation over entries pulled on demand, so
-    # lines print while deeper levels are still being listed. order='level'
-    # keeps sibling groups contiguous, which _LevelBuffer's monotone-depth
-    # rule (and tree's sibling sorting) depends on.
-    root = fs.resolve(path)
+    arguments = _arguments(fs, paths)
     # unix tree counts its root: a directory argument, or the one file a
-    # file argument names (the walk under it is empty either way)
-    root_is_file = fs.isfile(root)
-    dirs: int = 0 if root_is_file else 1
-    files: int = 1 if root_is_file else 0
-
-    walked = fs.walk(root, all=all_, max_depth=level, order='level')
-    buffer = _LevelBuffer(walked, root)
+    # file argument names (the walk under it is empty either way). One batch
+    # answers that for every argument, and validates them at the same time.
+    kinds = [raw.kind for raw in _checked_stats('tree', fs, [t for _, t in arguments])]
+    dirs: int = sum(kind is PathKind.DIRECTORY for kind in kinds)
+    files: int = sum(kind is PathKind.FILE for kind in kinds)
 
     def columns(entry: DirEntry) -> Text:
         """The eza-style 'kind size' prefix for -l, else nothing.
@@ -478,7 +653,9 @@ def tree(
             prefix.append(f'{human_size(size):>7}  ', style='green')
         return prefix
 
-    def render(parent: StorixPath, prefix: str, depth: int) -> None:
+    def render(
+        buffer: _LevelBuffer, parent: StorixPath, prefix: str, depth: int
+    ) -> None:
         nonlocal dirs, files
         buffer.ensure_level(depth)
         children = _sorted_entries(
@@ -502,18 +679,31 @@ def tree(
                 label = entry_label(child, slash=False, dir_state=state)
                 console.print(columns(child) + Text(f'{prefix}{branch}') + label)
                 if expanded:
-                    render(child.path, prefix + ('    ' if last else '│   '), depth + 1)
+                    render(
+                        buffer,
+                        child.path,
+                        prefix + ('    ' if last else '│   '),
+                        depth + 1,
+                    )
             else:
                 files += 1
                 console.print(
                     columns(child) + Text(f'{prefix}{branch}') + entry_label(child)
                 )
 
-    console.print(f'[bold blue]{root}[/bold blue]')
-    try:
-        render(root, '', 1)
-    except StorageError as exc:  # the walk pull or a --sort stat batch can fail
-        _die('tree', exc)
+    for _, root in arguments:
+        # one core walk per argument carries its traversal (concurrent,
+        # depth-bounded); everything below is presentation over entries
+        # pulled on demand, so lines print while deeper levels are still
+        # being listed. order='level' keeps sibling groups contiguous, which
+        # _LevelBuffer's monotone-depth rule (and tree's sibling sorting)
+        # depends on.
+        walked = fs.walk(root, all=all_, max_depth=level, order='level')
+        console.print(f'[bold blue]{root}[/bold blue]')
+        try:
+            render(_LevelBuffer(walked, root), root, '', 1)
+        except StorageError as exc:  # the walk pull or a --sort stat batch can fail
+            _die('tree', exc)
     d = _count_label(dirs, 'directory', 'directories')
     f = _count_label(files, 'file', 'files')
     console.print(f'\n{dirs} {d}, {files} {f}')
@@ -521,7 +711,7 @@ def tree(
 
 @app.command(rich_help_panel=_NAVIGATE)
 def find(
-    path: Annotated[str | None, typer.Argument()] = None,
+    paths: Annotated[list[str] | None, typer.Argument()] = None,
     *,
     name: Annotated[
         str | None,
@@ -535,18 +725,28 @@ def find(
         bool, typer.Option('-a', '--all', help='include hidden entries')
     ] = False,
 ) -> None:
-    """Recursively find entries by name glob and/or type (unix find)."""
+    """Recursively find entries by name glob and/or type (unix find).
+
+    Several arguments are searched in turn, in the order they were written,
+    and every one of them is checked before the first match prints.
+    """
     fs = _fs()
     kind = {'f': PathKind.FILE, 'd': PathKind.DIRECTORY}.get(type_) if type_ else None
     if type_ is not None and kind is None:
         _die('find', ValueError(f"type must be 'f' or 'd', got {type_!r}"))
+    arguments = _arguments(fs, paths)
+    # searched for its refusal, not for the stats: find needs nothing about
+    # an argument except that it is there, and one bad argument has to
+    # refuse the run before any match prints
+    _checked_stats('find', fs, [target for _, target in arguments])
     try:
         # print as the walk yields, like unix find; partial output before
         # a mid-stream error is fine
-        for entry in fs.find(path, name=name, kind=kind, all=all_):
-            icon, style = entry_decor(entry)
-            text = f'{icon} {entry.path}' if icon else str(entry.path)
-            console.print(Text(text, style=style))
+        for _, target in arguments:
+            for entry in fs.find(target, name=name, kind=kind, all=all_):
+                icon, style = entry_decor(entry)
+                text = f'{icon} {entry.path}' if icon else str(entry.path)
+                console.print(Text(text, style=style))
     except StorageError as exc:
         _die('find', exc)
 
@@ -688,8 +888,8 @@ def cat(
     last = b''
     try:
         for i, chunk in enumerate(fs.stream(*files)):
-            # ponytail: the binary guard reads the first chunk only, so a
-            # NUL that appears later still prints; widen it if that bites
+            # the binary guard reads the first chunk only, so a NUL that
+            # appears later still prints; widen it if that bites
             if i == 0 and not binary and b'\x00' in chunk:
                 err.print('[yellow]cat: binary file; use -b[/yellow]')
                 return
@@ -706,17 +906,26 @@ def cat(
 
 
 @app.command(rich_help_panel=_READ)
-def stat(path: Annotated[str, typer.Argument()]) -> None:
-    """Show a path's properties."""
+def stat(paths: Annotated[list[str], typer.Argument()]) -> None:
+    """Show each path's properties.
+
+    Several arguments print one block each, in the order they were written
+    and with no added header, as unix stat does - each block already names
+    its own path. All of them are read in one concurrent batch, so a bad
+    argument refuses the whole run.
+    """
+    fs = _fs()
     try:
-        console.print(str(_fs().stat(path)))
+        properties = concurrent(partial(fs.stat, path) for path in paths)
     except StorageError as exc:
         _die('stat', exc)
+    for props in properties:
+        console.print(str(props))
 
 
 @app.command(rich_help_panel=_READ)
 def du(
-    path: Annotated[str | None, typer.Argument()] = None,
+    paths: Annotated[list[str] | None, typer.Argument()] = None,
     *,
     summary: Annotated[
         bool, typer.Option('-s', '--summary', help='one grand total only (du -s)')
@@ -736,20 +945,30 @@ def du(
 
     Bottom-up like unix du (apparent content bytes). -s for the grand
     total only, -a to include files, -d to cap the reported depth.
+
+    Several arguments each get their own report, in the order they were
+    written, with no header and no combined grand total - unix du reports
+    them the same way. Every argument is checked before the first line
+    prints, so a bad one refuses them all.
     """
     fs = _fs()
-    target = fs.resolve(path)
-    shown = path if path is not None else str(target)
+    arguments = _arguments(fs, paths)
+    # du needs to know whether each argument is a file (a file reports one
+    # line, a directory a whole breakdown); one batch answers that for every
+    # argument, and validates them at the same time
+    kinds = [raw.kind for raw in _checked_stats('du', fs, [t for _, t in arguments])]
 
-    def emit(size: int, entry_path: StorixPath) -> None:
-        if entry_path == target:
-            label = shown
-        else:
-            label = f'{shown.rstrip("/")}/{entry_path.relative_to(target).as_posix()}'
-        console.print(f'{human_size(size) if human else size}\t{label}')
+    def report(shown: str, target: StorixPath, *, is_file: bool) -> None:
+        def emit(size: int, entry_path: StorixPath) -> None:
+            if entry_path == target:
+                label = shown
+            else:
+                label = (
+                    f'{shown.rstrip("/")}/{entry_path.relative_to(target).as_posix()}'
+                )
+            console.print(f'{human_size(size) if human else size}\t{label}')
 
-    try:
-        if summary or fs.isfile(target):
+        if summary or is_file:
             emit(fs.du(target), target)
             return
         # one post-order walk: children accumulate into their parent before
@@ -767,6 +986,10 @@ def du(
             if (entry.is_dir or all_) and (max_depth is None or depth <= max_depth):
                 emit(size, entry.path)
         emit(sizes[target], target)
+
+    try:
+        for (shown, target), kind in zip(arguments, kinds, strict=True):
+            report(shown, target, is_file=kind is PathKind.FILE)
     except StorageError as exc:
         _die('du', exc)
 

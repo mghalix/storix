@@ -34,7 +34,7 @@ class RawStat:
 
     Port-level DTO: constructed by backends from trusted OS/SDK data and
     shaped by the core into the user-facing :class:`FileProperties`.
-    Deliberately a plain dataclass rather than a pydantic model — it crosses
+    Deliberately a plain dataclass rather than a pydantic model: it crosses
     the port on every stat call and validating trusted data buys nothing.
     """
 
@@ -170,8 +170,9 @@ class Capabilities:
 class StorixBaseModel(BaseModel):
     """Base model for storix user-facing data models."""
 
-    # TODO(pydantic): json_encoders is deprecated in pydantic v2 — replace
-    # with field_serializer/model_serializer during the 0.2.0 refactor.
+    # json_encoders is deprecated in pydantic v2. Replacing it means a
+    # field_serializer per serialized type, so it stays until pydantic
+    # removes it or a model needs per-field control.
     model_config: ClassVar[ConfigDict] = ConfigDict(
         from_attributes=True,
         validate_assignment=True,
