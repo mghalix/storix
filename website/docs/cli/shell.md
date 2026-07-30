@@ -34,6 +34,9 @@ Completion sources a live listing, so an active
 that is the difference between a prompt that feels local and one that pauses on
 every Tab.
 
+Tab on a word holding a wildcard expands the pattern instead of completing it,
+which is [below](#expanding-on-tab).
+
 ## Glob expansion
 
 Patterns typed at the prompt are expanded against the session before the
@@ -87,6 +90,35 @@ names a file being written rather than one to be found:
 ```console
 / ❯ ls -l > /listing*.txt      # writes /listing*.txt
 ```
+
+### Expanding on Tab
+
+Tab on a pattern expands it on the line, so the names are on screen before
+anything runs:
+
+```console
+/ ❯ cat *.md          # press Tab
+/ ❯ cat a.md notes.md
+```
+
+The names are written at the depth the pattern was: a relative pattern expands
+to relative names, so `*.md` stays short however deep the cwd is, and only a
+pattern written absolute expands to absolute paths. Where a name needs escaping
+it gets it, so the line still tokenizes back to the same names when it runs:
+
+```console
+/ ❯ ls *space*             # press Tab
+/ ❯ ls with\ space.md
+```
+
+A pattern that matches nothing is left exactly as typed and nothing runs, so
+the pattern stays there to be corrected. A protected wildcard is not expanded
+here either, and Tab on a word with no wildcard is the ordinary path completion
+above, unchanged.
+
+This is `zsh`'s behavior, and it is the same matcher the line uses on Enter, so
+it costs the same walk (below) and an already-expanded line has nothing left to
+match when it runs.
 
 !!! warning "A pattern costs a recursive listing"
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import posixpath
 import shlex
 
 from itertools import takewhile
@@ -18,8 +19,9 @@ from typing import TYPE_CHECKING, Final
 import click
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application.current import get_app
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.filters import completion_is_selected
+from prompt_toolkit.filters import Condition, completion_is_selected
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -45,8 +47,9 @@ from .state import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator, Mapping, Sequence
 
+    from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.document import Document
     from prompt_toolkit.key_binding.key_processor import KeyPressEvent
@@ -240,8 +243,25 @@ def _holds_multi_column_menu(container: object) -> bool:
     return False
 
 
+def _cursor_on_pattern() -> bool:
+    """Whether Tab is sitting on a word that expands instead of completing."""
+    document = get_app().current_buffer.document
+    return _pattern_at_cursor(document.text_before_cursor) is not None
+
+
 def _key_bindings(hint: _ExitHint) -> KeyBindings:
-    """Bind completion acceptance and the two-press exit keys.
+    """Bind glob expansion, completion acceptance, and the two exit keys.
+
+    Tab: a pattern is expanded on the line rather than offered as a
+    completion candidate, because the two are different operations.
+    Completion proposes candidates for one word and inserts the one chosen;
+    expansion replaces one word with however many words it matched, which no
+    single candidate can express - a candidate carrying the whole joined list
+    would show one unreadable menu row, and picking a second one would
+    replace the first expansion rather than add to it. That is why zsh
+    expands in its line editor too. The filter is what keeps the ordinary
+    path intact: with no unquoted wildcard under the cursor this binding is
+    inactive and prompt_toolkit's own Tab handles the key.
 
     Enter: prompt_toolkit's default runs the line the moment you press Enter
     on a menu entry, so tab-completing a path and pressing Enter executes a
@@ -257,6 +277,15 @@ def _key_bindings(hint: _ExitHint) -> KeyBindings:
         hint: The shared "press again" state both keys drive.
     """
     bindings = KeyBindings()
+
+    @bindings.add('c-i', filter=Condition(_cursor_on_pattern))
+    def _expand(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
+        # the matching walk runs here rather than in the completion thread
+        # `complete_in_thread` provides, so a pattern over a large tree holds
+        # the prompt for as long as the walk takes; it is the same walk the
+        # line pays on Enter, and moving it off the loop would mean rewriting
+        # the buffer from another thread
+        _expand_on_line(event.current_buffer)
 
     @bindings.add('enter', filter=completion_is_selected)
     def _accept(event: KeyPressEvent) -> None:  # pyright: ignore[reportUnusedFunction]
@@ -758,6 +787,106 @@ def _parse_input(line: str, aliases: dict[str, str]) -> list[str]:
     """
     argv = shlex.split(_mark_quoted(line))
     return expand_alias(argv, aliases) if (argv and aliases) else argv
+
+
+def _last_word(text: str) -> str:
+    """The trailing word of ``text``, exactly as it was typed.
+
+    The extent to replace on the line, which the tokens cannot give: they
+    have already lost the quotes and escapes the buffer still holds. Split on
+    the last space the user did not escape, so a path written with an escaped
+    space stays one word.
+    """
+    for index in range(len(text) - 1, -1, -1):
+        if text[index].isspace() and text[index - 1 : index] != '\\':
+            return text[index + 1 :]
+    return text
+
+
+def _pattern_at_cursor(text: str) -> tuple[str, str] | None:
+    """The word at the cursor and the pattern it holds, or None.
+
+    Returns the word as typed together with the token it tokenizes to, which
+    is the form ``_match`` wants (marks included, as ``_expand_globs`` passes
+    them).
+
+    None means Tab completes instead of expanding, which is every word
+    without an unquoted wildcard, plus three that hold one and are still not
+    patterns: a word carrying a quote (the quotes are what make the wildcard
+    a plain character, and a matcher that never sees them cannot tell), the
+    command name (a wildcard there is a command that does not exist, which
+    Click says better than a matcher can), and an option (a leading ``-`` is
+    an option however it is spelled). The last two are the positions
+    ``_expand_globs`` leaves alone on Enter as well.
+
+    Args:
+        text: The line up to the cursor.
+    """
+    word = _last_word(text)
+    if not word or word.startswith('-') or '"' in word or "'" in word:
+        return None
+    if not text[: len(text) - len(word)].strip():
+        return None
+    try:
+        tokens = shlex.split(_mark_quoted(word))
+    except ValueError:
+        # an unfinished escape is a word still being typed, not a pattern
+        return None
+    if not tokens or not _is_pattern(tokens[0]):
+        return None
+    return word, tokens[0]
+
+
+def _expansion(matches: Sequence[str], pattern: str) -> str:
+    """The text ``matches`` become on the line, at the depth as typed.
+
+    ``_match`` answers in absolute paths, and putting those back on the line
+    would lose what the user chose to write: ``ls *.md`` in a deep directory
+    would grow into a line of full paths for names the cwd already fixes.
+    Only a pattern written absolute expands to absolute names, which is what
+    a shell shows.
+
+    The names are escaped rather than quoted, so one holding a space survives
+    the tokenizer the line goes back through, and a trailing space follows
+    several of them: an expansion to more than one name is finished, where a
+    single one is often a path being completed a component at a time.
+
+    Args:
+        matches: The absolute paths the pattern matched.
+        pattern: The token that matched them, as it was typed.
+    """
+    if pattern.startswith('/'):
+        names = list(matches)
+    else:
+        cwd = str(current_fs().pwd())
+        names = [posixpath.relpath(match, cwd) for match in matches]
+    line = ' '.join(_escape_shell_path(name) for name in names)
+    return f'{line} ' if len(names) > 1 else line
+
+
+def _expand_on_line(buffer: Buffer) -> None:
+    """Replace the pattern at the cursor with what it matches, in place.
+
+    Seeing the names before the line runs is the point: an expansion that
+    only ever happened on Enter leaves the user to trust that ``rm *.tmp``
+    selected what they meant.
+
+    A pattern that matches nothing is left alone, pattern and all, rather
+    than emptied. zsh does the same, and the alternative destroys the one
+    thing the user can correct.
+
+    Args:
+        buffer: The prompt buffer whose line is rewritten.
+    """
+    at_cursor = _pattern_at_cursor(buffer.document.text_before_cursor)
+    if at_cursor is None:
+        return
+    word, pattern = at_cursor
+    matches = _match(pattern)
+    if not matches:
+        return
+    buffer.delete_before_cursor(len(word))
+    buffer.insert_text(_expansion(matches, pattern))
 
 
 def _banner(fs: Storix) -> None:
