@@ -12,6 +12,7 @@ import contextlib
 import io
 import shlex
 
+from itertools import takewhile
 from typing import TYPE_CHECKING, Final
 
 import click
@@ -55,6 +56,21 @@ if TYPE_CHECKING:
 
 
 _MAX_CWD = 30
+
+_WILDCARDS: Final[str] = '*?'
+"""The glob metacharacters a prompt token is scanned for.
+
+``**`` is two of the first; the across-directories meaning of the pair
+comes from the core glob, which is what does the matching."""
+
+_QUOTED: Final[str] = '\x00'
+"""Marks a wildcard the user quoted, so tokenizing cannot lose the quotes.
+
+``shlex.split`` strips quotes, so ``'*.txt'`` and ``*.txt`` reach the
+tokens as one string and a pattern that was protected is indistinguishable
+from one that was meant. Marking the protected wildcards before the split
+and dropping the marks after keeps the two apart without a second
+tokenizer. A control character because no prompt line can contain one."""
 
 _BUILTINS: dict[str, str] = {
     'clear': 'clear the screen',
@@ -615,9 +631,132 @@ def _strip_padding(output: bytes) -> bytes:
     return stripped.encode('utf-8')
 
 
+def _mark_quoted(line: str) -> str:
+    """Mark every quoted or escaped wildcard in ``line`` as a literal.
+
+    Runs before ``shlex.split`` because the split is where the quotes go:
+    the scan tracks only quote and escape state, which is all that decides
+    whether a wildcard was protected, and leaves the tokenizing to shlex.
+
+    Args:
+        line: The line as typed.
+    """
+    marked: list[str] = []
+    quote = ''
+    escaped = False
+    for char in line:
+        if (escaped or quote) and char in _WILDCARDS:
+            marked.append(_QUOTED)
+        if escaped:
+            escaped = False
+        elif char == '\\' and quote != "'":
+            escaped = True
+        elif quote:
+            quote = '' if char == quote else quote
+        elif char in '\'"':
+            quote = char
+        marked.append(char)
+    return ''.join(marked)
+
+
+def _unmark(token: str) -> str:
+    """Drop the literal marks, leaving the token as it was written."""
+    return token.replace(_QUOTED, '')
+
+
+def _is_pattern(token: str) -> bool:
+    """Whether ``token`` holds a wildcard that was not quoted."""
+    return any(
+        char in _WILDCARDS and token[index - 1 : index] != _QUOTED
+        for index, char in enumerate(token)
+    )
+
+
+def _match(pattern: str) -> list[str]:
+    """Match ``pattern`` against the session, as sorted absolute paths.
+
+    The leading wildcard-free segments become the glob's base rather than
+    part of the pattern it walks: an absolute pattern is matched against a
+    path relative to that base and so could never match from the cwd, and
+    ``sub/*.md`` walks ``sub`` instead of every sibling of it.
+
+    Hidden entries join the candidates only when the pattern's last segment
+    asks for them with a leading dot, which is the pathlib and shell rule.
+
+    The core glob walks the whole subtree below the base and tests every
+    entry, so a shallow pattern still costs a full recursive listing. A
+    bounded walk belongs in that glob, where every caller gets it, rather
+    than in a second matcher here.
+
+    Args:
+        pattern: One prompt token, known to hold an unquoted wildcard.
+
+    Returns:
+        The matching paths in sorted order, empty when nothing matched.
+    """
+    segments = pattern.split('/')
+    fixed = list(takewhile(lambda segment: not _is_pattern(segment), segments))
+    base = '/'.join(fixed) or ('/' if pattern.startswith('/') else None)
+    tail = '/'.join(segments[len(fixed) :])
+    try:
+        matches = current_fs().glob(
+            tail, base, all=tail.rpartition('/')[2].startswith('.')
+        )
+        return sorted(str(path) for path in matches)
+    except StorageError:
+        # a base that is not there is a pattern matching nothing rather than
+        # a line that failed, which is what a shell reports for `nosuch/*`
+        return []
+
+
+def _expand_globs(argv: list[str]) -> list[str]:
+    """Replace the glob patterns in ``argv`` with what they match.
+
+    The outer shell cannot do this: the paths are in the backend, so a
+    pattern typed at the prompt reaches the command untouched and the
+    command reports a path that never existed. Expanding the whole line here
+    instead of per command is what makes it uniform, and is where a shell
+    does it too.
+
+    The command name and any option token are left alone, because a pattern
+    is only a pattern in a path position: a wildcard in the command name is
+    a command that does not exist, which Click says better than a matcher
+    can, and a leading ``-`` is an option however it is spelled. A redirect
+    target is already split off by the time this runs and stays literal for
+    the same reason: it names a file being written, not one to be found.
+
+    Args:
+        argv: The tokenized line, with any redirect already split off.
+
+    Returns:
+        The line with each pattern replaced by its matches in argument
+        order, and every quoted wildcard restored as a plain character.
+
+    Raises:
+        ValueError: If a pattern matches nothing.
+    """
+    if not argv:
+        return argv
+    expanded = [_unmark(argv[0])]
+    for token in argv[1:]:
+        if token.startswith('-') or not _is_pattern(token):
+            expanded.append(_unmark(token))
+            continue
+        matches = _match(token)
+        if not matches:
+            msg = f'no matches: {token}'
+            raise ValueError(msg)
+        expanded.extend(matches)
+    return expanded
+
+
 def _parse_input(line: str, aliases: dict[str, str]) -> list[str]:
-    """Parse a prompt line into tokenized argv, expanding aliases if defined."""
-    argv = shlex.split(line)
+    """Parse a prompt line into tokenized argv, expanding aliases if defined.
+
+    The tokens carry the literal marks ``_mark_quoted`` left, which
+    ``_expand_globs`` reads and removes.
+    """
+    argv = shlex.split(_mark_quoted(line))
     return expand_alias(argv, aliases) if (argv and aliases) else argv
 
 
@@ -712,6 +851,17 @@ def _run_line(command: click.Command, line: str, aliases: dict[str, str]) -> boo
     if not argv:
         console.print('[red]parse error: redirect needs a command[/red]')
         return True
+
+    try:
+        argv = _expand_globs(argv)
+    except ValueError as exc:
+        # nothing runs on an unmatched pattern: the command could be `rm`,
+        # and handing it the pattern would either report a path that never
+        # existed or address a literal `*` object
+        console.print(f'[red]{exc}[/red]')
+        return True
+    if redirect is not None:
+        redirect = _unmark(redirect)
 
     name = argv[0]
     if name in {'exit', 'quit'}:
