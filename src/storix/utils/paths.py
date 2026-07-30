@@ -20,7 +20,7 @@ def is_file_approx(p: StrPathLike) -> bool:
     if target.named_as_directory:
         return False
 
-    # if it has a suffix (e.g. ".txt", ".json"), we assume it's a file.
+    # a suffix (.txt, .json) is taken as a file
     return bool(target.suffix)
 
 

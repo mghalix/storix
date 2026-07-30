@@ -530,6 +530,31 @@ Note: much of the existing corpus (README, ADRs, docstrings) predates this rule
 and still uses em-dashes and en-dashes. Follow ASCII-only in new content, and
 migrate existing text opportunistically or in a dedicated pass.
 
+### Comments and docstrings are permanent project artifacts
+
+They are read by contributors who were not there when the code was written, so
+they are held to the standard the pull request body is (see "Pull request body:
+authorship and tone"), for the same reason.
+
+- No first person. Not `we assume`, `our writes`, `I chose`. State the fact:
+  `a suffix is taken as a file`.
+- Never mention agents, AI, prompts, sessions, tooling modes, or personal
+  shorthand. A marker naming the process that produced a line means nothing to
+  the next reader and dates the code.
+- Explain why, not what. `# bump the counter` beside `counter += 1` is noise; a
+  comment earns its place by recording a constraint, a tradeoff, a defect it
+  avoids, or a reason the obvious approach is wrong.
+- A deliberate shortcut is worth a comment when it has a known ceiling. Name
+  the ceiling and what would lift it, in plain prose, with no marker prefix.
+- `TODO` names a subject and a condition, not an aspiration. `TODO: fix later`
+  and `TODO: override in cloud backends` are noise. Either write what the
+  constraint actually is and what would change it, or make it a documented
+  limitation in the docstring where a user will see it.
+- No commented-out code. Delete it; git remembers.
+
+Existing text that predates a rule is migrated opportunistically or in a
+dedicated pass, as with ASCII-only above.
+
 ## Typing and docstrings
 
 House style on top of what ruff enforces. Match it in new code.
