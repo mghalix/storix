@@ -17,7 +17,8 @@ import storix.cli as cli_entry
 
 from storix import Storix
 from storix.backends import MemoryBackend
-from storix.cli import app as cli
+from storix.cli import app as cli, listing
+from storix.cli.commands import navigate, read, transfer, write
 from storix.cli.state import reset_session
 from storix.constants import DEFAULT_SOURCE_READ_SIZE
 
@@ -75,6 +76,76 @@ def test_entrypoint_does_not_mask_application_import_errors(monkeypatch):
         cli_entry.main()
 
     assert exc_info.value.name == 'application_dependency'
+
+
+def test_every_command_stays_registered():
+    """Given the command set sx offers, when the app is assembled from the
+    command modules, then every name is still registered, in the same order.
+
+    Spelled out rather than derived, so a module dropped from
+    `commands/__init__.py` fails here instead of quietly shrinking `sx`.
+    """
+    from typer.main import get_command
+
+    registered = list(get_command(cli.app).commands)
+
+    assert registered == [
+        'ls',
+        'pwd',
+        'cd',
+        'tree',
+        'find',
+        'exists',
+        'mkdir',
+        'touch',
+        'echo',
+        'edit',
+        'rm',
+        'rmdir',
+        'cp',
+        'mv',
+        'cat',
+        'stat',
+        'du',
+        'url',
+        'pull',
+        'push',
+        'whereami',
+        'provider',  # the hidden alias for whereami
+        'provision',
+        'shell',
+        'update',
+        'install',
+        'uninstall',
+        'doctor',
+        'config',
+    ]
+
+
+def test_help_panels_appear_in_registration_order():
+    """Given panels that open where their first command registers,
+    When sx renders its help,
+    Then they appear in the order `commands/__init__.py` imports the modules.
+
+    That import order is load bearing rather than incidental: reordering
+    those lines reorders this help (ADR 0034 D1).
+    """
+    result = run('--help')
+
+    panels = re.findall(r'╭─ (.+?) ─+╮', result.stdout)
+
+    assert panels == [
+        'Options',
+        'Inspect',
+        'Connection',
+        'Profile and overrides',
+        'Session',
+        'Navigate',
+        'Write',
+        'Read',
+        'Transfer',
+        'Session and setup',
+    ]
 
 
 def test_mkdir_touch_ls_round_trip():
@@ -251,7 +322,7 @@ def test_tree_streams_lines_while_walking(monkeypatch):
         def print(self, *args, **kwargs):
             events.append(('print', str(args[0]) if args else ''))
 
-    monkeypatch.setattr(cli, 'console', RecordingConsole())
+    monkeypatch.setattr(navigate, 'console', RecordingConsole())
     events.clear()
 
     # When tree renders the whole hierarchy
@@ -281,7 +352,7 @@ def test_find_streams_lines_while_walking(monkeypatch):
         def print(self, *args, **kwargs):
             events.append(('print', str(args[0]) if args else ''))
 
-    monkeypatch.setattr(cli, 'console', RecordingConsole())
+    monkeypatch.setattr(navigate, 'console', RecordingConsole())
     events.clear()
 
     assert run('find', '/').exit_code == 0
@@ -726,14 +797,15 @@ def test_ls_batches_the_long_listing_stats_across_every_argument(monkeypatch):
     Then it fetches them in one batch for all of them, not one batch each."""
     _mixed_arguments()
     batches: list[int] = []
-    real_stat_all = cli.stat_all
+    real_stat_all = navigate.stat_all
 
     def counting_stat_all(fs, paths):
         batched = list(paths)
         batches.append(len(batched))
         return real_stat_all(fs, batched)
 
-    monkeypatch.setattr(cli, 'stat_all', counting_stat_all)
+    monkeypatch.setattr(navigate, 'stat_all', counting_stat_all)
+    monkeypatch.setattr(listing, 'stat_all', counting_stat_all)
 
     result = run('ls', '-l', '/d1', '/d2')
 
@@ -751,14 +823,15 @@ def test_ls_batches_the_folder_glyph_lookups_across_every_argument(monkeypatch):
 
     load_prefs.cache_clear()
     batches: list[list[str]] = []
-    real_concurrent = cli.concurrent
+    real_concurrent = navigate.concurrent
 
     def counting_concurrent(thunks, **kwargs):
         collected = list(thunks)
         batches.append([thunk.func.__name__ for thunk in collected])
         return real_concurrent(collected, **kwargs)
 
-    monkeypatch.setattr(cli, 'concurrent', counting_concurrent)
+    monkeypatch.setattr(navigate, 'concurrent', counting_concurrent)
+    monkeypatch.setattr(listing, 'concurrent', counting_concurrent)
 
     result = run('ls', '/d1', '/d2')
 
@@ -972,7 +1045,7 @@ def test_echo_n_marks_the_open_line_on_a_terminal_but_not_when_captured():
     a bare closing newline would have hidden.
     """
     with tty_stdout() as terminal:
-        cli.echo('hi', None, no_newline=True)
+        write.echo('hi', None, no_newline=True)
 
     assert _visible(terminal.received()) == 'hi%\n'
     assert run('echo', '-n', 'hi').stdout_bytes == b'hi'  # captured stays exact
@@ -984,7 +1057,7 @@ def test_echo_leaves_a_newline_terminated_line_unmarked():
     The data ended its own line, so there is nothing to report.
     """
     with tty_stdout() as terminal:
-        cli.echo('hi', None)
+        write.echo('hi', None)
 
     assert terminal.received() == 'hi\n'
 
@@ -1000,7 +1073,7 @@ def test_the_open_line_mark_is_styled_rather_than_a_bare_character(monkeypatch):
     monkeypatch.setenv('TERM', 'xterm-256color')
 
     with tty_stdout() as terminal:
-        cli.echo('hi', None, no_newline=True)
+        write.echo('hi', None, no_newline=True)
 
     assert '\x1b[7m' in terminal.received()
 
@@ -1022,7 +1095,7 @@ def test_echo_marks_a_pipe_by_its_own_last_byte(
     monkeypatch.setattr(sys, 'stdin', _StdinPipe(piped))
 
     with tty_stdout() as terminal:
-        cli.echo(None, None, no_newline=no_newline)
+        write.echo(None, None, no_newline=no_newline)
 
     assert _visible(terminal.received()) == expected
 
@@ -1036,7 +1109,7 @@ def test_cat_marks_a_file_that_ends_mid_line():
     run('echo', '-n', 'hi', '-f', '/open.txt')
 
     with tty_stdout() as terminal:
-        cli.cat(['/open.txt'])
+        read.cat(['/open.txt'])
 
     assert _visible(terminal.received()) == 'hi%\n'
     assert run('cat', '/open.txt').stdout_bytes == b'hi'  # captured stays exact
@@ -1047,7 +1120,7 @@ def test_cat_leaves_a_newline_terminated_file_unmarked():
     run('echo', 'hi', '-f', '/clean.txt')
 
     with tty_stdout() as terminal:
-        cli.cat(['/clean.txt'])
+        read.cat(['/clean.txt'])
 
     assert terminal.received() == 'hi\n'
 
@@ -1352,7 +1425,7 @@ def test_transfer_summary_counts_directories(transfer_session):
 
 
 def test_local_completions_space_escaping(monkeypatch, tmp_path):
-    from storix.cli.shell import _get_local_completions
+    from storix.cli.shell.completion import _get_local_completions
 
     monkeypatch.setattr('pathlib.Path.cwd', lambda: tmp_path)
     (tmp_path / 'Black Bird').mkdir()
@@ -1390,7 +1463,8 @@ def test_escaped_name_round_trips_to_the_command(name):
     detail rather than the contract, which is that a completed name names
     the file it came from.
     """
-    from storix.cli.shell import _escape_shell_path, _expand_globs, _parse_input
+    from storix.cli.shell.globbing import _expand_globs
+    from storix.cli.shell.parsing import _escape_shell_path, _parse_input
 
     line = f'cat {_escape_shell_path(name)}'
 
@@ -1400,7 +1474,7 @@ def test_escaped_name_round_trips_to_the_command(name):
 def test_escaping_backslashes_each_character_a_shell_would_read_as_syntax():
     """Given names carrying a space, a wildcard and a literal backslash, when
     they are escaped, then each of those characters gains a backslash."""
-    from storix.cli.shell import _escape_shell_path
+    from storix.cli.shell.parsing import _escape_shell_path
 
     assert _escape_shell_path('Black Bird') == 'Black\\ Bird'
     assert _escape_shell_path('report*.md') == 'report\\*.md'
@@ -1410,7 +1484,7 @@ def test_escaping_backslashes_each_character_a_shell_would_read_as_syntax():
 def test_escaping_leaves_non_ascii_names_as_they_are():
     """Given a name of non-ascii characters, when it is escaped, then it is
     unchanged, because no tokenizer or glob reads them as syntax."""
-    from storix.cli.shell import _escape_shell_path
+    from storix.cli.shell.parsing import _escape_shell_path
 
     assert _escape_shell_path('caf\xe9-\U0001f4c1.txt') == 'caf\xe9-\U0001f4c1.txt'
 
@@ -1422,7 +1496,9 @@ def test_completion_offers_a_wildcard_name_that_reaches_the_command_intact():
     The sibling exists so the assertion means something: an unescaped
     ``report*.md`` would expand to both.
     """
-    from storix.cli.shell import _expand_globs, _get_remote_completions, _parse_input
+    from storix.cli.shell.completion import _get_remote_completions
+    from storix.cli.shell.globbing import _expand_globs
+    from storix.cli.shell.parsing import _parse_input
 
     run('touch', '/report*.md', '/report-final.md')
 
@@ -1507,7 +1583,7 @@ def test_push_and_pull_and_legacy_aliases(tmp_path):
 
 
 def test_completion_context_parsing():
-    from storix.cli.shell import _parse_completion_context
+    from storix.cli.shell.parsing import _parse_completion_context
 
     # command-name position
     assert _parse_completion_context('push') == ('push', 0, 'push')
@@ -1533,9 +1609,9 @@ def test_shell_help_is_derived_from_the_registered_commands(capsys):
     learned about `find`."""
     from typer.main import get_command
 
-    from storix.cli import shell
+    from storix.cli.shell import loop
 
-    shell._help(get_command(cli.app).commands)
+    loop._help(get_command(cli.app).commands)
     listed = capsys.readouterr().out
 
     assert 'provider' not in listed  # hidden deprecated alias for whereami
@@ -1544,14 +1620,14 @@ def test_shell_help_is_derived_from_the_registered_commands(capsys):
 
 
 def test_shell_history_persists_between_sessions(tmp_path, monkeypatch):
-    from storix.cli import shell
+    from storix.cli.shell import loop
 
     monkeypatch.setenv('XDG_CONFIG_HOME', str(tmp_path))
 
-    history = shell._history()
+    history = loop._history()
     history.append_string('pwd')
 
-    assert 'pwd' in list(shell._history().load_history_strings())
+    assert 'pwd' in list(loop._history().load_history_strings())
 
 
 def test_push_pull_completion_side(monkeypatch):
@@ -1559,7 +1635,7 @@ def test_push_pull_completion_side(monkeypatch):
     from prompt_toolkit.completion import CompleteEvent, Completion
     from prompt_toolkit.document import Document
 
-    from storix.cli import shell
+    from storix.cli.shell import completion
 
     def fake_local(word):
         yield Completion('LOCAL')
@@ -1567,10 +1643,10 @@ def test_push_pull_completion_side(monkeypatch):
     def fake_remote(word):
         yield Completion('REMOTE')
 
-    monkeypatch.setattr(shell, '_get_local_completions', fake_local)
-    monkeypatch.setattr(shell, '_get_remote_completions', fake_remote)
+    monkeypatch.setattr(completion, '_get_local_completions', fake_local)
+    monkeypatch.setattr(completion, '_get_remote_completions', fake_remote)
 
-    completer = shell._ShellCompleter({'push': '', 'pull': ''})
+    completer = completion._ShellCompleter({'push': '', 'pull': ''})
 
     def side(text: str) -> str | None:
         doc = Document(text, len(text))
@@ -1673,7 +1749,7 @@ def test_transfer_progress_totals_interleaved_events(monkeypatch):
         def update(self, task_id, *, completed):
             updates.append(completed)
 
-    monkeypatch.setattr(cli, 'Progress', FakeProgress)
+    monkeypatch.setattr(transfer, 'Progress', FakeProgress)
 
     # Given two files streaming through one progress session
     fs = Storix(MemoryBackend())
@@ -1681,7 +1757,7 @@ def test_transfer_progress_totals_interleaved_events(monkeypatch):
     fs.echo('bbb', '/b.bin')
 
     # When their per-chunk events interleave (round-robin, 1-byte chunks)
-    with cli._transfer_progress(fs, 'batch', 8) as obs:
+    with transfer._transfer_progress(fs, 'batch', 8) as obs:
         streams = [
             obs.stream('/a.bin', chunk_size=1),
             obs.stream('/b.bin', chunk_size=1),
@@ -1796,7 +1872,7 @@ def test_stopped_pull_reports_130_and_leaves_no_partial_files(tmp_path, monkeypa
         stop.set()
         yield stop
 
-    monkeypatch.setattr(cli, '_cancellable', already_stopped)
+    monkeypatch.setattr(transfer, '_cancellable', already_stopped)
     out = tmp_path / 'pulled'
     result = run('pull', '/d', str(out))
 
@@ -1821,7 +1897,7 @@ def test_stopped_push_reports_130(tmp_path, monkeypatch):
         stop.set()
         yield stop
 
-    monkeypatch.setattr(cli, '_cancellable', already_stopped)
+    monkeypatch.setattr(transfer, '_cancellable', already_stopped)
     result = run('push', str(source), '/dst')
 
     assert result.exit_code == 130
@@ -2286,12 +2362,12 @@ class _ScriptedPrompt:
 
 
 def _run_shell_over(monkeypatch, fs, script) -> None:
-    from storix.cli import shell
+    from storix.cli.shell import loop
 
     monkeypatch.setattr(
-        shell, 'PromptSession', lambda **kwargs: _ScriptedPrompt(script, **kwargs)
+        loop, 'PromptSession', lambda **kwargs: _ScriptedPrompt(script, **kwargs)
     )
-    shell.start_shell(fs)
+    loop.start_shell(fs)
 
 
 def _run_shell(monkeypatch, script) -> None:
@@ -2355,7 +2431,7 @@ def exit_keys():
     coroutine a test armed and did not fire: an un-awaited one is collected
     later and reported against whichever test happens to be running then.
     """
-    from storix.cli.shell import _ExitHint, _key_bindings
+    from storix.cli.shell.keys import _ExitHint, _key_bindings
 
     session = _FakeSession()
     hint = _ExitHint(session)
@@ -2478,9 +2554,9 @@ def test_a_later_press_supersedes_an_earlier_expiry(exit_keys, monkeypatch):
     """
     import asyncio
 
-    from storix.cli import shell
+    from storix.cli.shell import keys
 
-    monkeypatch.setattr(shell, '_HINT_SECONDS', 0)
+    monkeypatch.setattr(keys, '_HINT_SECONDS', 0)
     session, _hint, handlers = exit_keys
     # a different key re-arms; the same key twice would exit instead
     handlers['c-c'](_FakeEvent(session.app))
@@ -2497,9 +2573,9 @@ def test_an_expiry_that_is_still_the_live_one_clears_the_hint(exit_keys, monkeyp
     """Given no second press, when the expiry fires, then the row goes away."""
     import asyncio
 
-    from storix.cli import shell
+    from storix.cli.shell import keys
 
-    monkeypatch.setattr(shell, '_HINT_SECONDS', 0)
+    monkeypatch.setattr(keys, '_HINT_SECONDS', 0)
     session, _hint, handlers = exit_keys
     handlers['c-c'](_FakeEvent(session.app))
 
@@ -2521,7 +2597,7 @@ def test_an_expiry_that_is_still_the_live_one_clears_the_hint(exit_keys, monkeyp
     ],
 )
 def test_completion_case_preference(mode, fragment, expected, prefs_from):
-    from storix.cli.shell import _completion_matches
+    from storix.cli.shell.completion import _completion_matches
 
     prefs_from(f'[cli]\ncompletion_case = "{mode}"\n')
 
@@ -2569,7 +2645,7 @@ def test_cd_dash_before_any_move_stays_where_the_session_opened():
 def test_split_redirect(line, expected):
     import shlex
 
-    from storix.cli.shell import _split_redirect
+    from storix.cli.shell.parsing import _split_redirect
 
     assert _split_redirect(shlex.split(line)) == expected
 
@@ -2578,7 +2654,7 @@ def test_split_redirect(line, expected):
 def test_split_redirect_rejects_a_target_it_cannot_name(line):
     import shlex
 
-    from storix.cli.shell import _split_redirect
+    from storix.cli.shell.parsing import _split_redirect
 
     with pytest.raises(ValueError, match='redirect'):
         _split_redirect(shlex.split(line))
@@ -2709,7 +2785,7 @@ def test_a_token_without_a_wildcard_reaches_the_command_as_typed():
     Relative stays relative: expansion selects paths, it does not resolve
     them, which the command and the core already do.
     """
-    from storix.cli.shell import _expand_globs
+    from storix.cli.shell.globbing import _expand_globs
 
     argv = ['cat', 'a.txt', 'sub/one.md']
 
@@ -2723,7 +2799,7 @@ def test_an_option_token_is_left_alone(globbable):
     A leading ``-`` is an option however it is spelled, so it is not a path
     position even when it holds a wildcard.
     """
-    from storix.cli.shell import _expand_globs
+    from storix.cli.shell.globbing import _expand_globs
 
     cli.use_fs(globbable)
 
@@ -2756,7 +2832,8 @@ def test_a_quoted_wildcard_is_a_plain_character(line, globbable):
     ``shlex.split`` strips the quotes, so the protected wildcards are marked
     before the split for the two spellings to stay distinguishable.
     """
-    from storix.cli.shell import _expand_globs, _parse_input
+    from storix.cli.shell.globbing import _expand_globs
+    from storix.cli.shell.parsing import _parse_input
 
     cli.use_fs(globbable)
 
@@ -2805,7 +2882,7 @@ def test_an_absolute_pattern_matches_from_the_directory_it_names(globbable):
     walks, so an absolute one is unmatchable until that directory comes from
     the pattern itself.
     """
-    from storix.cli.shell import _expand_globs
+    from storix.cli.shell.globbing import _expand_globs
 
     globbable.cd('/sub')
     cli.use_fs(globbable)
@@ -2827,7 +2904,7 @@ def _press_tab(line: str) -> str:
     from prompt_toolkit.buffer import Buffer
     from prompt_toolkit.document import Document
 
-    from storix.cli.shell import _expand_on_line
+    from storix.cli.shell.globbing import _expand_on_line
 
     buffer = Buffer(document=Document(line, len(line)))
     _expand_on_line(buffer)
@@ -2904,7 +2981,8 @@ def test_tab_leaves_a_word_without_a_wildcard_to_the_completer(globbable):
     The binding is conditional so that the completion path is untouched by
     the expansion: a word with no live wildcard is not this key's business.
     """
-    from storix.cli.shell import _get_remote_completions, _pattern_at_cursor
+    from storix.cli.shell.completion import _get_remote_completions
+    from storix.cli.shell.globbing import _pattern_at_cursor
 
     cli.use_fs(globbable)
 
@@ -2920,7 +2998,7 @@ def test_tab_binds_the_expansion_to_a_filtered_key():
     """
     from prompt_toolkit.filters import Condition
 
-    from storix.cli.shell import _ExitHint, _key_bindings
+    from storix.cli.shell.keys import _ExitHint, _key_bindings
 
     bindings = [
         binding
@@ -2939,7 +3017,7 @@ def test_an_expanded_name_with_a_space_survives_a_re_parse(globbable):
     An expansion that is not re-parseable would split the name in two the
     moment the line runs.
     """
-    from storix.cli.shell import _parse_input
+    from storix.cli.shell.parsing import _parse_input
 
     globbable.echo('spaced\n', '/two words.md')
     cli.use_fs(globbable)
@@ -3121,14 +3199,14 @@ def test_edit_uses_the_configured_editor(prefs_from, monkeypatch, tmp_path):
 def test_cd_dash_marks_the_destination_with_the_jump_glyph(monkeypatch):
     """zoxide's convention: the arrow says "you were moved here", so the
     line does not read as one more piece of output."""
-    from storix.cli import app as app_module
+    from storix.cli.commands import navigate as navigate_module
     from storix.cli.icons import Icons
 
     run('mkdir', '/a')
     run('cd', '/a')
-    monkeypatch.setattr(app_module, 'icons_enabled', lambda: True)
+    monkeypatch.setattr(navigate_module, 'icons_enabled', lambda: True)
     monkeypatch.setattr(
-        type(app_module.console), 'is_terminal', property(lambda _: True)
+        type(navigate_module.console), 'is_terminal', property(lambda _: True)
     )
 
     out = run('cd', '-').stdout
@@ -3158,7 +3236,7 @@ def test_the_prompt_paints_no_background_of_its_own(style_str):
     from prompt_toolkit.styles import merge_styles
     from prompt_toolkit.styles.defaults import default_ui_style
 
-    from storix.cli.shell import _MENU_STYLE
+    from storix.cli.shell.layout import _MENU_STYLE
 
     merged = merge_styles([default_ui_style(), _MENU_STYLE])
 
@@ -3174,7 +3252,7 @@ def test_a_menu_entry_keeps_a_readable_foreground():
     from prompt_toolkit.styles import merge_styles
     from prompt_toolkit.styles.defaults import default_ui_style
 
-    from storix.cli.shell import _MENU_STYLE
+    from storix.cli.shell.layout import _MENU_STYLE
 
     merged = merge_styles([default_ui_style(), _MENU_STYLE])
 
@@ -3196,7 +3274,7 @@ def test_the_selected_entry_inverts_rather_than_choosing_colors():
     from prompt_toolkit.styles import merge_styles
     from prompt_toolkit.styles.defaults import default_ui_style
 
-    from storix.cli.shell import _MENU_STYLE
+    from storix.cli.shell.layout import _MENU_STYLE
 
     merged = merge_styles([default_ui_style(), _MENU_STYLE])
 
@@ -3216,7 +3294,7 @@ def test_the_completion_menu_is_a_grid_not_a_column():
     """
     from prompt_toolkit.shortcuts import CompleteStyle
 
-    from storix.cli import shell
+    from storix.cli.shell import loop
 
     captured: dict[str, object] = {}
 
@@ -3230,11 +3308,11 @@ def test_the_completion_menu_is_a_grid_not_a_column():
         def prompt(self, *_args, **_kwargs) -> str:
             raise EOFError
 
-    shell.PromptSession = _Recorder  # type: ignore[misc]
+    loop.PromptSession = _Recorder  # type: ignore[misc]
     try:
-        shell.start_shell(Storix(MemoryBackend()))
+        loop.start_shell(Storix(MemoryBackend()))
     finally:
-        importlib.reload(shell)
+        importlib.reload(loop)
 
     assert captured['complete_style'] is CompleteStyle.MULTI_COLUMN
 
@@ -3246,7 +3324,7 @@ def test_completions_follow_the_order_a_shell_lists_them_in():
     glibc collation under a UTF-8 locale, which coreutils `ls` and a zsh
     completion list both follow, files them by their letters.
     """
-    from storix.cli.shell import _completion_order
+    from storix.cli.shell.completion import _completion_order
 
     names = [
         'azblob.py',
@@ -3269,7 +3347,7 @@ def test_completions_follow_the_order_a_shell_lists_them_in():
 
 def test_completions_still_break_ties_case_insensitively():
     """Given mixed case, when completions sort, then case does not decide."""
-    from storix.cli.shell import _completion_order
+    from storix.cli.shell.completion import _completion_order
 
     assert sorted(['Zebra.txt', 'apple.txt'], key=_completion_order) == [
         'apple.txt',
@@ -3291,7 +3369,7 @@ def test_the_completion_grid_starts_at_the_left_edge():
     from prompt_toolkit.layout.containers import Float, FloatContainer, Window
     from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
 
-    from storix.cli.shell import _left_align_menu, _menu_floats
+    from storix.cli.shell.layout import _left_align_menu, _menu_floats
 
     anchored = Float(content=MultiColumnCompletionsMenu(), xcursor=True, ycursor=True)
     container = FloatContainer(content=Window(), floats=[anchored])
@@ -3312,6 +3390,6 @@ def test_left_aligning_the_menu_tolerates_a_session_without_a_layout():
 
     A cosmetic adjustment must never be what stops the prompt opening.
     """
-    from storix.cli.shell import _left_align_menu
+    from storix.cli.shell.layout import _left_align_menu
 
     _left_align_menu(type('S', (), {})())
