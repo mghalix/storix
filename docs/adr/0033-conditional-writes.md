@@ -142,7 +142,7 @@ data.
 | `MemoryBackend`            | yes                  | yes                |
 | `LocalBackend`             | no (POSIX has no CAS)| yes (`O_EXCL`)     |
 | `S3Backend`, `GcsBackend`, `AzureBlobBackend` | from the service | from the service |
-| `AzureBackend` (ADLS)      | no (not yet wired)   | no (not yet wired) |
+| `AzureBackend` (ADLS)      | yes (`If-Match`)     | yes (`If-None-Match: *`) |
 
 The opendal-backed backends do not hardcode either flag. They read
 `capability().write_with_if_match` and `write_with_if_not_exists` from the
@@ -151,11 +151,19 @@ an assumption about the provider. `MemoryBackend` keys its validator off a
 per-node revision counter rather than a timestamp, so two writes in the same
 clock tick still produce different versions.
 
-`AzureBackend` (ADLS Gen2, the native SDK) accepts the argument so its
-signature conforms to the port, and refuses it through the shared gate rather
-than accepting an argument it would ignore. Wiring a precondition onto the
-flush that completes an ADLS file is follow-up work; Azure Blob accounts have
-it today through the opendal backend.
+`AzureBackend` (ADLS Gen2, the native SDK) writes a file as create, append,
+flush, and carries the precondition on the **create** (`PUT ?resource=file`),
+not on the flush. The create is the request that truncates an occupied path,
+so it is the only one where the comparison and the destructive write are the
+same service operation: a condition on the flush would arbitrate after the
+previous content was already gone, and against an ETag the create had just
+replaced. The SDK expresses both forms as `match_condition` plus `etag`
+(`MatchConditions.IfNotModified` emits `If-Match`,
+`MatchConditions.IfMissing` emits `If-None-Match: *`), and reports a refusal
+as `ResourceModifiedError` or `ResourceExistsError`, which the backend
+translates to `PreconditionFailedError` only when it actually sent a
+condition. `RawStat.version` is the ETag already present on the properties
+response `stat` parses.
 
 ## Performance
 
