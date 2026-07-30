@@ -45,3 +45,17 @@ def test_path_kind_str_matches_enum():
     from storix.types import PathKindStr
 
     assert set(get_args(PathKindStr.__value__)) == {kind.value for kind in PathKind}
+
+
+def test_a_trailing_separator_names_a_directory_whatever_the_suffix() -> None:
+    """Given 'a.txt/', when its shape is judged, then it is a directory.
+
+    The separator is the stronger signal: the check used to run after the
+    argument became a pure path, which normalizes the separator away, so it
+    never fired and a suffix decided on its own.
+    """
+    from storix.utils.paths import is_dir_approx, is_file_approx
+
+    assert is_file_approx('a.txt/') is False
+    assert is_dir_approx('a.txt/') is True
+    assert is_file_approx('a.txt') is True

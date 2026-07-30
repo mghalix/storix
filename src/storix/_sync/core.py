@@ -148,6 +148,23 @@ def _glob_to_regex(pattern: str) -> re.Pattern[str]:
     return re.compile('(?s:' + ''.join(parts) + ')')
 
 
+def _named_as_directory(path: StrPathLike) -> str | None:
+    """The path as written, when it was written as a directory.
+
+    A trailing separator is a shell's way of saying "this name is a
+    directory", and it is the one piece of intent that resolving a path
+    destroys: ``PurePosixPath('nodir/')`` is ``PurePosixPath('nodir')``, so
+    the question has to be asked of the argument as it arrived. The text is
+    returned rather than a flag because an error about it should quote what
+    was typed, separator and all.
+
+    Args:
+        path: The argument as the caller wrote it.
+    """
+    written = os.fspath(path)
+    return written if written.endswith(('/', os.sep)) else None
+
+
 class Storix:
     """A unix-flavored filesystem session over a storage backend.
 
@@ -1338,8 +1355,8 @@ class Storix:
         when it is an existing directory); multiple sources require an
         existing directory destination.
         """
-        sources, dst = self._split_destination('mv', source, paths)
-        targets = self._plan_destinations(sources, dst)
+        sources, dst, into_dir = self._split_destination('mv', source, paths)
+        targets = self._plan_destinations(sources, dst, named_as_directory=into_dir)
         concurrent(
             partial(self._backend.move, src, target)
             for src, target in zip(sources, targets, strict=True)
@@ -1353,12 +1370,12 @@ class Storix:
         Copying a directory requires ``recursive=True`` (cp -r), which
         overlays into existing destination directories like unix does.
         """
-        sources, dst = self._split_destination('cp', source, paths)
+        sources, dst, into_dir = self._split_destination('cp', source, paths)
         src_stats = concurrent(partial(self._backend.stat, src) for src in sources)
         for src, raw in zip(sources, src_stats, strict=True):
             if raw.kind is PathKind.DIRECTORY and not recursive:
                 raise IsADirectoryError(src)
-        targets = self._plan_destinations(sources, dst)
+        targets = self._plan_destinations(sources, dst, named_as_directory=into_dir)
         concurrent(
             partial(generic.copy_tree, self._backend, src, target)
             if raw.kind is PathKind.DIRECTORY
@@ -1368,23 +1385,62 @@ class Storix:
 
     def _split_destination(
         self, op: str, first: StrPathLike, rest: tuple[StrPathLike, ...]
-    ) -> tuple[list[StorixPath], StorixPath]:
-        """Split unix-style variadic arguments into (sources, destination)."""
+    ) -> tuple[list[StorixPath], StorixPath, str | None]:
+        """Split unix-style variadic arguments into (sources, destination).
+
+        Also reports whether the destination was written with a trailing
+        separator, which asserts "this is a directory" in every shell. That
+        has to be read here, from the argument as given: resolving it builds
+        a ``PurePosixPath``, and normalizing away the separator is the first
+        thing pathlib does. A caller passing a path object has already done
+        that normalization itself, so only a string can carry the assertion.
+
+        Args:
+            op: The operation name, for the error message.
+            first: The first positional argument.
+            rest: The remaining arguments, the last being the destination.
+
+        Returns:
+            The sources, the resolved destination, and the destination as
+            written when it named a directory explicitly (None otherwise),
+            so an error can quote what was typed rather than what it
+            resolved to.
+
+        Raises:
+            TypeError: If no destination was given.
+        """
         if not rest:
             msg = f'{op}() needs a source and a destination: {op}(src, ..., dst)'
             raise TypeError(msg)
         *more, dst = rest
         sources = [self._resolve(p) for p in (first, *more)]
-        return sources, self._resolve(dst)
+        return sources, self._resolve(dst), _named_as_directory(dst)
 
     def _plan_destinations(
-        self, sources: list[StorixPath], dst: StorixPath
+        self,
+        sources: list[StorixPath],
+        dst: StorixPath,
+        *,
+        named_as_directory: str | None = None,
     ) -> list[StorixPath]:
         """Map sources onto final target paths, honoring unix semantics.
 
         An existing directory destination receives the sources *inside*
         it; anything else is a rename target, valid only for a single
         source and requiring an existing parent.
+
+        Args:
+            sources: The resolved sources being moved or copied.
+            dst: The resolved destination.
+            named_as_directory: The destination as written, when it carried
+                a trailing separator. Then it is a directory or it is an
+                error, never a name to create a file under: ``cp a.txt
+                nodir/`` must not leave a file called ``nodir``.
+
+        Raises:
+            NotADirectoryError: If the destination cannot receive the
+                sources: several sources onto a non-directory, or a
+                trailing separator on something that is not a directory.
         """
         try:
             dst_kind = (self._backend.stat(dst)).kind
@@ -1393,6 +1449,13 @@ class Storix:
 
         if dst_kind is PathKind.DIRECTORY:
             return [dst / src.name for src in sources]
+        if named_as_directory is not None:
+            # quote the destination as typed, separator included: 'nodir'
+            # is not what was asked for and reads as a different mistake.
+            # ENOTDIR either way, which is what coreutils reports for both a
+            # missing destination and an existing file
+            msg = f"cannot create '{named_as_directory}': not a directory"
+            raise NotADirectoryError(dst, msg)
         if len(sources) > 1:
             raise NotADirectoryError(dst)
         self._ensure_parent(dst)
