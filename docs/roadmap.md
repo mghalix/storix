@@ -121,6 +121,43 @@ Designed or prototyped, not yet shipped.
 
 ---
 
+## Deferred, with a reason
+
+Decided against for now, with the condition that would change the decision.
+Distinct from "Under consideration": the shape is understood, the sequencing is
+what defers it.
+
+### `sx` package structure comes before more shell grammar
+
+`sx` grew as a subsystem: `cli/app.py` holds every command, `cli/shell.py`
+holds the REPL, its completion, its key bindings, its redirect parsing and its
+glob expansion. Both files now carry several unrelated jobs, and the seams
+between them are function boundaries rather than module boundaries.
+
+The next shell feature to want is command chaining (`&&`, `||`, `;`), so that
+`mkdir a b && rm -rf *.test` is one line. That needs a small amount of shell
+grammar, and grammar is exactly the thing that should not be added to a file
+that already parses redirects in one function and marks quotes in another. A
+line parser wants to be one module with one job: tokenize, honor quoting, split
+on operators, split redirects, and hand back a structure the REPL executes.
+
+So the order is: restructure `sx` into a package whose modules each own one
+concern (commands grouped by area, the line parser, completion, rendering,
+session state), then add chaining inside the parser that restructuring
+creates.
+
+Chaining also needs two things the REPL does not track today: a per-command
+exit status, since `&&` is defined by it, and operator splitting that runs
+before both redirect splitting and quote marking. Pipes (`|`) between `sx`
+commands are explicitly out of scope: that means one command's output feeding
+another's stdin inside one process, which is a different feature with a much
+larger surface.
+
+Revisit when: the CLI restructure has landed, or a user needs chaining badly
+enough to justify grammar in the current layout.
+
+---
+
 ## Under consideration
 
 Ideas that need a concrete use case or design pass before committing.
