@@ -320,18 +320,47 @@ def _key_bindings(hint: _ExitHint) -> KeyBindings:
     return bindings
 
 
+_UNESCAPED_PUNCTUATION: Final[str] = '_@%+=:,./-'
+"""The ASCII punctuation a completed name may carry with no backslash.
+
+The set `shlex.quote` calls safe, which is the punctuation no tokenizer,
+glob, or redirect operator reads as syntax."""
+
+
 def _escape_shell_path(name: str) -> str:
-    """Escape spaces and shell special characters for CLI completion."""
-    return (
-        name.replace(' ', '\\ ')
-        .replace('(', '\\(')
-        .replace(')', '\\)')
-        .replace('[', '\\[')
-        .replace(']', '\\]')
-        .replace("'", "\\'")
-        .replace('"', '\\"')
-        .replace('&', '\\&')
-        .replace('$', '\\$')
+    """Quote one path component so tokenizing the line returns it unchanged.
+
+    The contract is the round trip: `_parse_input` on what this produces
+    yields exactly `name`. That is stated as a rule (backslash every ASCII
+    character that is neither alphanumeric nor `_UNESCAPED_PUNCTUATION`)
+    rather than a list of the characters noticed so far, because a list is
+    silently short until a filename finds the gap. A glob wildcard was one
+    such gap: `report*.md` inserted bare is a pattern over the directory
+    rather than the file that was picked.
+
+    A literal backslash is why this cannot be a chain of replacements. It has
+    to be escaped too, and escaping any other character first makes the
+    backslashes just inserted indistinguishable from the one in the name, so
+    a name carrying both a backslash and a space arrived as two tokens.
+
+    Non-ASCII is left alone. It is syntax to no tokenizer, and a backslash
+    before every accent or emoji only makes the line unreadable.
+
+    Args:
+        name: An entry name, or a POSIX path of them, as the backend or the
+            host filesystem reports it. The `/` separator is safe punctuation
+            and stays unescaped. A Windows host separator never reaches here,
+            because a directory prefix the user typed is passed through as
+            typed rather than escaped.
+
+    Returns:
+        The name as a single shell token.
+    """
+    return ''.join(
+        char
+        if char.isalnum() or not char.isascii() or char in _UNESCAPED_PUNCTUATION
+        else f'\\{char}'
+        for char in name
     )
 
 

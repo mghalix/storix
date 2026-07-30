@@ -1239,9 +1239,7 @@ def test_push_and_pull_paths_with_spaces(tmp_path):
 
 
 def test_local_completions_space_escaping(monkeypatch, tmp_path):
-    from storix.cli.shell import _escape_shell_path, _get_local_completions
-
-    assert _escape_shell_path('Black Bird') == 'Black\\ Bird'
+    from storix.cli.shell import _get_local_completions
 
     monkeypatch.setattr('pathlib.Path.cwd', lambda: tmp_path)
     (tmp_path / 'Black Bird').mkdir()
@@ -1249,6 +1247,77 @@ def test_local_completions_space_escaping(monkeypatch, tmp_path):
     completions = list(_get_local_completions('Bl'))
     assert len(completions) == 1
     assert completions[0].text == 'Black\\ Bird/'
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'report*.md',  # a wildcard is part of this name, not a pattern
+        'who?.txt',
+        'Black Bird',
+        "it's here.txt",
+        'say "hi".txt',
+        'take [1].log',
+        'back\\slash.txt',
+        'weird\\ name.txt',  # a backslash and a space together
+        '-leading-dash.txt',
+        '!$&;|`~^(){}*?',  # nothing but punctuation
+        'tab\there.txt',
+        'caf\xe9 \U0001f4c1.txt',  # an accent and an emoji, escaped or not
+    ],
+)
+def test_escaped_name_round_trips_to_the_command(name):
+    """Given an awkward entry name, when it is escaped for insertion at the
+    prompt, then the command receives the one original name back.
+
+    Asserted on the argv the command is handed, not on the tokens in
+    between: an escaped wildcard stays marked through ``_parse_input`` so
+    the glob step knows not to expand it, and the mark is removed on the
+    way out. Checking the intermediate form would pin an implementation
+    detail rather than the contract, which is that a completed name names
+    the file it came from.
+    """
+    from storix.cli.shell import _escape_shell_path, _expand_globs, _parse_input
+
+    line = f'cat {_escape_shell_path(name)}'
+
+    assert _expand_globs(_parse_input(line, {})) == ['cat', name]
+
+
+def test_escaping_backslashes_each_character_a_shell_would_read_as_syntax():
+    """Given names carrying a space, a wildcard and a literal backslash, when
+    they are escaped, then each of those characters gains a backslash."""
+    from storix.cli.shell import _escape_shell_path
+
+    assert _escape_shell_path('Black Bird') == 'Black\\ Bird'
+    assert _escape_shell_path('report*.md') == 'report\\*.md'
+    assert _escape_shell_path('back\\slash') == 'back\\\\slash'
+
+
+def test_escaping_leaves_non_ascii_names_as_they_are():
+    """Given a name of non-ascii characters, when it is escaped, then it is
+    unchanged, because no tokenizer or glob reads them as syntax."""
+    from storix.cli.shell import _escape_shell_path
+
+    assert _escape_shell_path('caf\xe9-\U0001f4c1.txt') == 'caf\xe9-\U0001f4c1.txt'
+
+
+def test_completion_offers_a_wildcard_name_that_reaches_the_command_intact():
+    """Given a backend file whose name contains a wildcard, when completion
+    offers it, then the command receives that file alone.
+
+    The sibling exists so the assertion means something: an unescaped
+    ``report*.md`` would expand to both.
+    """
+    from storix.cli.shell import _expand_globs, _get_remote_completions, _parse_input
+
+    run('touch', '/report*.md', '/report-final.md')
+
+    offered = [completion.text for completion in _get_remote_completions('rep')]
+
+    assert offered == ['report\\*.md', 'report-final.md']
+    argv = _expand_globs(_parse_input(f'cat {offered[0]}', {}))
+    assert argv == ['cat', 'report*.md']
 
 
 def test_expand_alias_subcommand_expansion():
