@@ -1357,17 +1357,44 @@ def installation_kind() -> str:
     return 'system'
 
 
-def upgrade_command() -> list[str] | None:
-    """The exact command that upgrades this installation, if one is known.
+def upgrade_command(version: str | None = None) -> list[str]:
+    """The exact command that moves this installation to ``version``.
 
-    A uv tool install is upgraded through uv, whose receipt already holds
-    the extras that were requested, so storix keeps no installation state
-    of its own. Anything else gets the pip form, which the caller prints
-    rather than runs.
+    A uv tool install is *reinstalled*, not upgraded. ``uv tool upgrade``
+    refuses to cross an exact version pin, and ``sx install`` writes
+    exactly such a pin into the receipt every time it adds an extra - so
+    for anyone who has ever added a backend, upgrading that way is a
+    permanent no-op. Reinstalling at ``@latest`` crosses the pin by
+    construction, and the receipt's extras (which are the only record of
+    what was asked for) carry forward.
+
+    ``--refresh-package`` invalidates storix's index entry alone rather
+    than the whole cache: PyPI serves the simple index with
+    ``max-age=600``, so a release published in the last ten minutes would
+    otherwise be invisible, and "nothing to upgrade" is indistinguishable
+    from being genuinely current.
+
+    Anything that is not a uv tool install gets the pip form, which the
+    caller prints rather than runs.
+
+    Args:
+        version: The exact version to move to; the newest release if None.
     """
     if _is_uv_tool():
-        return ['uv', 'tool', 'upgrade', 'storix']
-    return [sys.executable, '-m', 'pip', 'install', '--upgrade', 'storix']
+        # cli is what makes sx runnable at all, exactly as sx install treats it
+        extras = ','.join(sorted(installed_extras() | {'cli'}))
+        return [
+            'uv',
+            'tool',
+            'install',
+            '--force',
+            # the `=` form, because `--refresh-package storix storix[...]` reads
+            # as a duplicated word to everyone who has not memorized the flag
+            '--refresh-package=storix',
+            f'storix[{extras}]@{version or "latest"}',
+        ]
+    spec = f'storix=={version}' if version else 'storix'
+    return [sys.executable, '-m', 'pip', 'install', '--upgrade', spec]
 
 
 def install_hint(extra: str) -> str:

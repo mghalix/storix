@@ -60,6 +60,29 @@ def _run(argv: Sequence[str]) -> int:
     return subprocess.run(argv, check=False).returncode  # noqa: S603
 
 
+def _run_quietly(argv: Sequence[str], label: str) -> int:
+    """Run a command behind a spinner, showing its output only on failure.
+
+    ``sx update`` should read as one tool updating itself, not as a wrapper
+    that shells out - the package manager's resolve log is an
+    implementation detail while it is working. It stops being one the
+    moment it fails, so a non-zero exit prints everything, unedited,
+    together with the command that produced it.
+
+    Args:
+        argv: The command to run.
+        label: What to show beside the spinner, in the present tense.
+    """
+    with console.status(f'[cyan]{label}[/cyan]', spinner='dots'):
+        done = subprocess.run(  # noqa: S603
+            argv, check=False, capture_output=True, text=True
+        )
+    if done.returncode != 0:
+        err.print(f'[red]sx: {label} failed[/red]\n[dim]$ {" ".join(argv)}[/dim]')
+        err.print(done.stdout + done.stderr, markup=False, highlight=False)
+    return done.returncode
+
+
 def latest_version() -> str | None:
     """The newest release on PyPI, or None when it cannot be reached."""
     import json
@@ -74,13 +97,28 @@ def latest_version() -> str | None:
 
 
 def update(
+    version: Annotated[
+        str | None,
+        typer.Argument(
+            help='exact version to move to (e.g. 0.5.1); the newest release '
+            'when omitted'
+        ),
+    ] = None,
     *,
     check: Annotated[
         bool,
         typer.Option('--check', help='report current and latest, change nothing'),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option('-v', '--verbose', help="show the package manager's own output"),
+    ] = False,
 ) -> None:
-    """Upgrade storix through the package manager that installed it."""
+    """Upgrade storix through the package manager that installed it.
+
+    With no argument this moves to the newest release. Naming a version
+    moves to exactly that one, which is also how to go back.
+    """
     current = installed_version()
     if check:
         latest = latest_version()
@@ -88,21 +126,78 @@ def update(
             err.print('[yellow]sx: could not reach PyPI to check for updates[/yellow]')
             raise typer.Exit(1)
         console.print(f'installed [cyan]{current}[/cyan]  latest [cyan]{latest}[/cyan]')
-        argv = upgrade_command()
-        if latest != current and argv is not None:
-            console.print(f'[green]run:[/green] {" ".join(argv)}')
+        if latest != current:
+            console.print(f'[green]run:[/green] {" ".join(upgrade_command(version))}')
         return
 
     kind = installation_kind()
-    argv = upgrade_command()
-    if kind != 'uv-tool' or argv is None:
-        manual = ' '.join(argv) if argv else 'pip install --upgrade storix'
+    argv = upgrade_command(version)
+    if kind != 'uv-tool':
+        manual = ' '.join(argv)
         err.print(
             f'[yellow]sx: storix runs from a {kind} install, which sx will not '
             f'modify. Upgrade it the way you installed it:\n  {manual}[/yellow]'
         )
         raise typer.Exit(2)
-    raise typer.Exit(_run(argv))
+
+    target = version or latest_version()
+    if version is None and target == current:
+        console.print(f'already on [cyan]{current}[/cyan], the newest release')
+        raise typer.Exit(0)
+    _warn_if_backwards(current, target)
+    if verbose:
+        raise typer.Exit(_run(argv))
+
+    moving = f'{current} -> {target}' if target else f'from {current}'
+    code = _run_quietly(argv, f'updating storix ({moving})')
+    if code == 0:
+        console.print(f'[green]updated[/green] storix {moving}')
+    raise typer.Exit(code)
+
+
+def _warn_if_backwards(current: str, target: str | None) -> None:
+    """Say so when a named version moves backwards rather than forwards.
+
+    ``update`` reads as forwards, and one command that moves either way is
+    still better than a second command whose only difference is comparing
+    two numbers. Naming the direction is what removes the surprise, and an
+    older storix can reject configuration keys the current one wrote, which
+    is the part worth a warning rather than a silent success.
+
+    Args:
+        current: The installed version.
+        target: The version being moved to, if it is known.
+    """
+    if target is None:
+        return
+    try:
+        backwards = _as_release(target) < _as_release(current)
+    except ValueError:
+        # a version storix cannot order (a local or pre-release spelling):
+        # say nothing rather than guess a direction
+        return
+    if backwards:
+        console.print(f'[yellow]downgrade[/yellow] {current} -> {target}')
+        console.print(
+            '[dim]an older storix may reject configuration keys this one accepts[/dim]'
+        )
+
+
+def _as_release(version: str) -> tuple[int, ...]:
+    """Parse a plain ``MAJOR.MINOR.PATCH`` into comparable parts.
+
+    Args:
+        version: The version string to order.
+
+    Raises:
+        ValueError: If it is not three dot-separated integers, which is
+            every version storix itself publishes (ADR 0021).
+    """
+    parts = version.split('.')
+    if len(parts) != 3:  # noqa: PLR2004 - major.minor.patch, not a tunable
+        msg = f'not a release version: {version}'
+        raise ValueError(msg)
+    return tuple(int(part) for part in parts)
 
 
 def _extras_argument(extras: str) -> list[str]:
