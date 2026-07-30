@@ -184,6 +184,36 @@ existing worktree when it is appropriate. Manage the lifecycle with
 `git worktree prune`. Do not move or delete a registered worktree by hand when a
 `git worktree` command does it.
 
+### Retiring a worktree after its pull request merges
+
+A worktree outlives the change it was created for. The remote deletes the head
+branch on merge, but the local worktree and the local branch survive that, so
+they pile up until a checkout carries a dozen of them for work that shipped
+weeks ago. Removing the worktree and deleting its local branch is part of
+finishing a pull request, not a separate cleanup someone gets to later.
+
+`git fetch --prune` is what makes the remote's deletion visible here. Without
+it a stale remote-tracking ref keeps a merged branch looking live, and nothing
+locally will say otherwise. After pruning, `git worktree list` shows what is
+still registered and `git branch -vv` marks every branch whose upstream is
+gone. Retire each one with `git worktree remove`, never `rm -rf`: deleting the
+directory by hand leaves a registered entry pointing at nothing, which then
+needs `git worktree prune` to clear.
+
+The merge check is the part that misleads. A squash merge replaces the topic
+branch with one new commit on the default branch, so the branch's own commits
+are never ancestors of it: `git branch -d` refuses to delete, and
+`git merge-base --is-ancestor` reports the branch as not merged. Neither is
+evidence that the work did not land, and treating them as evidence turns a
+shipped branch into a phantom of unfinished work. Confirm the landing before
+deleting. The pull request state is authoritative
+(`gh pr view <branch> --json state,mergedAt`). `git cherry main <branch>`
+answers offline by comparing patches rather than commit identity, marking an
+already-landed commit with `-` and a genuinely missing one with `+`; it settles
+a branch whose commits squashed one for one, and not a branch whose several
+commits collapsed into a single commit that matches no patch id. Once the
+landing is confirmed, `git branch -D` is the ordinary delete, not a forced one.
+
 ### Commit messages
 
 Every commit follows Conventional Commits (`cz check` enforces it through the
@@ -315,7 +345,8 @@ Releases are draft-first and fully automated:
 
 1. Dispatch `Prepare release` and choose `patch`, `minor`, or `major`.
 2. The release App opens `release/vX.Y.Z...` with the version, lockfile, and
-   generated notes. Curate the notes and squash-merge after `Required` passes.
+   generated notes. Curate the notes (see "Writing the release notes") and
+   squash-merge after `Required` passes.
 3. GitHub Actions builds and smoke-tests that exact merge commit, attests one
    wheel and one sdist, then attaches them to a draft GitHub Release.
 4. Review and publish the complete draft. Release immutability locks its tag
@@ -378,6 +409,45 @@ When guiding a future release, an agent must:
 
 Confirm each remote setting before advancing to the next manual checkpoint.
 Never infer remote release readiness from repository files alone.
+
+### Writing the release notes
+
+`Prepare release` prepends a generated block to
+`website/docs/release-notes.md`: the merged pull request titles, grouped under
+`#### Features` and `#### Fixes` by their labels. That is a changelog of what
+was done. It tells a reader which pull requests merged, not what changed for
+them, and a title written for reviewers rarely survives as a sentence written
+for users. Treat the block as raw material and replace it.
+
+So when the maintainer asks for release notes, or prepares a release, produce
+curated notes in its place. The released entries in
+`website/docs/release-notes.md` from 0.4.9 onward are the reference; read them
+first and match what they already do:
+
+- `## [X.Y.Z] - YYYY-MM-DD`, then a short opening paragraph saying what the
+  release is about. A theme, not a list, and the measured result where there is
+  one.
+- Then `### Added`, `### Changed`, `### Fixed`, `### Documentation` and
+  `### Internal`, in that order, keeping only the ones that have entries. The
+  vocabulary is Keep a Changelog's: `### Changed (breaking)` when something
+  breaks, `### Removed` when something is gone. A test in
+  `tests/automation/test_workflow_contracts.py` rejects any other heading, so
+  the generated `#### Features` block cannot reach a release unedited.
+- One entry per user-visible change, not per pull request. Several pull
+  requests that add up to one change are one entry, and one pull request that
+  changed several things is several entries. An entry leads with a bolded
+  statement of the change and carries its pull request number in parentheses:
+  `- **Binary uploads are read by size, not by line** (#39): ...`.
+- The body says what changed and why it mattered: the symptom where there was
+  one, the reason the obvious behavior was wrong, and the way back where a
+  setting restores the old behavior. A short code or console block earns its
+  place whenever it shows the change faster than the prose can describe it.
+- A pull request labeled `skip-changelog` gets no entry.
+- Check every claim against the merged code rather than the pull request title.
+  A title states an intent; the notes state what shipped, and the two diverge
+  often enough that a title-only reading produces entries that are wrong.
+- The version follows ADR 0021's 0.x shift-down above, and when a release
+  breaks something the notes say what breaks and how to migrate.
 
 ## Architecture (the big picture)
 

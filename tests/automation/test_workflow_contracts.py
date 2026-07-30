@@ -428,3 +428,60 @@ def test_agent_guidance_names_every_hand_written_twin() -> None:
         'AGENTS.md must name every file in unasync.py SKIP_NAMES; missing: '
         f'{sorted(set(skipped) - documented)}'
     )
+
+
+_NOTES_SECTIONS: Final[frozenset[str]] = frozenset(
+    {
+        'Added',
+        'Changed',
+        'Changed (breaking)',
+        'Removed',
+        'Fixed',
+        'Documentation',
+        'Internal',
+    }
+)
+"""The section headings AGENTS.md documents for a curated release entry."""
+
+_CURATED_SINCE: Final[tuple[int, int, int]] = (0, 4, 9)
+"""The first release written to that shape. Earlier entries predate it."""
+
+_NOTES_HEADING: Final[re.Pattern[str]] = re.compile(r'(?P<marks>#{2,6}) (?P<title>.+)')
+
+
+def test_release_notes_use_the_documented_section_vocabulary() -> None:
+    """Given the released notes, when scanned, then every section is documented.
+
+    `Prepare release` prepends a generated block of pull request titles under
+    `#### Features` and `#### Fixes`, which is a changelog rather than release
+    notes. Curating it away is a manual step, and a manual step that nothing
+    checks is one that eventually gets skipped.
+    """
+    offenders: list[str] = []
+    version: tuple[int, int, int] | None = None
+    fenced = False
+
+    for line in _CANONICAL_NOTES.read_text(encoding='utf-8').splitlines():
+        if line.startswith('```'):
+            fenced = not fenced
+        if fenced:
+            continue
+        heading = _NOTES_HEADING.fullmatch(line.rstrip())
+        if heading is None:
+            continue
+        title = heading.group('title').strip()
+        if heading.group('marks') == '##':
+            release = re.fullmatch(r'\[(\d+)\.(\d+)\.(\d+)\].*', title)
+            version = (
+                None
+                if release is None
+                else (int(release[1]), int(release[2]), int(release[3]))
+            )
+        elif version is not None and version >= _CURATED_SINCE:
+            if heading.group('marks') != '###' or title not in _NOTES_SECTIONS:
+                offenders.append(f'{line.strip()!r} under {version}')
+
+    assert not offenders, (
+        'release notes sections must be one of '
+        f'{sorted(_NOTES_SECTIONS)} at "###"; found: {offenders}'
+    )
