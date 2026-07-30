@@ -17,7 +17,7 @@ import os
 import shlex
 
 from functools import cache
-from typing import Any, Final, cast
+from typing import Any, Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -54,6 +54,19 @@ class CliPrefs(BaseModel):
     listing cannot know: it costs one extra listing per subdirectory (a
     round trip each on object stores, free under a cache layer). Set false
     to trade the distinction for one request per ``ls``."""
+
+    completion_case: Literal['sensitive', 'insensitive', 'smart'] = 'smart'
+    """How tab completion matches what you have typed. ``smart`` (the
+    default) ignores case until you type an uppercase letter, then matches
+    exactly - the fzf/vim rule that modern shells settled on, because a
+    lowercase prefix is almost never a statement about case.
+    ``insensitive`` ignores case always, ``sensitive`` never does."""
+
+    editor: str | None = None
+    """Command that ``sx edit`` and ``sx config edit`` open files with,
+    ahead of ``$VISUAL`` and ``$EDITOR``. Set it when the environment has
+    no editor to inherit (a fresh Windows shell) or when sx should use a
+    different one from the rest of the system."""
 
     provider: str | None = None
     """Which backend sx opens by default, overriding ``STORIX_PROVIDER``
