@@ -14,7 +14,7 @@ the dfs endpoint this backend speaks only exists on HNS accounts. Flat
 from __future__ import annotations
 
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Final
 
 from storix._async._stream import (
     batch_chunks,
@@ -36,22 +36,25 @@ from storix.errors import (
     NotADirectoryError,
     PathNotFoundError,
     PermissionDeniedError,
+    PreconditionFailedError,
     StorageError,
     StorageRootNotFoundError,
     UnsupportedOperationError,
 )
 from storix.models import Capabilities, Entry, RawStat
-from storix.preconditions import validate_precondition
+from storix.preconditions import IF_MATCH_ABSENT, validate_precondition
 
 from .base import BackendBase
 
 
 try:
+    from azure.core import MatchConditions
     from azure.core.exceptions import (
         AzureError,
         ClientAuthenticationError,
         HttpResponseError,
         ResourceExistsError,
+        ResourceModifiedError,
         ResourceNotFoundError,
     )
     from azure.storage.blob import ContentSettings
@@ -111,6 +114,57 @@ def _translate(exc: AzureError, path: PurePosixPath) -> StorageError:
     return StorageError(f"'{path}': {exc}")
 
 
+_PRECONDITION_STATUS: Final[int] = 412
+"""HTTP status the dfs endpoint answers a refused precondition with."""
+
+
+def _match_conditions(if_match: str | None) -> dict[str, Any]:
+    """SDK keywords carrying a validated write precondition (ADR 0033).
+
+    The dfs create (``PUT ?resource=file``) is the request that truncates
+    an occupied path, so the comparison has to gate that one. A condition
+    on the later flush would arbitrate after the previous content was
+    already gone, and against an ETag the create itself had just replaced.
+
+    Verified on the wire against azure-storage-file-datalake 12.22:
+    ``MatchConditions.IfNotModified`` plus ``etag`` emits ``If-Match``,
+    and ``MatchConditions.IfMissing`` emits ``If-None-Match: *``.
+
+    Args:
+        if_match: The precondition, already validated: ``None`` for an
+            unconditional write, ``IF_MATCH_ABSENT`` for create-only, or a
+            version read from a previous ``stat``.
+
+    Returns:
+        Keywords to add to the create request, empty for the unconditional
+        default so an ordinary write issues exactly the request it always
+        has.
+    """
+    if if_match is None:
+        return {}
+    if if_match == IF_MATCH_ABSENT:
+        return {'match_condition': MatchConditions.IfMissing}
+    return {'etag': if_match, 'match_condition': MatchConditions.IfNotModified}
+
+
+def _refused_precondition(exc: AzureError) -> bool:
+    """Whether an SDK failure is the service refusing a precondition.
+
+    An ``If-Match`` loss arrives as ``ResourceModifiedError`` (dfs
+    ``ConditionNotMet``, HTTP 412) and an ``If-None-Match: *`` loss as
+    ``ResourceExistsError`` (dfs ``PathAlreadyExists``), with a bare 412
+    covering a code the SDK did not classify. Only consulted once a
+    precondition was actually sent, so an ordinary collision keeps
+    translating to ``AlreadyExistsError``.
+
+    Args:
+        exc: The SDK failure raised by the conditional request.
+    """
+    return isinstance(exc, (ResourceModifiedError, ResourceExistsError)) or (
+        getattr(exc, 'status_code', None) == _PRECONDITION_STATUS
+    )
+
+
 class AzureBackend(BackendBase):
     """ADLS Gen2 backend anchored at one container (filesystem).
 
@@ -126,6 +180,11 @@ class AzureBackend(BackendBase):
         presigned_urls=True,
         provisioning=True,
         ranged_reads=True,
+        # both forms ride on the dfs create as one service operation:
+        # If-Match compares the stored ETag before truncating, and
+        # If-None-Match: * refuses an occupied path outright (ADR 0033)
+        conditional_writes=True,
+        exclusive_create=True,
     )
     default_read_chunk_size: int = DEFAULT_AZURE_READ_CHUNK_SIZE
     default_write_chunk_size: int = DEFAULT_AZURE_WRITE_CHUNK_SIZE
@@ -255,15 +314,18 @@ class AzureBackend(BackendBase):
     ) -> None:
         """Write batched range appends, then flush the completed file.
 
+        A precondition becomes a conditional header on the dfs create that
+        opens the file, so the service compares and truncates as one
+        operation and a lost race leaves the stored content untouched. The
+        ``stat`` below is the port's own directory and append-offset
+        precheck; it never stands in for that comparison.
+
         Raises:
             ValueError: If ``chunk_size`` is zero or negative, or if
                 ``if_match`` accompanies ``mode='a'``.
-            UnsupportedOperationError: If ``if_match`` is given at all. The
-                ADLS SDK can carry a precondition on the flush that
-                completes a file, but this backend does not yet wire one, so
-                it refuses rather than accepting an argument it would ignore
-                (ADR 0033). Azure Blob accounts get it through the opendal
-                backend today.
+            PreconditionFailedError: If ``if_match`` no longer holds: the
+                stored version moved on, or ``IF_MATCH_ABSENT`` found the
+                path occupied.
         """
         size = resolve_chunk_size(chunk_size, self.default_write_chunk_size)
         validate_precondition(if_match, mode=mode, capabilities=self.capabilities)
@@ -283,7 +345,10 @@ class AzureBackend(BackendBase):
         try:
             if creating:
                 # metadata rides along with creation - one request, not two
-                await client.create_file(metadata=dict(metadata) if metadata else None)
+                await client.create_file(
+                    metadata=dict(metadata) if metadata else None,
+                    **_match_conditions(if_match),
+                )
             async for chunk in batch_chunks(data, size):
                 await client.append_data(chunk, offset=offset, length=len(chunk))
                 offset += len(chunk)
@@ -294,6 +359,8 @@ class AzureBackend(BackendBase):
             if metadata is not None and not creating:
                 await client.set_metadata(dict(metadata))
         except AzureError as exc:
+            if if_match is not None and _refused_precondition(exc):
+                raise PreconditionFailedError(path) from exc
             raise self._error(exc, path) from exc
 
     async def delete(self, path: PurePosixPath) -> None:
@@ -366,6 +433,9 @@ class AzureBackend(BackendBase):
             modified=file_props.last_modified,
             accessed=None,
             metadata=raw_metadata or None,
+            # the ETag header is already on this properties response, so the
+            # validator costs nothing extra to carry (ADR 0033)
+            version=file_props.etag,
         )
 
     async def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
