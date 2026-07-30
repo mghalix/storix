@@ -3202,3 +3202,65 @@ def test_left_aligning_the_menu_tolerates_a_session_without_a_layout():
     from storix.cli.shell import _left_align_menu
 
     _left_align_menu(type('S', (), {})())
+
+
+def test_an_interrupted_command_closes_its_line(capsys):
+    """Given a command stopped by Ctrl+C, when it unwinds, then the line is
+    closed before the next prompt.
+
+    The terminal echoes ^C wherever the cursor was, so a prompt drawn next
+    lands on the same line as the half-written output.
+    """
+    import click
+
+    from storix.cli.shell import _dispatch
+
+    @click.command()
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    _dispatch(interrupted, [])
+
+    assert capsys.readouterr().out.endswith('\n')
+
+
+def test_a_command_that_exits_cleanly_adds_no_blank_line(capsys):
+    """Given a command that exits on its own, when it returns, then nothing
+    is added: it already closed its own output."""
+    import click
+
+    from storix.cli.shell import _dispatch
+
+    @click.command()
+    def quiet() -> None:
+        raise SystemExit(0)
+
+    _dispatch(quiet, [])
+
+    assert capsys.readouterr().out == ''
+
+
+def test_interrupting_a_glob_expansion_cancels_the_line_not_the_session(
+    monkeypatch, capsys
+):
+    """Given Ctrl+C while a pattern is being matched, when it unwinds, then the
+    shell stays open.
+
+    Expanding a pattern walks the backend, so it is long enough to want
+    interrupting, and a remote walk is exactly where a user reaches for
+    Ctrl+C. Leaving the session there loses the cwd and the layer stack.
+    """
+    from storix.cli import shell
+
+    def interrupted(_argv):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(shell, '_expand_globs', interrupted)
+    from typer.main import get_command
+
+    command = get_command(cli.app)
+
+    stays_open = shell._run_line(command, 'ls *.md', {})
+
+    assert stays_open is True
+    assert capsys.readouterr().out.endswith('\n')

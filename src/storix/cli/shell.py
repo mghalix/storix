@@ -990,6 +990,45 @@ def start_shell(fs: Storix | None = None) -> None:
             return
 
 
+def _prepared(
+    line: str, aliases: dict[str, str]
+) -> tuple[list[str], str | None, bool] | None:
+    """Turn a typed line into argv, its redirect, and whether it appends.
+
+    None when the line cannot run, having already said why. Everything that
+    can fail before a command starts lives here: tokenizing, splitting the
+    redirect off, and matching any pattern against the backend.
+
+    Args:
+        line: The line as typed, already stripped and known non-empty.
+        aliases: Alias table from the preferences.
+    """
+    try:
+        argv, redirect, append = _split_redirect(_parse_input(line, aliases))
+    except ValueError as exc:
+        console.print(f'[red]parse error: {exc}[/red]')
+        return None
+    if not argv:
+        console.print('[red]parse error: redirect needs a command[/red]')
+        return None
+
+    try:
+        argv = _expand_globs(argv)
+    except ValueError as exc:
+        # nothing runs on an unmatched pattern: the command could be `rm`,
+        # and handing it the pattern would either report a path that never
+        # existed or address a literal `*` object
+        console.print(f'[red]{exc}[/red]')
+        return None
+    except KeyboardInterrupt:
+        # expanding a pattern is a walk of the backend, so it is long enough
+        # to want interrupting. That cancels the line, the way an interrupt
+        # during a command does; only an interrupt at the prompt leaves.
+        console.print()
+        return None
+    return argv, None if redirect is None else _unmark(redirect), append
+
+
 def _run_line(command: click.Command, line: str, aliases: dict[str, str]) -> bool:
     """Execute one prompt line.
 
@@ -1001,25 +1040,10 @@ def _run_line(command: click.Command, line: str, aliases: dict[str, str]) -> boo
     Returns:
         False when the line asked the shell to exit, True otherwise.
     """
-    try:
-        argv, redirect, append = _split_redirect(_parse_input(line, aliases))
-    except ValueError as exc:
-        console.print(f'[red]parse error: {exc}[/red]')
+    prepared = _prepared(line, aliases)
+    if prepared is None:
         return True
-    if not argv:
-        console.print('[red]parse error: redirect needs a command[/red]')
-        return True
-
-    try:
-        argv = _expand_globs(argv)
-    except ValueError as exc:
-        # nothing runs on an unmatched pattern: the command could be `rm`,
-        # and handing it the pattern would either report a path that never
-        # existed or address a literal `*` object
-        console.print(f'[red]{exc}[/red]')
-        return True
-    if redirect is not None:
-        redirect = _unmark(redirect)
+    argv, redirect, append = prepared
 
     name = argv[0]
     if name in {'exit', 'quit'}:
@@ -1071,7 +1095,15 @@ def _dispatch(command: click.Command, argv: list[str]) -> None:
         command.main(argv, prog_name='', standalone_mode=False)
     except click.ClickException as exc:
         exc.show()
-    except (click.exceptions.Abort, SystemExit):
+    except (click.exceptions.Abort, KeyboardInterrupt):
+        # the terminal has already echoed ^C wherever the cursor was, so the
+        # line is open and the next prompt would start on it. click writes its
+        # own newline to stderr, which can land before output rich has not
+        # flushed yet; going through the same console the command printed
+        # through is what keeps it after.
+        console.print()
+    except SystemExit:
+        # a command that exited on its own closed its own output
         pass
     except Exception as exc:  # noqa: BLE001 - the REPL must survive any command
         console.print(f'[red]{exc}[/red]')
