@@ -42,10 +42,15 @@ class StorixPath(PurePosixPath):
             return False
         return os.fspath(raw[-1]).endswith(('/', os.sep))
 
-    # TODO: override in cloud-based filesystems
     # positional bool mirrors pathlib.Path.resolve for drop-in parity
     def resolve(self, strict: bool = False) -> Self:  # noqa: FBT001, FBT002
-        """Make the path absolute and normalized, resolving any symlinks."""
+        """Make the path absolute and normalized, resolving any symlinks.
+
+        Resolves against the local filesystem, so it answers for a local
+        session and not for a cloud one, where a path has no host to
+        resolve symlinks against. Backends that need their own answer
+        override it.
+        """
         from pathlib import Path
 
         return self.__class__(Path(self).resolve(strict=strict))

@@ -851,8 +851,8 @@ def cat(
     last = b''
     try:
         for i, chunk in enumerate(fs.stream(*files)):
-            # ponytail: the binary guard reads the first chunk only, so a
-            # NUL that appears later still prints; widen it if that bites
+            # the binary guard reads the first chunk only, so a NUL that
+            # appears later still prints; widen it if that bites
             if i == 0 and not binary and b'\x00' in chunk:
                 err.print('[yellow]cat: binary file; use -b[/yellow]')
                 return

@@ -185,8 +185,8 @@ def _left_align_menu(session: PromptSession[str]) -> None:
     Args:
         session: The session whose layout to adjust.
     """
-    # ponytail: reaches into the layout prompt_toolkit assembled, for want of
-    # a parameter; a no-op if the internals move, never an error
+    # reaches into the layout prompt_toolkit assembled, for want of a
+    # parameter; a no-op if the internals move, never an error
     for float_ in _menu_floats(session):
         float_.xcursor = False
         float_.left = 0
