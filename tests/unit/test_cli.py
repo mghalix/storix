@@ -2174,6 +2174,356 @@ def test_shell_redirection_reports_a_bad_target_instead_of_writing(monkeypatch, 
     assert not fs.exists('/copy.txt')
 
 
+@pytest.fixture
+def globbable():
+    """A session a pattern has something to select from.
+
+    Two ``.txt`` files, one ``.md`` beside them, a dotfile, and a
+    subdirectory holding two more ``.md`` files, so a match can be told from
+    everything a pattern should have left out.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('alpha\n', '/a.txt')
+    fs.echo('beta\n', '/b.txt')
+    fs.echo('gamma\n', '/c.md')
+    fs.echo('secret\n', '/.env')
+    fs.mkdir('/sub')
+    fs.echo('one\n', '/sub/one.md')
+    fs.echo('two\n', '/sub/two.md')
+    return fs
+
+
+def test_a_pattern_expands_to_every_match_in_argument_order(monkeypatch, globbable):
+    """Given a pattern two files match, when the line runs, then the command
+    receives both, sorted.
+
+    Concatenated into a file because that is what makes the order of the
+    expansion observable.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat *.txt > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'alpha\nbeta\n'
+
+
+def test_a_pattern_matching_one_path_expands_to_that_path(monkeypatch, globbable):
+    """Given a pattern one file matches, when the line runs, then the command
+    receives that file and not its siblings."""
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat *.md > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'gamma\n'
+
+
+def test_a_pattern_matching_nothing_stops_the_line(monkeypatch, capsys, globbable):
+    """Given a pattern with no match, when the line runs, then no command runs
+    and the report names the pattern.
+
+    The command could be ``rm``, so an unmatched pattern is refused instead of
+    handed on as a literal path: ``/new.txt`` is never created.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'touch /new.txt *.tmp'), ('', EOFError)]
+    )
+
+    assert 'no matches: *.tmp' in capsys.readouterr().out
+    assert not globbable.exists('/new.txt')
+
+
+def test_a_pattern_under_a_missing_directory_matches_nothing(
+    monkeypatch, capsys, globbable
+):
+    """Given a pattern whose directory is absent, when the line runs, then it
+    reports no match rather than a failed listing."""
+    _run_shell_over(monkeypatch, globbable, [('', 'cat nosuch/*.md'), ('', EOFError)])
+
+    assert 'no matches: nosuch/*.md' in capsys.readouterr().out
+
+
+def test_a_token_without_a_wildcard_reaches_the_command_as_typed():
+    """Given plain paths, when the line is expanded, then they are unchanged.
+
+    Relative stays relative: expansion selects paths, it does not resolve
+    them, which the command and the core already do.
+    """
+    from storix.cli.shell import _expand_globs
+
+    argv = ['cat', 'a.txt', 'sub/one.md']
+
+    assert _expand_globs(argv) == ['cat', 'a.txt', 'sub/one.md']
+
+
+def test_an_option_token_is_left_alone(globbable):
+    """Given an option beside a pattern, when the line is expanded, then only
+    the pattern grows.
+
+    A leading ``-`` is an option however it is spelled, so it is not a path
+    position even when it holds a wildcard.
+    """
+    from storix.cli.shell import _expand_globs
+
+    cli.use_fs(globbable)
+
+    assert _expand_globs(['ls', '-l', '--exclude=*.txt', '*.txt']) == [
+        'ls',
+        '-l',
+        '--exclude=*.txt',
+        '/a.txt',
+        '/b.txt',
+    ]
+
+
+def test_a_redirect_target_is_not_expanded(monkeypatch, globbable):
+    """Given a wildcard in a redirect target, when the line runs, then the file
+    written carries that name.
+
+    A target names a file being written, not one to be found.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat a.txt > /out*.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out*.txt') == b'alpha\n'
+
+
+@pytest.mark.parametrize('line', ["cat '*.txt'", 'cat "*.txt"', 'cat \\*.txt'])
+def test_a_quoted_wildcard_is_a_plain_character(line, globbable):
+    """Given a protected wildcard, when the line is expanded, then it is not.
+
+    ``shlex.split`` strips the quotes, so the protected wildcards are marked
+    before the split for the two spellings to stay distinguishable.
+    """
+    from storix.cli.shell import _expand_globs, _parse_input
+
+    cli.use_fs(globbable)
+
+    assert _expand_globs(_parse_input(line, {})) == ['cat', '*.txt']
+
+
+def test_a_wildcard_does_not_reach_a_hidden_path(monkeypatch, capsys, globbable):
+    """Given a dotfile, when a pattern that spans it expands, then it is not
+    among the matches.
+
+    A leading dot has to be explicit, the pathlib and shell rule.
+    """
+    _run_shell_over(monkeypatch, globbable, [('', 'cat *env'), ('', EOFError)])
+
+    assert 'no matches: *env' in capsys.readouterr().out
+
+
+def test_a_pattern_that_names_the_dot_reaches_a_hidden_path(monkeypatch, globbable):
+    """Given a dotfile, when the pattern spells its leading dot, then it
+    matches."""
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat .e* > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'secret\n'
+
+
+def test_a_pattern_with_a_directory_component_matches_inside_it(monkeypatch, globbable):
+    """Given files in a subdirectory, when the pattern names it, then the
+    matches come from there and nowhere else.
+
+    ``/c.md`` sits beside ``sub`` and is left out.
+    """
+    _run_shell_over(
+        monkeypatch, globbable, [('', 'cat sub/*.md > /out.txt'), ('', EOFError)]
+    )
+
+    assert globbable.cat('/out.txt') == b'one\ntwo\n'
+
+
+def test_an_absolute_pattern_matches_from_the_directory_it_names(globbable):
+    """Given a session inside a subdirectory, when an absolute pattern expands,
+    then it matches from the root it names.
+
+    A pattern is matched against a path relative to the directory the glob
+    walks, so an absolute one is unmatchable until that directory comes from
+    the pattern itself.
+    """
+    from storix.cli.shell import _expand_globs
+
+    globbable.cd('/sub')
+    cli.use_fs(globbable)
+
+    assert _expand_globs(['cat', '/*.txt']) == ['cat', '/a.txt', '/b.txt']
+
+
+def _press_tab(line: str) -> str:
+    """The line after Tab, run through the handler the key is bound to.
+
+    A real ``Buffer`` over a ``Document``, which needs neither a terminal nor
+    a running loop: constructing a ``PromptSession`` under pytest raises
+    ``io.UnsupportedOperation`` because prompt_toolkit builds its input
+    eagerly and stdin is not a terminal.
+
+    Args:
+        line: The line as typed, with the cursor at its end.
+    """
+    from prompt_toolkit.buffer import Buffer
+    from prompt_toolkit.document import Document
+
+    from storix.cli.shell import _expand_on_line
+
+    buffer = Buffer(document=Document(line, len(line)))
+    _expand_on_line(buffer)
+    return buffer.text
+
+
+def test_tab_replaces_a_pattern_with_every_name_it_matches(globbable):
+    """Given a pattern two files match, when Tab lands, then both names are on
+    the line in place of it.
+
+    Seeing the selection before running anything is the point of expanding on
+    the key rather than only on Enter.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat *.txt') == 'cat a.txt b.txt '
+
+
+def test_tab_replaces_a_single_match_with_that_name_alone(globbable):
+    """Given a pattern one file matches, when Tab lands, then the line carries
+    that name and no trailing space.
+
+    A single name is often a path being completed a component at a time, so
+    the cursor stays against it; several names are a finished expansion.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat *.md') == 'cat c.md'
+
+
+def test_tab_on_a_pattern_with_no_match_leaves_the_line_as_typed(globbable):
+    """Given a pattern nothing matches, when Tab lands, then the line is
+    unchanged.
+
+    The pattern is the only thing the user can correct, so it is kept; zsh
+    rings the bell and leaves the word alone here too.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('rm *.tmp') == 'rm *.tmp'
+
+
+@pytest.mark.parametrize('line', ["cat '*.md'", 'cat "*.md"', 'cat \\*.md'])
+def test_tab_does_not_expand_a_protected_wildcard(line, globbable):
+    """Given a quoted or escaped wildcard, when Tab lands, then nothing
+    expands.
+
+    The quotes are what make the wildcard a plain character, the same
+    decision the line makes on Enter.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab(line) == line
+
+
+@pytest.mark.parametrize('line', ['c*', 'ls -l --exclude=*.txt'])
+def test_tab_expands_no_word_outside_a_path_position(line, globbable):
+    """Given a wildcard in the command name or an option, when Tab lands, then
+    the line is unchanged.
+
+    A wildcard in the command name is a command that does not exist, and a
+    leading ``-`` is an option however it is spelled: the two positions
+    expansion leaves alone on Enter as well.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab(line) == line
+
+
+def test_tab_leaves_a_word_without_a_wildcard_to_the_completer(globbable):
+    """Given a plain fragment, when Tab lands, then expansion declines it and
+    ordinary completion still offers the entry.
+
+    The binding is conditional so that the completion path is untouched by
+    the expansion: a word with no live wildcard is not this key's business.
+    """
+    from storix.cli.shell import _get_remote_completions, _pattern_at_cursor
+
+    cli.use_fs(globbable)
+
+    assert _pattern_at_cursor('cat a.t') is None
+    assert [c.text for c in _get_remote_completions('a.t')] == ['a.txt']
+
+
+def test_tab_binds_the_expansion_to_a_filtered_key():
+    """Given the shell bindings, when Tab is bound, then it carries a filter.
+
+    An unconditional binding would take the key from prompt_toolkit's own
+    completion, which every word that is not a pattern still needs.
+    """
+    from prompt_toolkit.filters import Condition
+
+    from storix.cli.shell import _ExitHint, _key_bindings
+
+    bindings = [
+        binding
+        for binding in _key_bindings(_ExitHint(_FakeSession())).bindings
+        if binding.keys == ('c-i',)
+    ]
+
+    assert len(bindings) == 1
+    assert isinstance(bindings[0].filter, Condition)
+
+
+def test_an_expanded_name_with_a_space_survives_a_re_parse(globbable):
+    """Given a matched name holding a space, when Tab expands it, then the line
+    still tokenizes back to that one name.
+
+    An expansion that is not re-parseable would split the name in two the
+    moment the line runs.
+    """
+    from storix.cli.shell import _parse_input
+
+    globbable.echo('spaced\n', '/two words.md')
+    cli.use_fs(globbable)
+
+    line = _press_tab('cat *words*')
+
+    assert line == 'cat two\\ words.md'
+    assert _parse_input(line, {}) == ['cat', 'two words.md']
+
+
+def test_tab_keeps_the_directory_the_pattern_named(globbable):
+    """Given a pattern with a directory component, when Tab lands, then the
+    names keep it.
+
+    ``/c.md`` sits beside ``sub`` and is not among them.
+    """
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat sub/*.md') == 'cat sub/one.md sub/two.md '
+
+
+def test_tab_expands_to_names_relative_to_where_the_session_is(globbable):
+    """Given a session inside a subdirectory, when Tab expands a relative
+    pattern, then the names are relative too.
+
+    Matching answers in absolute paths, and a deep cwd would turn a short
+    line into a column of full paths for names the cwd already fixes.
+    """
+    globbable.cd('/sub')
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat *.md') == 'cat one.md two.md '
+
+
+def test_tab_expands_a_pattern_written_absolute_to_absolute_names(globbable):
+    """Given an absolute pattern, when Tab lands, then the names are absolute.
+
+    What the user wrote decides the depth, which is what a shell shows.
+    """
+    globbable.cd('/sub')
+    cli.use_fs(globbable)
+
+    assert _press_tab('cat /*.txt') == 'cat /a.txt /b.txt '
+
+
 def test_edit_writes_the_editors_changes_back(monkeypatch):
     """The point of the command: edit a backend file with a local editor."""
     run('echo', 'hello', '-f', '/a.txt')

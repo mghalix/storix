@@ -80,7 +80,11 @@ cli = [
     # round-trip TOML editing for `sx config set/unset` (comments preserved)
     "tomlkit>=0.13",
     "click>=8.2.0",
-    "prompt-toolkit>=3.0.0",
+    # 3.0.24 is the first release whose Buffer can be constructed without a
+    # current event loop: before it, loading a history eagerly called
+    # asyncio.get_event_loop(), which Python 3.12 raises on rather than
+    # creating one, so the shell could not be built outside a running loop
+    "prompt-toolkit>=3.0.24",
     "rich>=13.0.0",
     # 0.16 is the first release that calls click 8.2's Parameter.make_metavar
     # with the ctx it now requires; below it, any `sx --help` raises TypeError
