@@ -74,6 +74,36 @@ sx tree -L 2               # cap the depth at 2 levels
 sx tree --sort size        # largest first, directories last
 ```
 
+## Writing files: `echo`
+
+`echo` prints text, or writes it into a file with `-f` (`-a` appends instead of
+truncating). `-n` drops the trailing newline, exactly like `/usr/bin/echo -n`,
+which is what a file that must not end on a newline needs:
+
+```bash
+sx echo hello -f /notes.txt       # stores "hello\n"
+sx echo -n hello -f /notes.txt    # stores "hello"
+sx echo world -a -f /notes.txt    # appends another line
+```
+
+Left without text, `echo` takes the data from a pipe, so a producer writes
+straight into storage:
+
+```bash
+gzip -c dump.sql | sx echo -f /backups/dump.sql.gz
+sx echo -f /photos/raw.arw < photo.arw
+```
+
+Piped data is pulled in bounded reads, so an input larger than memory streams
+through, and it is stored byte for byte: it arrives with its own encoding and
+its own line endings, so nothing decodes it and nothing appends a newline to it,
+which is what `-n` asks for anyway.
+
+A terminal is never read as data, because in the REPL stdin is the prompt being
+typed into. With no text and no pipe, `echo` prints just the newline, as unix
+`echo` does with no operands. A lone `-` stays literal text: the argument is
+content, not a file name, so overloading it would leave no way to print a dash.
+
 ## Provisioning the storage root
 
 `sx provision` creates the backend's storage root if it is missing, and is

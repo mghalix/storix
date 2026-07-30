@@ -1,6 +1,7 @@
 import dataclasses
 import datetime as dt
 import importlib
+import io
 import re
 import sys
 
@@ -17,6 +18,7 @@ from storix import Storix
 from storix.backends import MemoryBackend
 from storix.cli import app as cli
 from storix.cli.state import reset_session
+from storix.constants import DEFAULT_SOURCE_READ_SIZE
 
 
 runner = CliRunner()
@@ -701,6 +703,136 @@ def test_echo_prints_text_literally():
 
     assert unbalanced.exit_code == 0
     assert unbalanced.stdout == 'a[/]b\n'
+
+
+class _Pipe(io.BytesIO):
+    """Stand-in for the process pipe, with its reads on the record.
+
+    ``CliRunner`` installs any ``input`` that can ``read`` as the buffer
+    under the text layer it puts on ``sys.stdin``, so this object is
+    exactly what the command pulls from, and it answers ``isatty`` for the
+    whole session.
+    """
+
+    def __init__(self, data: bytes = b'', *, tty: bool = False) -> None:
+        super().__init__(data)
+        self.reads: list[int | None] = []
+        self._tty = tty
+
+    def isatty(self) -> bool:
+        return self._tty
+
+    def read(self, size: int | None = -1, /) -> bytes:
+        self.reads.append(size)
+        return super().read(size)
+
+
+def test_echo_appends_a_newline_without_n():
+    """Given no -n, when echoing to either sink, then one newline ends it."""
+    assert run('echo', 'hi').stdout_bytes == b'hi\n'
+
+    run('echo', 'hi', '-f', '/a.txt')
+
+    assert run('cat', '-b', '/a.txt').stdout_bytes == b'hi\n'
+
+
+def test_echo_n_prints_without_the_trailing_newline():
+    """Given -n, when printing, then the text stands alone, like echo -n."""
+    assert run('echo', '-n', 'hi').stdout_bytes == b'hi'
+
+
+def test_echo_n_writes_a_file_without_the_trailing_newline():
+    """Given -n and -f, when writing, then the file holds the text only.
+
+    The gap this closes: no other flag produced a file whose last byte is
+    not a newline.
+    """
+    assert run('echo', '-n', 'hi', '-f', '/a.txt').exit_code == 0
+
+    assert run('cat', '-b', '/a.txt').stdout_bytes == b'hi'
+
+
+def test_echo_keeps_a_lone_dash_literal():
+    """Given a dash as the text, when echoing, then a dash is printed.
+
+    The text argument is content, not a file name, so the usual stdin
+    spelling would cost the only way to write a dash.
+    """
+    assert run('echo', '-').stdout_bytes == b'-\n'
+
+
+def test_echo_writes_a_pipe_verbatim():
+    """Given piped bytes and no text, when -f is given, then they are stored.
+
+    Arbitrary bytes are not text: nothing decodes them, and nothing
+    appends the newline that a text operand would get.
+    """
+    payload = b'\xff\xfe\x00 not utf-8'
+
+    result = runner.invoke(cli.app, ['echo', '-f', '/raw.bin'], input=_Pipe(payload))
+
+    assert result.exit_code == 0
+    assert run('cat', '-b', '/raw.bin').stdout_bytes == payload
+
+
+def test_echo_prints_a_pipe_verbatim():
+    """Given piped bytes and no -f, when echoing, then stdout gets them raw."""
+    payload = b'\x00\x9c binary'
+
+    result = runner.invoke(cli.app, ['echo'], input=_Pipe(payload))
+
+    assert result.exit_code == 0
+    assert result.stdout_bytes == payload
+
+
+def test_echo_n_leaves_piped_data_unchanged():
+    """Given -n on a pipe, when writing, then the bytes match the pipe.
+
+    Piped data never grows a newline, so -n asks for what already holds.
+    """
+    payload = b'ends without a newline'
+
+    result = runner.invoke(
+        cli.app, ['echo', '-n', '-f', '/raw.bin'], input=_Pipe(payload)
+    )
+
+    assert result.exit_code == 0
+    assert run('cat', '-b', '/raw.bin').stdout_bytes == payload
+
+
+def test_echo_pulls_a_large_pipe_in_bounded_reads():
+    """Given a pipe past one read size, when written, then reads stay bounded.
+
+    A pipe larger than memory has to reach the backend in pieces, so the
+    stream itself is handed over: every pull asks for a fixed size, and a
+    materializing ``read()`` or ``read(-1)`` would show up here as an
+    unbounded request.
+    """
+    payload = b'p' * (2 * DEFAULT_SOURCE_READ_SIZE + 7)
+    pipe = _Pipe(payload)
+
+    result = runner.invoke(cli.app, ['echo', '-f', '/big.bin'], input=pipe)
+
+    assert result.exit_code == 0
+    pulls = [size for size in pipe.reads if size]  # the runner probes with read(0)
+    assert len(pulls) > 2
+    assert all(size == DEFAULT_SOURCE_READ_SIZE for size in pulls)
+    assert run('cat', '-b', '/big.bin').stdout_bytes == payload
+
+
+def test_echo_without_text_at_a_terminal_prints_one_newline():
+    """Given a terminal, when no text is given, then only a newline prints.
+
+    A terminal is the user typing, not data: the REPL would otherwise
+    swallow the next prompt line, and unix echo with no operands prints
+    just the newline.
+    """
+    pipe = _Pipe(b'not data', tty=True)
+
+    result = runner.invoke(cli.app, ['echo'], input=pipe)
+
+    assert result.stdout_bytes == b'\n'
+    assert not [size for size in pipe.reads if size]  # the runner probes read(0)
 
 
 def test_tree_on_a_file_counts_one_file_and_no_directory():
