@@ -1,5 +1,18 @@
 # Release Notes
 
+## [0.5.3] - 2026-07-30
+
+### What's Changed
+#### Features
+* feat(cli): take several paths in the listing commands by @mghalix in https://github.com/mghalix/storix/pull/80
+* feat(cli): expand glob patterns at the shell prompt by @mghalix in https://github.com/mghalix/storix/pull/79
+* feat(cli): echo -n and writing a file from a pipe by @mghalix in https://github.com/mghalix/storix/pull/81
+#### Fixes
+* fix(cli): mark output that does not end in a newline by @mghalix in https://github.com/mghalix/storix/pull/84
+* fix(cli): escape completed names by rule, wildcards included by @mghalix in https://github.com/mghalix/storix/pull/83
+#### Documentation
+* docs(repo): record the deferred CLI restructure and chaining by @mghalix in https://github.com/mghalix/storix/pull/82
+
 ## [0.5.2] - 2026-07-30
 
 Two things this release is about. Writes can now refuse to clobber a change
