@@ -2,17 +2,154 @@
 
 ## [0.5.2] - 2026-07-30
 
-### What's Changed
-#### Features
-* feat(core): cd('-') returns to the previous directory by @mghalix in https://github.com/mghalix/storix/pull/69
-* feat(core): conditional writes for safe concurrent updates by @mghalix in https://github.com/mghalix/storix/pull/71
-* feat(cli): shell ergonomics - interrupts, completion, editing, redirection by @mghalix in https://github.com/mghalix/storix/pull/70
-* feat(core): conditional writes on the native ADLS backend by @mghalix in https://github.com/mghalix/storix/pull/73
-* feat(core): StorixPath remembers being written as a directory by @mghalix in https://github.com/mghalix/storix/pull/75
-* feat(cli): one sort vocabulary for ls and tree by @mghalix in https://github.com/mghalix/storix/pull/76
-#### Fixes
-* fix(cli): print file bytes verbatim and align listings with unix by @mghalix in https://github.com/mghalix/storix/pull/66
-* fix(core): a trailing separator asserts a directory by @mghalix in https://github.com/mghalix/storix/pull/74
+Two things this release is about. Writes can now refuse to clobber a change
+they did not see, and the interactive shell behaves like a shell: interrupts
+that warn before they leave, completion that finds `LICENSE` from `li`, and
+redirection that writes text instead of a terminal rendering. Alongside them,
+the first pass of a unix parity audit - `cat` is byte-exact when piped, `ls -l`
+works on a file, and a trailing separator means what it means in every shell.
+
+See ADR 0033 for the conditional-write design.
+
+### Added
+
+- **Conditional writes** (#71, #73, ADR 0033): every write was last-write-wins,
+  so two writers holding the same path destroyed one another's work with no
+  error on either side. `stat` now reports an opaque `version`, and `write`
+  takes `if_match`: a version writes only while the stored object still carries
+  it, and `IF_MATCH_ABSENT` writes only while nothing exists at the path. The
+  store compares and writes as one operation, so there is no window between the
+  check and the write, and `PreconditionFailedError` tells a losing writer that
+  someone else changed the object rather than that the write failed.
+
+  ```python
+  props = fs.stat("/config.toml")
+  fs.echo(edited, "/config.toml", if_match=props.version)  # or PreconditionFailedError
+  ```
+
+  Two capabilities, not one, because comparing a version and refusing an
+  occupied path are separate guarantees that stores offer independently:
+  conditional_writes and exclusive_create. Local disk creates exclusively
+  through O_EXCL and has no compare-and-write; the opendal-backed stores read
+  both flags from the endpoint actually configured rather than assuming them of
+  the provider, so an S3-compatible store that takes one and not the other is
+  reported accurately. Native ADLS Gen2 carries the precondition on the create
+  that completes a file (#73) - not the flush, which happens after the old
+  content is already gone.
+
+  Nothing is emulated. The only available emulation is stat, compare, then
+  write, which reopens the exact race a precondition exists to close, so a
+  backend that cannot be atomic advertises nothing and raises instead.
+
+- sx is an interactive shell again (#70): two consecutive Ctrl+C or Ctrl+D
+  presses leave and a single one never does, with the hint rendered under the
+  line being typed rather than printed above a fresh prompt, and lapsing after
+  a second so a press now and another one later stay two intentions. Ctrl+D
+  does nothing while there is text on the line, which is the terminal's own
+  rule: it delivers the pending line and reports end of input only on an empty
+  one. Tab completion gains [cli] completion_case (default smart: ignore
+  case until an uppercase letter is typed), Enter on a highlighted completion
+  puts it on the line instead of running it, and the menu is a grid rather than
+  a tall column. sx edit opens a remote file in $VISUAL/$EDITOR and writes
+  it back, with [cli] editor taking precedence over both. Redirection
+  (ls -l > out.txt) writes into the backend.
+
+- One sort vocabulary for ls and tree (#76): --sort name|time|size
+  with -r/--reverse on both, where ls had time and reverse but no size
+  and tree had all three keys but no reverse. ls keeps -t as the
+  coreutils shorthand. A size sort reuses the stats a listing already carries,
+  so ls -l --sort size costs no extra request; directories sort below every
+  file, since neither command renders a size for one.
+
+- cd - (#69): returns to the previous directory and echoes where it
+  landed, marked with the jump glyph, because you did not name the destination.
+
+- StorixPath.named_as_directory (#75): reports whether a path was written
+  with a trailing separator, which a normalized path otherwise forgets. This is
+  what lets a StorixPath destination be held to the same assertion a string
+  is, and what makes maybe_file() agree with is_file_approx().
+
+### Fixed
+
+- cat is byte-exact when piped, and no longer buffers the whole object
+  (#66): file bytes went through rich.console.print, which hard-wrapped at 80
+  columns and turned tabs into spaces, so a piped file was not the file. A 10 MB
+  read took 35s and 230 MB of resident memory, and a 400 MB file had not
+  finished in two minutes, because fs.cat() materialized the object while the
+  core's streaming path went unused. Bytes now go straight to
+  sys.stdout.buffer.
+
+- sx ls -l FILE (#66) exited with path '/f/f' does not exist: the long
+  and time-sorted paths rebuilt each entry's path from the listing base, which
+  holds only when the base is the directory being listed. Listing a file yields
+  one entry whose path is the base itself, so the join appended the file's own
+  name to it.
+
+- echo prints its argument literally (#66): markup was eaten
+  ([bold]hi[/bold] printed as hi) and a[/]b raised a traceback, because
+  the text went through rich's markup parser.
+
+- Listings collate like ls and eza (#66): a byte-order key filed every
+  capitalized name above every lowercase one, so Zebra.txt sorted above
+  a.txt. Completions follow the order a shell's own completion list shows,
+  where leading punctuation does not file a package's dunder modules ahead of
+  every letter.
+
+- tree FILE counts a file as a file (#66), rather than reporting
+  1 directory, 0 files.
+
+- Errors never leak host paths (#66): cp a.txt a.txt reported
+  PosixPath('/tmp/sxx/a.txt') and ... are the same file, exposing the
+  filesystem behind the session.
+
+- A trailing separator asserts a directory (#74, #75): cp a.txt nodir/
+  exited 0 and created a file called nodir, putting content at a path
+  nobody asked for and reporting success. The separator is how every shell says
+  "this name is a directory", so the destination is now a directory or an
+  error, quoted as it was typed. The assertion survives for a StorixPath
+  destination too, and a path derived from one - the parent of nodir/x -
+  correctly asserts nothing.
+
+- sx update could not cross a pin it created itself (#70): sx install
+  pins to the running version every time it adds an extra, uv records that pin
+  in its receipt, and uv tool upgrade refuses to cross it. Adding a provider
+  backend silently and permanently disabled self-update. It now reinstalls at
+  @latest carrying the receipt's extras, with --refresh-package so a
+  release published inside PyPI's ten-minute index cache is visible rather than
+  reported as "nothing to upgrade".
+
+- Redirection writes text, not a rendering (#70): ls -l > out.txt wrote
+  ANSI escapes and trailing column padding into the file. The console is built
+  at import time and rich resolves its color system once there, so under a
+  terminal it kept emitting escapes into a file that was never one; replacing
+  stdout does not undo that decision, and no_color removes color while
+  leaving dim and bold.
+
+- The interactive shell keeps its history and shows its real command set
+  (#66): history died with the session, and help advertised a deprecated
+  alias while omitting find, whereami, doctor and config.
+
+- StorixPath('a.txt/').maybe_file() (#75) returned True. The
+  trailing-separator check ran after the argument had been converted to a pure
+  path, which is the conversion that removes one, so the branch was unreachable
+  for exactly the shape it existed to judge.
+
+### Changed
+
+- sx update <VERSION> moves in either direction (#70). A backward move
+  names itself as a downgrade and notes that an older storix can reject
+  configuration keys this one accepts; a version that cannot be ordered against
+  the installed one is left unremarked rather than guessed at. There is no
+  sx pin: a pin records standing intent, a self-contained tool has no project
+  file to record it in, and a pin that made bare sx update refuse to move
+  would silently stop delivering fixes while the tool continued to look healthy.
+
+- Nothing in the prompt paints a background (#70). The defaults were opaque
+  throughout - the completion menu a grey slab, its meta rows two more greys,
+  the scrollbar two, the exit hint a full-width reversed bar - which covers a
+  terminal configured to be transparent. A selected entry reverses rather than
+  choosing a pair, so the highlight follows both the terminal theme and the type
+  color a directory already carries.
 
 ## [0.5.1] - 2026-07-29
 
