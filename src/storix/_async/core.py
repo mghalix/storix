@@ -112,6 +112,28 @@ def _pwrite_all(fd: int, data: bytes, offset: int) -> int:
 _ROOT = StorixPath('/')
 
 
+def _glob_depth(pattern: str) -> int | None:
+    """The deepest level ``pattern`` can match, or None when unbounded.
+
+    A pattern without ``**`` cannot match below its own segment count: ``*``
+    describes a direct child and ``sub/*.md`` a grandchild, so walking past
+    that depth reads directories whose entries the regex can never accept.
+    In a home directory that is the difference between one listing and every
+    non-hidden descendant, which is a hang rather than a slow answer.
+
+    ``**`` spans any number of segments, so it is unbounded and the walk
+    stays exhaustive. Detected as a substring rather than a whole segment,
+    because a bound that is too tight silently drops matches while one that
+    is too loose only costs time.
+
+    Args:
+        pattern: The glob, relative to the base being searched.
+    """
+    if '**' in pattern:
+        return None
+    return len(pattern.split('/'))
+
+
 def _glob_to_regex(pattern: str) -> re.Pattern[str]:
     """Translate a pathlib-style glob into a full-match regex.
 
@@ -977,10 +999,12 @@ class Storix:
         unless ``all`` is set (like ``pathlib.glob``, where a leading dot must
         be explicit).
 
-        The whole subtree is walked and each entry tested, so a shallow
-        pattern still visits every descendant; a bounded walk is a later
-        optimization. Anchoring (``^``/``$``-style) and character classes
-        (``[abc]``) beyond ``*``/``?``/``**`` are not supported.
+        The walk is bounded by the deepest level the pattern can match, so
+        a shallow pattern reads only the directories that could contain a
+        match rather than every descendant. A ``**`` spans any number of
+        segments and stays exhaustive. Anchoring (``^``/``$``-style) and
+        character classes (``[abc]``) beyond ``*``/``?``/``**`` are not
+        supported.
 
         Args:
             pattern: The glob, relative to ``path`` (``'**/*.txt'``).
@@ -992,7 +1016,7 @@ class Storix:
         """
         base = self._resolve(path)
         regex = _glob_to_regex(pattern)
-        async for entry in self.walk(base, all=all):
+        async for entry in self.walk(base, all=all, max_depth=_glob_depth(pattern)):
             if regex.fullmatch(entry.path.relative_to(base).as_posix()):
                 yield entry.path
 
