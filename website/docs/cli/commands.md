@@ -19,6 +19,29 @@ Every command supports `--help`. Familiar flags behave as they do in unix:
 `ls -l` humanize sizes in binary units like coreutils (`165M`); `tree` closes
 with the usual `N directories, M files`.
 
+## Ordering a listing: `ls` and `tree`
+
+The two listing commands take the same ordering flags: `--sort name|time|size`
+and `-r` to invert whichever order was chosen. `name` is the default and
+collates case-insensitively, like coreutils under a UTF-8 locale and like eza.
+On `ls`, `-t` is the coreutils shorthand for `--sort time`.
+
+```bash
+sx ls --sort size          # largest first
+sx ls -tr                  # oldest first (-t is --sort time, -r inverts it)
+sx tree --sort time -r     # oldest sibling first, at every level
+```
+
+A directory has no size of its own - `ls -l` and `tree -l` render `-` in its
+size column - so a size sort puts directories last, in both commands.
+
+Sorting by time or size reads a modification time or a size that a plain
+listing does not always carry. Those are fetched in one concurrent batch per
+directory, and only for the sort that asks for them: on a cloud backend a
+sorted listing of N entries costs one round trip's worth of latency, not N. A
+long listing (`-l`) has already batched them, so sorting it costs nothing
+extra.
+
 ## Searching with `find`
 
 `find` searches recursively, the power-user (and agent) tool:
@@ -48,7 +71,7 @@ For an itemized view - every file and directory with its size - use `tree -l`
 ```bash
 sx tree -l                 # kind + size columns on every entry
 sx tree -L 2               # cap the depth at 2 levels
-sx tree --sort size        # largest first (also: name, time)
+sx tree --sort size        # largest first, directories last
 ```
 
 ## Provisioning the storage root
