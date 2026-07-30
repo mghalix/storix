@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import shutil
 import signal
 import sys
 import tempfile
@@ -777,19 +778,55 @@ def touch(files: Annotated[list[str], typer.Argument()]) -> None:
 
 @app.command(rich_help_panel=_WRITE)
 def echo(
-    text: Annotated[str, typer.Argument()],
+    text: Annotated[str | None, typer.Argument()] = None,
     file: Annotated[str | None, typer.Option('-f', '--file')] = None,
     *,
     append: Annotated[bool, typer.Option('-a', '--append')] = False,
+    no_newline: Annotated[
+        bool, typer.Option('-n', '--no-newline', help='omit the trailing newline')
+    ] = False,
 ) -> None:
-    """Print text, or write it to a file with -f."""
+    """Print text, or write it to a file with -f.
+
+    Left without TEXT the data comes from a pipe, so a producer writes
+    straight into storage (``prog | sx echo -f /dest.bin``). The pipe is
+    handed to the core as a stream, which pulls it in bounded reads, and
+    it is stored byte for byte: piped data arrives with its own encoding
+    and its own line endings, so nothing decodes it and nothing appends a
+    newline to it, which is what -n asks for anyway.
+
+    A terminal is never read as data, because the REPL's stdin is the
+    prompt being typed into; there, a missing TEXT is unix echo's empty
+    operand list and prints just the newline. A lone ``-`` stays literal
+    text: this argument is content, not a file name, so overloading it
+    would leave no way to print a dash.
+    """
+    piped = text is None and not sys.stdin.isatty()
+    payload = text or ''
+    if not no_newline:
+        payload += '\n'
+
     if file is None:
-        # literal, like unix echo: rich would read '[bold]' as markup (and
-        # raise MarkupError on a lone '[/]') and wrap at the console width
-        sys.stdout.write(text + '\n')
+        if piped:
+            shutil.copyfileobj(sys.stdin.buffer, sys.stdout.buffer)
+        else:
+            # literal, like unix echo: rich would read '[bold]' as markup (and
+            # raise MarkupError on a lone '[/]') and wrap at the console width
+            sys.stdout.write(payload)
+        sys.stdout.flush()
+        # same rule cat follows: a terminal gets a closing newline so the next
+        # prompt starts on a fresh line, and anything captured stays
+        # byte-exact. Without it, -n leaves the prompt welded to the output.
+        if not payload.endswith('\n') and sys.stdout.isatty():
+            sys.stdout.write('\n')
+            sys.stdout.flush()
         return
     try:
-        _fs().echo(text + '\n', file, mode='a' if append else 'w')
+        _fs().echo(
+            sys.stdin.buffer if piped else payload,
+            file,
+            mode='a' if append else 'w',
+        )
     except StorageError as exc:
         _die('echo', exc)
 
