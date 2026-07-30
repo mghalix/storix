@@ -1238,6 +1238,119 @@ def test_push_and_pull_paths_with_spaces(tmp_path):
     assert (pull_dest / 'episode 1.mp4').read_text() == 'video stream'
 
 
+@pytest.fixture(params=['memory', 'local'])
+def transfer_session(request, tmp_path):
+    """A session on each offline backend, plus a clean local destination.
+
+    Transfer shape must not depend on the store behind it, so every
+    directory-transfer test runs against both the reference backend and a
+    real disk. The destination sits outside the backend's own base so a
+    pull cannot be satisfied by the tree it is reading from.
+    """
+    if request.param == 'local':
+        from storix.backends import LocalBackend
+
+        cli.use_fs(Storix(LocalBackend(tmp_path / 'backend-root')))
+    destination = tmp_path / 'pulled'
+    destination.mkdir()
+    return destination
+
+
+def test_pull_creates_a_wholly_empty_directory(transfer_session):
+    """Given a remote directory with no files, when pulled, then it lands.
+
+    The reported defect: the transfer reported success while nothing
+    reached the disk, because the local directories were derived from the
+    files and an empty directory implies none.
+    """
+    run('mkdir', '/empty-dir')
+
+    result = run('pull', '/empty-dir', str(transfer_session / 'empty-dir'))
+
+    assert result.exit_code == 0
+    assert (transfer_session / 'empty-dir').is_dir()
+
+
+def test_pull_creates_an_empty_directory_beside_files(transfer_session):
+    """Given a tree mixing files and an empty directory, when pulled, then both land.
+
+    A wholly empty source is only the visible half of the defect: the same
+    derivation drops an empty directory sitting inside a tree that does
+    transfer files.
+    """
+    run('mkdir', '/mixed')
+    run('mkdir', '/mixed/sub-empty')
+    run('echo', 'payload', '-f', '/mixed/file.txt')
+
+    result = run('pull', '/mixed', str(transfer_session / 'mixed'))
+
+    assert result.exit_code == 0
+    assert (transfer_session / 'mixed' / 'file.txt').read_text() == 'payload\n'
+    assert (transfer_session / 'mixed' / 'sub-empty').is_dir()
+
+
+def test_pull_creates_nested_empty_directories(transfer_session):
+    """Given empty directories several levels deep, when pulled, then every level lands.
+
+    Depth is what separates creating the destination root from reproducing
+    the tree, so the deepest level is the one worth asserting.
+    """
+    run('mkdir', '-p', '/deep/a/b/c')
+
+    result = run('pull', '/deep', str(transfer_session / 'deep'))
+
+    assert result.exit_code == 0
+    assert (transfer_session / 'deep' / 'a' / 'b' / 'c').is_dir()
+
+
+def test_pull_of_a_tree_of_files_is_unchanged(transfer_session):
+    """Given a tree of files, when pulled, then every file arrives as before.
+
+    The directory set widened; what the transfer copies did not.
+    """
+    run('mkdir', '-p', '/tree/inner')
+    run('echo', 'top', '-f', '/tree/top.txt')
+    run('echo', 'inner', '-f', '/tree/inner/leaf.txt')
+
+    result = run('pull', '/tree', str(transfer_session / 'tree'))
+
+    assert result.exit_code == 0
+    assert (transfer_session / 'tree' / 'top.txt').read_text() == 'top\n'
+    assert (transfer_session / 'tree' / 'inner' / 'leaf.txt').read_text() == 'inner\n'
+
+
+def test_push_creates_nested_empty_directories(transfer_session, tmp_path):
+    """Given a local tree with empty directories, when pushed, then every level lands.
+
+    The push direction derived its remote directories from the files too,
+    so it kept only the destination root. Both directions have to agree
+    for a push followed by a pull to return the same tree.
+    """
+    source = tmp_path / 'outgoing'
+    (source / 'a' / 'b').mkdir(parents=True)
+    (source / 'sub-empty').mkdir()
+    (source / 'file.txt').write_text('payload')
+
+    result = run('push', str(source), '/outgoing')
+
+    assert result.exit_code == 0
+    assert run('ls', '/outgoing/sub-empty').exit_code == 0
+    assert run('ls', '/outgoing/a/b').exit_code == 0
+
+
+def test_transfer_summary_counts_directories(transfer_session):
+    """Given an empty directory, when pulled, then the summary reports it.
+
+    A files-only count reads as a transfer that did nothing, which is
+    exactly how the defect presented.
+    """
+    run('mkdir', '/reported')
+
+    result = run('pull', '/reported', str(transfer_session / 'reported'))
+
+    assert '0 files, 1 directory' in result.stdout
+
+
 def test_local_completions_space_escaping(monkeypatch, tmp_path):
     from storix.cli.shell import _get_local_completions
 
