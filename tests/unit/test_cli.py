@@ -1,3 +1,5 @@
+import dataclasses
+import datetime as dt
 import importlib
 import re
 import sys
@@ -472,6 +474,187 @@ def test_ls_sorts_case_insensitively_like_coreutils_and_eza():
     listed = run('ls').stdout.split()
 
     assert listed == ['a.txt', 'apple.txt', 'B.md', 'Zebra.txt']
+
+
+def _tree_names(out: str) -> list[str]:
+    """Entry names from tree output, in printed order (root and count dropped)."""
+    return [
+        line.split('── ', 1)[1].strip() for line in out.splitlines() if '── ' in line
+    ]
+
+
+def _by_size() -> None:
+    """/big.txt (9 bytes), /mid.txt (5), /small.txt (2) and /d/."""
+    run('echo', 'aaaaaaaa', '-f', '/big.txt')
+    run('echo', 'aaaa', '-f', '/mid.txt')
+    run('echo', 'a', '-f', '/small.txt')
+    run('mkdir', '/d')
+
+
+def _sizeless_session() -> list[str]:
+    """Install a session whose listings omit sizes, and log every stat path.
+
+    Mirrors a cloud listing that reports names and kinds only, which is
+    what makes a size sort's stats (and their reuse) observable; memory
+    listings carry the size for free and would hide both.
+    """
+    stats: list[str] = []
+
+    class SizelessBackend(MemoryBackend):
+        def list_dir(self, path):
+            for entry in super().list_dir(path):
+                yield entry._replace(size=None)
+
+        def stat(self, path):
+            stats.append(str(path))
+            return super().stat(path)
+
+    cli.use_fs(Storix(SizelessBackend()))
+    return stats
+
+
+def _stamp_mtimes(*oldest_first: str) -> None:
+    """Install a session whose mtimes follow the given order, oldest first.
+
+    Scripted rather than clock-driven: two writes can land in the same tick
+    on a coarse timer, and a tie would leave the expected order ambiguous.
+    """
+    stamps = {
+        name: dt.datetime(2026, 1, 1, tzinfo=dt.UTC) + dt.timedelta(minutes=minute)
+        for minute, name in enumerate(oldest_first)
+    }
+
+    class StampedBackend(MemoryBackend):
+        def stat(self, path):
+            raw = super().stat(path)
+            stamp = stamps.get(path.name)
+            return raw if stamp is None else dataclasses.replace(raw, modified=stamp)
+
+    cli.use_fs(Storix(StampedBackend()))
+
+
+def test_ls_sorts_by_size_largest_first_with_directories_last():
+    """Given files of different sizes beside a directory,
+    When ls sorts by size,
+    Then the largest file leads and the directory (no size of its own) trails."""
+    _by_size()
+
+    listed = run('ls', '--sort', 'size').stdout.split()
+
+    assert listed == ['big.txt', 'mid.txt', 'small.txt', 'd/']
+
+
+def test_ls_sorts_by_size_reusing_the_long_listing_stat_batch():
+    """Given a listing that carries no sizes, so ls -l has to batch a stat per entry,
+    When that long listing is sorted by size,
+    Then the batch is reused instead of a second pass over the same entries."""
+    stats = _sizeless_session()
+    _by_size()
+
+    stats.clear()
+    unsorted_ = run('ls', '-l')
+    baseline = len(stats)
+    stats.clear()
+    by_size = run('ls', '-l', '--sort', 'size')
+
+    assert unsorted_.exit_code == by_size.exit_code == 0
+    assert baseline > 0  # the long listing does stat every entry
+    assert len(stats) == baseline
+
+
+def test_ls_stats_per_entry_only_when_the_sort_asks_for_it():
+    """Given a listing that carries no sizes,
+    When a plain ls runs and then the same listing is sorted by size,
+    Then only the size sort pays for the per-entry stats it needs."""
+    stats = _sizeless_session()
+    _by_size()
+
+    stats.clear()
+    run('ls')
+    plain = [path for path in stats if path.endswith('.txt')]
+    stats.clear()
+    run('ls', '--sort', 'size')
+    by_size = [path for path in stats if path.endswith('.txt')]
+
+    assert plain == []
+    assert len(by_size) == 3  # the three files, in one batch, never /d
+
+
+def test_ls_sorts_by_modification_time_newest_first():
+    """Given entries written at known, distinct times,
+    When ls sorts by time, whether spelled --sort time or the -t shorthand,
+    Then the newest entry leads in both spellings."""
+    _stamp_mtimes('old.txt', 'middle.txt', 'new.txt')
+    for name in ('middle.txt', 'new.txt', 'old.txt'):
+        run('touch', f'/{name}')
+
+    by_option = run('ls', '--sort', 'time').stdout.split()
+
+    assert by_option == ['new.txt', 'middle.txt', 'old.txt']
+    assert run('ls', '-t').stdout.split() == by_option
+
+
+def test_ls_reverse_inverts_whichever_order_was_chosen():
+    """Given a listing ordered by name, by time or by size,
+    When -r is added,
+    Then each order comes out exactly inverted."""
+    _stamp_mtimes('small.txt', 'big.txt', 'mid.txt')
+    _by_size()
+
+    for order in (('ls',), ('ls', '-t'), ('ls', '--sort', 'size')):
+        forward = run(*order).stdout.split()
+
+        assert run(*order, '-r').stdout.split() == forward[::-1]
+
+
+def test_tree_sorts_siblings_by_size_largest_first_with_directories_last():
+    """Given a directory holding files of different sizes and a subdirectory,
+    When tree sorts siblings by size,
+    Then the largest file leads and the subdirectory trails, as in ls."""
+    _by_size()
+
+    listed = _tree_names(run('tree', '-L', '1', '/', '--sort', 'size').stdout)
+
+    assert listed == ['big.txt', 'mid.txt', 'small.txt', 'd']
+
+
+def test_tree_sorts_siblings_by_modification_time_newest_first():
+    """Given siblings written at known, distinct times,
+    When tree sorts them by time,
+    Then the newest sibling leads."""
+    _stamp_mtimes('old.txt', 'middle.txt', 'new.txt')
+    for name in ('middle.txt', 'new.txt', 'old.txt'):
+        run('touch', f'/{name}')
+
+    listed = _tree_names(run('tree', '--sort', 'time', '/').stdout)
+
+    assert listed == ['new.txt', 'middle.txt', 'old.txt']
+
+
+def test_tree_reverse_inverts_the_sibling_order():
+    """Given siblings ordered by name or by size,
+    When -r is added,
+    Then each order comes out exactly inverted, as in ls."""
+    _by_size()
+
+    for order in (('tree', '-L', '1', '/'), ('tree', '-L', '1', '/', '--sort', 'size')):
+        forward = _tree_names(run(*order).stdout)
+
+        assert _tree_names(run(*order, '-r').stdout) == forward[::-1]
+
+
+@pytest.mark.parametrize('command', ['ls', 'tree'])
+def test_listing_commands_reject_an_unknown_sort_key(command):
+    """Given a sort key neither listing command knows,
+    When it is passed to either of them,
+    Then the invocation is rejected and the message names the known keys."""
+    result = run(command, '--sort', 'bogus')
+
+    assert result.exit_code != 0
+    assert 'bogus' in result.output  # the value that was rejected
+    # asserted token by token: the exact phrasing belongs to click, and the
+    # panel wraps it at the terminal width
+    assert all(key in result.output for key in ('name', 'time', 'size'))
 
 
 def test_cat_reproduces_file_bytes_exactly():

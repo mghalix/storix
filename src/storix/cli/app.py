@@ -16,6 +16,7 @@ import threading
 
 from collections import defaultdict
 from contextlib import contextmanager, suppress
+from enum import auto
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, NoReturn
@@ -39,7 +40,7 @@ from storix import ObservabilityLayer, TransferEvent
 from storix._sync._compat import concurrent
 from storix.config import StorixSettings, resolve_profile
 from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
-from storix.enums import PathKind
+from storix.enums import PathKind, StorixEnum
 from storix.errors import PathNotFoundError, StorageError, TransferStoppedError
 
 from . import config_cmds, maintenance
@@ -78,7 +79,7 @@ from .state import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator
+    from collections.abc import Generator, Iterator, Mapping
     from pathlib import PurePosixPath
     from types import FrameType
 
@@ -160,6 +161,19 @@ def _count_label(count: int, singular: str, plural: str) -> str:
     return singular if count == 1 else plural
 
 
+class _ListingSort(StorixEnum):
+    """Key a listing is ordered by, shared by ``ls`` and ``tree``.
+
+    One vocabulary for both commands: they list the same thing, so they
+    order it the same way (``--sort`` plus ``-r``), and ``ls`` keeps ``-t``
+    as the coreutils shorthand.
+    """
+
+    NAME = auto()
+    TIME = auto()
+    SIZE = auto()
+
+
 def _listing_order(entry: DirEntry) -> tuple[str, str]:
     """Sort key for a displayed listing: case-insensitive, like ls and eza.
 
@@ -168,6 +182,71 @@ def _listing_order(entry: DirEntry) -> tuple[str, str]:
     locale nor eza does. The exact name breaks ties so the order is total.
     """
     return entry.name.lower(), entry.name
+
+
+def _sorted_entries(
+    fs: Storix,
+    entries: list[DirEntry],
+    sort: _ListingSort,
+    *,
+    reverse: bool = False,
+    stats: Mapping[str, RawStat] | None = None,
+) -> list[DirEntry]:
+    """Order one directory's entries by the key the listing commands share.
+
+    ``name`` collates case-insensitively (``_listing_order``), ``time`` puts
+    the newest first, ``size`` the largest first, and ``reverse`` inverts
+    whichever was chosen. The name collation is applied first, so entries
+    tying on a time or a size still come out alphabetical.
+
+    ``time`` and ``size`` need a stat a listing does not always carry, so
+    what the caller already holds is reused (``ls -l`` batches stats for its
+    own columns), a listing that carried the size is taken at its word, and
+    only what is left over is fetched - in one concurrent batch
+    (``stat_all``), one round trip's latency rather than one per entry.
+
+    Args:
+        fs: Session used to fetch any stat the chosen key still needs.
+        entries: One directory's entries, in any order.
+        sort: Key to order by.
+        reverse: Invert the chosen order, as ``ls -r`` and ``tree -r`` do.
+        stats: Stats the caller already holds, keyed by entry name.
+
+    Raises:
+        StorageError: If a stat the chosen key needs cannot be read.
+    """
+    ordered = sorted(entries, key=_listing_order)
+    if sort is not _ListingSort.NAME and len(ordered) > 1:
+        known = dict(stats or {})
+        needed = [
+            e
+            for e in ordered
+            if e.name not in known
+            and (sort is _ListingSort.TIME or (not e.is_dir and e.size is None))
+        ]
+        known |= {
+            e.name: s
+            for e, s in zip(needed, stat_all(fs, [e.path for e in needed]), strict=True)
+        }
+
+        def size_of(entry: DirEntry) -> int:
+            # a directory has no meaningful size of its own - ls -l and
+            # tree -l both render '-' in its size column - so it cannot
+            # compete on one: -1 sinks every directory below the files,
+            # identically in both commands
+            if entry.is_dir:
+                return -1
+            batched = known.get(entry.name)
+            # absent from the batch means the listing carried the size
+            return batched.size if batched is not None else (entry.size or 0)
+
+        if sort is _ListingSort.TIME:
+            ordered.sort(key=lambda e: known[e.name].modified, reverse=True)
+        else:
+            ordered.sort(key=size_of, reverse=True)
+    if reverse:
+        ordered.reverse()
+    return ordered
 
 
 # --- listing / navigation ---
@@ -179,24 +258,34 @@ def ls(
     *,
     long: Annotated[bool, typer.Option('-l', '--long')] = False,
     all_: Annotated[bool, typer.Option('-a', '--all')] = False,
+    sort: Annotated[
+        _ListingSort,
+        typer.Option('--sort', help='order entries by name | time | size'),
+    ] = _ListingSort.NAME,
     time_sort: Annotated[
         bool,
-        typer.Option('-t', '--time', help='sort by modification time, newest first'),
+        typer.Option('-t', '--time', help='shorthand for --sort time (newest first)'),
     ] = False,
-    reverse: Annotated[bool, typer.Option('-r', '--reverse')] = False,
+    reverse: Annotated[
+        bool, typer.Option('-r', '--reverse', help='invert the order')
+    ] = False,
 ) -> None:
     """List directory contents (hidden entries need -a).
 
+    --sort orders entries by name (default), time (newest first) or size
+    (largest first, directories last); -t is the coreutils shorthand for
+    --sort time and -r inverts whichever order was chosen.
+
     The per-entry backend lookups a listing does not carry for free -
     directory emptiness (the folder glyph), mtime (``-t``), a missing file
-    size (``-l``) - are batched concurrently (``state.empty_all`` /
-    ``stat_all``), so a directory of N entries on a cloud backend costs one
-    round trip's worth of latency, not N.
+    size (``-l``, ``--sort size``) - are batched concurrently
+    (``state.empty_all`` / ``stat_all``), so a directory of N entries on a
+    cloud backend costs one round trip's worth of latency, not N.
     """
     fs = _fs()
     base = fs.resolve(path)
     try:
-        entries = sorted(fs.scandir(path, all=all_), key=_listing_order)
+        entries = list(fs.scandir(path, all=all_))
     except StorageError as exc:
         _die('ls', exc)
 
@@ -207,17 +296,23 @@ def ls(
         empty = dict(zip(dir_names, empty_all(fs, base, dir_names), strict=True))
 
     entry_stats: dict[str, RawStat] = {}
-
-    if (time_sort and len(entries) > 1) or long:
-        # entry.path, not base / name: listing a file yields that one file,
-        # whose path is base itself
-        fetched_stats = stat_all(fs, [e.path for e in entries])
-        entry_stats = {e.name: s for e, s in zip(entries, fetched_stats, strict=True)}
-
-    if time_sort and len(entries) > 1:
-        entries.sort(key=lambda e: entry_stats[e.name].modified, reverse=True)
-    if reverse:
-        entries.reverse()
+    # -t is the shorthand, so it wins when both ways of asking are given
+    order = _ListingSort.TIME if time_sort else sort
+    try:
+        if long:
+            # entry.path, not base / name: listing a file yields that one
+            # file, whose path is base itself
+            fetched_stats = stat_all(fs, [e.path for e in entries])
+            entry_stats = {
+                e.name: s for e, s in zip(entries, fetched_stats, strict=True)
+            }
+        # the -l batch already covers every mtime and size, so sorting by
+        # one of them reuses it instead of paying for a second pass
+        entries = _sorted_entries(
+            fs, entries, order, reverse=reverse, stats=entry_stats
+        )
+    except StorageError as exc:
+        _die('ls', exc)
 
     def label(entry: DirEntry) -> Text:
         if entry.is_dir and show_empty:
@@ -319,32 +414,6 @@ class _LevelBuffer:
         return self._grouped.get(parent, [])
 
 
-def _sorted_entries(fs: Storix, entries: list[DirEntry], sort: str) -> list[DirEntry]:
-    """Order a directory's entries for ``tree`` by the chosen key.
-
-    ``name`` sorts alphabetically; ``time`` newest first; ``size`` largest
-    first, with directories (no meaningful size) sinking to the bottom.
-    ``time`` and ``size`` need a stat per entry the listing did not carry,
-    so those are batched concurrently (``stat_all``), one round trip's
-    latency for the level rather than one per entry.
-    """
-    if sort == 'time':
-        stats = stat_all(fs, [e.path for e in entries])
-        mtime = {e.name: s.modified for e, s in zip(entries, stats, strict=True)}
-        return sorted(entries, key=lambda e: mtime[e.name], reverse=True)
-    if sort == 'size':
-        missing = [e.path for e in entries if not e.is_dir and e.size is None]
-        extra = dict(zip(missing, (s.size for s in stat_all(fs, missing)), strict=True))
-
-        def size_of(entry: DirEntry) -> int:
-            if entry.is_dir:
-                return -1
-            return entry.size if entry.size is not None else extra[entry.path]
-
-        return sorted(entries, key=size_of, reverse=True)
-    return sorted(entries, key=_listing_order)
-
-
 @app.command(rich_help_panel=_NAVIGATE)
 def tree(
     path: Annotated[str | None, typer.Argument()] = None,
@@ -359,17 +428,20 @@ def tree(
         typer.Option('-l', '--long', help='show size and kind columns (eza-style)'),
     ] = False,
     sort: Annotated[
-        str, typer.Option('--sort', help='order siblings by name | time | size')
-    ] = 'name',
+        _ListingSort,
+        typer.Option('--sort', help='order siblings by name | time | size'),
+    ] = _ListingSort.NAME,
+    reverse: Annotated[
+        bool, typer.Option('-r', '--reverse', help='invert the order')
+    ] = False,
 ) -> None:
     """Print a directory tree (unix tree style, with the closing count).
 
-    -L caps the depth, -l adds eza-style size and kind columns, --sort
-    orders siblings by name (default), time, or size.
+    -L caps the depth and -l adds eza-style size and kind columns. Siblings
+    take the same ordering as ls: --sort by name (default), time (newest
+    first) or size (largest first, directories last), and -r inverts it.
     """
     fs = _fs()
-    if sort not in {'name', 'time', 'size'}:
-        _die('tree', ValueError(f'sort must be name, time or size, got {sort!r}'))
     if level is not None and level < 1:
         _die('tree', ValueError(f'level must be at least 1, got {level}'))
     # one core walk carries the traversal (concurrent, depth-bounded);
@@ -408,7 +480,9 @@ def tree(
     def render(parent: StorixPath, prefix: str, depth: int) -> None:
         nonlocal dirs, files
         buffer.ensure_level(depth)
-        children = _sorted_entries(fs, buffer.children_of(parent), sort)
+        children = _sorted_entries(
+            fs, buffer.children_of(parent), sort, reverse=reverse
+        )
         for i, child in enumerate(children):
             last = i == len(children) - 1
             branch = '└── ' if last else '├── '
