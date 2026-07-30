@@ -1288,3 +1288,92 @@ def test_a_directory_reports_no_version():
     fs.mkdir('/d')
 
     assert (fs.stat('/d')).version is None
+
+
+def test_a_trailing_slash_refuses_to_become_a_file():
+    """Given `cp a.txt nodir/`, when nodir is missing, then it is an error.
+
+    The separator says the destination is a directory. Treating it as a name
+    to create under put the file's content at a path the user never asked
+    for, and reported success.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+
+    with pytest.raises(NotADirectoryError) as exc_info:
+        fs.cp('/a.txt', '/nodir/')
+
+    # quoted as typed: '/nodir' reads as a different mistake than the one made
+    assert "'/nodir/'" in str(exc_info.value)
+    assert not fs.exists('/nodir')
+
+
+def test_a_trailing_slash_refuses_an_existing_file_too():
+    """Given a file at the destination, when named with a slash, then it errors.
+
+    coreutils reports ENOTDIR for both the missing and the occupied case.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+    fs.echo('two', '/b.txt')
+
+    with pytest.raises(NotADirectoryError):
+        fs.cp('/a.txt', '/b.txt/')
+
+    assert fs.cat('/b.txt') == b'two'
+
+
+def test_mv_honors_a_trailing_slash_as_well():
+    """Given `mv a.txt nodir/`, when nodir is missing, then nothing moves."""
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+
+    with pytest.raises(NotADirectoryError):
+        fs.mv('/a.txt', '/nodir/')
+
+    assert fs.cat('/a.txt') == b'one'
+
+
+def test_a_trailing_slash_onto_a_real_directory_still_copies_into_it():
+    """Given an existing directory, when named with a slash, then it receives.
+
+    The assertion is satisfied, so the separator changes nothing.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+    fs.mkdir('/dst')
+
+    fs.cp('/a.txt', '/dst/')
+
+    assert fs.cat('/dst/a.txt') == b'one'
+
+
+def test_a_rename_without_a_slash_is_unchanged():
+    """Given no separator, when copying onto a new name, then it renames.
+
+    The default path has to stay exactly as it was: a destination that does
+    not exist is still a rename target.
+    """
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+
+    fs.cp('/a.txt', '/b.txt')
+
+    assert fs.cat('/b.txt') == b'one'
+
+
+def test_a_path_object_destination_carries_no_assertion():
+    """Given a StorixPath, when used as a destination, then it renames.
+
+    pathlib normalizes a trailing separator away at construction, so a
+    caller handing over a path object has already discarded the assertion
+    and cannot be held to it.
+    """
+    from storix.types import StorixPath
+
+    fs = Storix(MemoryBackend())
+    fs.echo('one', '/a.txt')
+
+    fs.cp('/a.txt', StorixPath('/b.txt/'))
+
+    assert fs.cat('/b.txt') == b'one'
