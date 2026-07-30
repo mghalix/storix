@@ -131,7 +131,7 @@ class UnsupportedOperationError(StorageError):
     Raised when an argument or operation requires a capability the backend
     does not advertise (see :class:`~storix.models.Capabilities`), e.g.
     passing ``content_type=`` to a local filesystem. Deliberately not an
-    :class:`OSError`: nothing went wrong with the path — the backend simply
+    :class:`OSError`: nothing went wrong with the path: the backend simply
     cannot do what was asked.
     """
 
