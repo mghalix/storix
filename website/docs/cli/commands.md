@@ -19,12 +19,44 @@ Every command supports `--help`. Familiar flags behave as they do in unix:
 `ls -l` humanize sizes in binary units like coreutils (`165M`); `tree` closes
 with the usual `N directories, M files`.
 
+## Several paths at once
+
+`ls`, `du`, `stat`, `tree` and `find` each take as many paths as you like, and
+report them the way their unix counterparts do:
+
+```bash
+sx ls a.txt b.txt /media /logs   # files first, then a block per directory
+sx du -sh /media /logs           # one total per argument
+sx stat a.txt b.txt              # one block per argument
+sx tree /media /logs             # one tree per argument, one closing count
+sx find /media /logs --type f    # each subtree in turn
+```
+
+`ls` leads with the plain files as one group, then gives each directory its own
+`name:` header with a blank line between blocks - and no header at all when
+there is only one argument. `du`, `stat` and `find` keep the order you wrote,
+add no header, and `du` prints no combined grand total. `tree` roots each
+argument separately and closes with the count over all of them.
+
+One difference from coreutils, and it is deliberate: sx checks every argument
+before it acts on any of them. `ls a.txt nope b.txt` reports the missing path
+and lists nothing, where unix `ls` lists `a.txt` first and then complains. The
+same contract `cat` already keeps, and the reason is that a half-finished report
+is harder to notice than a refused one.
+
+The per-argument backend work is batched across all of them, so several
+arguments cost one round trip's worth of latency rather than one each.
+
 ## Ordering a listing: `ls` and `tree`
 
 The two listing commands take the same ordering flags: `--sort name|time|size`
 and `-r` to invert whichever order was chosen. `name` is the default and
 collates case-insensitively, like coreutils under a UTF-8 locale and like eza.
 On `ls`, `-t` is the coreutils shorthand for `--sort time`.
+
+`--sort` orders the entries inside a listing. `ls` orders its directory
+*arguments* by name whatever `--sort` says, since ordering those by a stat would
+cost a round trip nothing else on the command needs; `-r` inverts both.
 
 ```bash
 sx ls --sort size          # largest first
@@ -62,6 +94,7 @@ reported depth, `-h` humanizes.
 sx du /data          # per-directory sizes + total
 sx du -a /data       # include every file
 sx du -sh /data      # one human-readable total
+sx du -sh /a /b      # one total each, in the order written
 ```
 
 For an itemized view - every file and directory with its size - use `tree -l`

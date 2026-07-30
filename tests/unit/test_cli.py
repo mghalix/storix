@@ -657,6 +657,184 @@ def test_listing_commands_reject_an_unknown_sort_key(command):
     assert all(key in result.output for key in ('name', 'time', 'size'))
 
 
+def _mixed_arguments() -> None:
+    """/a.txt (2 bytes), /b.txt (3), /d1/{x,y} and /d2/z."""
+    run('echo', 'a', '-f', '/a.txt')
+    run('echo', 'bb', '-f', '/b.txt')
+    run('mkdir', '/d1', '/d2')
+    run('touch', '/d1/x', '/d1/y', '/d2/z')
+
+
+def test_ls_groups_file_arguments_before_each_directory_block():
+    """Given files and directories named in one ls,
+    When it lists them,
+    Then the files come out as one leading group and each directory follows
+    under its own header, one blank line apart, as unix ls prints them."""
+    _mixed_arguments()
+
+    out = run('ls', '/b.txt', '/d1', '/a.txt', '/d2').stdout
+
+    assert out.splitlines() == [
+        'a.txt  b.txt',
+        '',
+        '/d1:',
+        'x  y',
+        '',
+        '/d2:',
+        'z',
+    ]
+
+
+def test_ls_heads_a_block_only_when_more_than_one_argument_is_given():
+    """Given a single directory argument,
+    When ls lists it,
+    Then no header names it, and the same directory does get one as soon as
+    a second argument needs telling apart."""
+    _mixed_arguments()
+
+    alone = run('ls', '/d1').stdout
+
+    assert alone.splitlines() == ['x  y']
+    assert '/d1:' in run('ls', '/d1', '/d2').stdout
+
+
+def test_ls_orders_directory_arguments_by_name_and_inverts_them_with_reverse():
+    """Given directory arguments written out of order,
+    When ls lists them, and then lists them again with -r,
+    Then the blocks come out by name, and -r inverts that order."""
+    _mixed_arguments()
+
+    forward = [
+        line for line in run('ls', '/d2', '/d1').stdout.splitlines() if ':' in line
+    ]
+    inverted = [
+        line
+        for line in run('ls', '-r', '/d2', '/d1').stdout.splitlines()
+        if ':' in line
+    ]
+
+    assert forward == ['/d1:', '/d2:']
+    assert inverted == ['/d2:', '/d1:']
+
+
+def test_ls_batches_the_long_listing_stats_across_every_argument(monkeypatch):
+    """Given several directory arguments to a long listing,
+    When ls fetches the stats its columns need,
+    Then it fetches them in one batch for all of them, not one batch each."""
+    _mixed_arguments()
+    batches: list[int] = []
+    real_stat_all = cli.stat_all
+
+    def counting_stat_all(fs, paths):
+        batched = list(paths)
+        batches.append(len(batched))
+        return real_stat_all(fs, batched)
+
+    monkeypatch.setattr(cli, 'stat_all', counting_stat_all)
+
+    result = run('ls', '-l', '/d1', '/d2')
+
+    assert result.exit_code == 0
+    assert batches == [3]  # x, y and z, in one round trip's worth of latency
+
+
+def test_ls_batches_the_folder_glyph_lookups_across_every_argument(monkeypatch):
+    """Given several directory arguments whose entries include directories,
+    When ls resolves the empty/full folder glyph for them,
+    Then every argument's lookups run in one concurrent batch."""
+    run('mkdir', '-p', '/d1/sub', '/d2/sub')
+    monkeypatch.setenv('STORIX_CLI_ICONS', '1')
+    from storix.cli.config import load_prefs
+
+    load_prefs.cache_clear()
+    batches: list[list[str]] = []
+    real_concurrent = cli.concurrent
+
+    def counting_concurrent(thunks, **kwargs):
+        collected = list(thunks)
+        batches.append([thunk.func.__name__ for thunk in collected])
+        return real_concurrent(collected, **kwargs)
+
+    monkeypatch.setattr(cli, 'concurrent', counting_concurrent)
+
+    result = run('ls', '/d1', '/d2')
+
+    assert result.exit_code == 0
+    glyphs = [names for names in batches if 'empty_all' in names]
+    assert glyphs == [['empty_all', 'empty_all']]  # both arguments, one batch
+
+
+@pytest.mark.parametrize('command', ['ls', 'du', 'stat', 'tree', 'find'])
+def test_listing_commands_refuse_every_argument_when_one_is_missing(command):
+    """Given a missing path among valid ones,
+    When any listing command is given all of them,
+    Then it reports the missing one and prints nothing about the valid ones,
+    unlike coreutils, which reports each argument as it reaches it."""
+    _mixed_arguments()
+
+    result = run(command, '/a.txt', '/nope', '/d1')
+
+    assert result.exit_code == 1
+    assert 'does not exist' in result.stderr
+    assert result.stdout == ''
+
+
+def test_du_reports_each_argument_in_the_order_it_was_written():
+    """Given files and directories named in one du,
+    When it reports their usage,
+    Then each argument gets its own report in argument order, with no header
+    and no combined total, as unix du does."""
+    _mixed_arguments()
+
+    lines = _du_lines(run('du', '/b.txt', '/d1', '/a.txt').stdout)
+
+    assert lines == [['3', '/b.txt'], ['0', '/d1'], ['2', '/a.txt']]
+
+
+def test_stat_prints_one_block_per_argument_in_order():
+    """Given two files named in one stat,
+    When it reports them,
+    Then each gets its own block, in argument order, and neither block needs
+    a header because it already names its own path (as unix stat does)."""
+    _mixed_arguments()
+
+    out = run('stat', '/b.txt', '/a.txt').stdout
+
+    assert [line for line in out.splitlines() if 'File:' in line] == [
+        '  File: b.txt',
+        '  File: a.txt',
+    ]
+
+
+def test_tree_prints_a_tree_per_argument_and_one_combined_count():
+    """Given two directories named in one tree,
+    When it renders them,
+    Then each is rooted separately and the closing count is the total over
+    both, as unix tree reports it."""
+    _mixed_arguments()
+
+    out = run('tree', '/d1', '/d2').stdout
+
+    assert '/d1' in out
+    assert '/d2' in out
+    assert _tree_names(out) == ['x', 'y', 'z']
+    assert '2 directories, 3 files' in out  # both roots, counted once
+
+
+def test_find_searches_each_argument_in_turn():
+    """Given two directories named in one find,
+    When it searches them,
+    Then each argument's whole subtree is printed before the next argument's,
+    in the order the arguments were written."""
+    _mixed_arguments()
+
+    lines = run('find', '/d2', '/d1', '--type', 'f').stdout.splitlines()
+
+    # unordered within one argument: find streams the backend's listing order
+    assert lines[:1] == ['/d2/z']
+    assert sorted(lines[1:]) == ['/d1/x', '/d1/y']
+
+
 def test_cat_reproduces_file_bytes_exactly():
     """`sx cat f > copy` must be byte-identical: no wrapping, no tab expansion."""
     long_line = 'x' * 300
