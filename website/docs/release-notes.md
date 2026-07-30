@@ -2,9 +2,19 @@
 
 ## [0.5.4] - 2026-07-30
 
-### What's Changed
-#### Fixes
-* fix(core): bound the glob walk to the depth the pattern can reach by @mghalix in https://github.com/mghalix/storix/pull/87
+A performance and stability release for recursive search. Glob queries without recursive
+wildcards (\*\*) are now bounded to the exact depth the pattern can reach, preventing full-
+subtree traversals and shell freezes during pattern expansion.
+
+### Fixed
+
+- Bounded glob directory walks (#87): core.py walked the entire subtree beneath the search
+  base regardless of the pattern, causing shallow queries (such as _ or sub/_.md) in large
+  directories to hang indefinitely. This reached users as shell freezes during prompt
+  expansion on Tab or Enter (e.g., sx ls _ followed by Tab). The walk is now bounded by the
+  maximum segment depth derived from the pattern (reducing a home directory glob('_') lookup
+  from an indefinite hang to 0.003s). Patterns carrying \*\* are safely detected and continue to
+  perform an exhaustive walk.
 
 ## [0.5.3] - 2026-07-30
 
