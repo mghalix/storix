@@ -1,5 +1,11 @@
 # Release Notes
 
+## [0.5.4] - 2026-07-30
+
+### What's Changed
+#### Fixes
+* fix(core): bound the glob walk to the depth the pattern can reach by @mghalix in https://github.com/mghalix/storix/pull/87
+
 ## [0.5.3] - 2026-07-30
 
 The shell learns to expand patterns and the listing commands learn to take more
