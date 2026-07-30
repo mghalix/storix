@@ -2,16 +2,125 @@
 
 ## [0.5.3] - 2026-07-30
 
-### What's Changed
-#### Features
-* feat(cli): take several paths in the listing commands by @mghalix in https://github.com/mghalix/storix/pull/80
-* feat(cli): expand glob patterns at the shell prompt by @mghalix in https://github.com/mghalix/storix/pull/79
-* feat(cli): echo -n and writing a file from a pipe by @mghalix in https://github.com/mghalix/storix/pull/81
-#### Fixes
-* fix(cli): mark output that does not end in a newline by @mghalix in https://github.com/mghalix/storix/pull/84
-* fix(cli): escape completed names by rule, wildcards included by @mghalix in https://github.com/mghalix/storix/pull/83
-#### Documentation
-* docs(repo): record the deferred CLI restructure and chaining by @mghalix in https://github.com/mghalix/storix/pull/82
+The shell learns to expand patterns and the listing commands learn to take more
+than one path, which are the two halves of the same thing: `ls *.md` now works,
+at the prompt and on Tab. Alongside them, `echo` gains `-n` and a pipe, and two
+quoting defects are fixed - one of which silently split a filename into two
+arguments.
+
+Every change here is in `sx`. The library is untouched.
+
+### Added
+
+- **Glob expansion at the prompt** (#79): `ls *.md`, `rm *.tmp` and
+  `cat sub/*.md` now expand against the session's backend, which the outer
+  shell cannot do because the paths live in remote storage. Expansion happens
+  both on Enter and on Tab, where the pattern is replaced on the line with the
+  names it matched, the way zsh's `expand-or-complete` does:
+
+  ```console
+  / > cat *.md<TAB>
+  / > cat a.md b.md with\ space.md
+  ```
+
+  A quoted pattern is left alone - '*.md', "*.md" and \*.md all reach the
+  command as the literal text. That distinction survives tokenizing, which
+  shlex would otherwise erase along with the quotes.
+
+  No match reports the pattern and runs nothing, which is zsh's behavior rather
+  than bash's. bash hands the unexpanded pattern to the command, and an object
+  store accepts * in a key, so rm *.tmp with no matches could address or
+  create a literal *.tmp object.
+
+  Expanded names are relative unless the pattern was absolute, so
+  ls *.md in a deep directory does not become a column of full paths. Only
+  path positions expand: not the command name, not an option token, and not a
+  redirect target, which names a file being written rather than one to be
+  found.
+
+- Several paths in the listing commands (#80): ls, du, stat, tree
+  and find each take one or more paths, matching what their unix counterparts
+  have always done, and what makes an expanded pattern useful for more than one
+  match. ls a.txt d1 d2 lists the plain files first as one group, then each
+  directory under a name: header, with no header at all for a single
+  argument. du, stat and find report per argument in argument order;
+  tree prints one rooted tree per argument and a single combined total.
+
+- storix still validates every argument before acting on any of them, so one
+  bad path refuses the whole command. That is a deliberate divergence from
+  coreutils, which processes operands one at a time and reports failures as it
+  goes, and it now holds for several arguments the same way it held for one.
+
+- Batching is preserved: several arguments do not become several serial round
+  trips. ls issues one concurrent listing batch, one flattened stat batch
+  covering both the -l columns and the sort keys across every block, and one
+  batch for the directory glyphs.
+- echo -n and writing a file from a pipe (#81): -n suppresses the
+  trailing newline, and a pipe writes into storage with no positional argument
+  at all:
+
+  some-command | sx echo -f /dest.txt
+
+- The pipe streams rather than buffering, so a large file does not have to fit
+  in memory, and its bytes are written verbatim - nothing decodes them and
+  nothing renders them. A terminal is never read as data, which is what keeps
+  typing echo at the interactive prompt from swallowing the next line. A lone
+- stays literal text: unlike cat -, where the operand is a path, echo's
+  operand is content, so overloading it would leave no way to print a dash.
+
+### Fixed
+
+- Output that does not end in a newline is marked (#84): echo -n hi and
+  cat of a file whose last byte is not a newline both left the next prompt
+  welded to the output. Adding a newline unconditionally would have fixed that
+  and lost the distinction, so a terminal now gets zsh's % in inverse video,
+  then the newline:
+
+  ```console
+  / > echo hi
+  hi
+  / > echo -n hi
+  hi%
+  ```
+
+- Captured output stays byte-exact: no mark, no added newline, which is the
+  entire point of -n. TERM=dumb degrades to a plain %.
+- Completed names are escaped by rule, wildcards included (#83): tab
+  completion inserted a filename with only an ad hoc set of characters escaped.
+  A name containing \* or ? was inserted bare and then re-expanded as a
+  pattern, so the command acted on whatever matched rather than the file that
+  was picked.
+
+- The wildcards were the reported symptom. A literal backslash was the worse
+  defect: back\slash.txt had its backslash silently eaten, and
+  weird\ name.txt split into two arguments. Escaping now follows a rule
+  rather than a list - every ASCII character that is not alphanumeric or in
+  shlex's safe set - which is also what makes escaping the backslash possible
+  at all, since a chain of replacements cannot tell an inserted backslash from
+  one in the name. Non-ASCII is deliberately left alone: it is syntax to no
+  tokenizer, and a backslash before every accent makes the line unreadable.
+
+### Changed
+
+- prompt-toolkit now requires 3.0.24 or newer (#79), raised from 3.0.0.
+  Before 3.0.24 a Buffer could not be constructed without a current event
+  loop, because loading a history eagerly called asyncio.get_event_loop(),
+  which Python 3.12 raises on rather than creating a loop. The shell had needed
+  that behavior since it gained a persistent history; only the lower-bounds CI
+  job installs the floor, so nothing caught it until now. 3.0.24 is verified
+  against every prompt_toolkit API the shell uses.
+
+### Documentation
+
+- Deferred decisions are recorded with the condition that would revisit
+  them (#82): a new roadmap section, separate from "Under consideration"
+  because these need neither a use case nor a design pass - only sequencing.
+  It holds command chaining (&&, ||, ;) and the sx package restructure
+  that precedes it. cli/app.py holds every command and cli/shell.py holds
+  the REPL, its completion, its key bindings, its redirect parsing and its glob
+  expansion, so the seams are function boundaries where they want to be module
+  boundaries - and shell grammar is the wrong thing to add to that. Pipes
+  between sx commands are named as out of scope.
 
 ## [0.5.2] - 2026-07-30
 
