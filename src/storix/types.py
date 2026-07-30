@@ -15,6 +15,33 @@ if TYPE_CHECKING:
 class StorixPath(PurePosixPath):
     """Base path used accross all storix filesystems."""
 
+    @property
+    def named_as_directory(self) -> bool:
+        """Whether this path was written with a trailing separator.
+
+        A trailing separator is how a shell says "this name is a
+        directory", and it is the one thing a normalized path otherwise
+        forgets: ``StorixPath('nodir/')`` prints as ``nodir``, so the
+        question cannot be answered from ``str()``. pathlib keeps the
+        segments as they were given, which is what makes this answerable
+        at all, and only the last one can carry the separator.
+
+        A derived path reports False, correctly: ``StorixPath('nodir/x')``
+        has a parent of ``nodir`` that nobody wrote a separator on, and an
+        assertion made about one path is not an assertion about another.
+
+        False, rather than an error, when the segments are unavailable:
+        this reads a pathlib internal (present in every Python storix
+        supports), and a cosmetic assertion is not worth raising over.
+        """
+        # pathlib has no public accessor for the arguments as given, and
+        # reconstructing one would mean shadowing every
+        # constructor and operator on PurePosixPath
+        raw: tuple[str, ...] = getattr(self, '_raw_paths', ())  # pyright: ignore[reportAssignmentType]
+        if not raw:
+            return False
+        return os.fspath(raw[-1]).endswith(('/', os.sep))
+
     # TODO: override in cloud-based filesystems
     # positional bool mirrors pathlib.Path.resolve for drop-in parity
     def resolve(self, strict: bool = False) -> Self:  # noqa: FBT001, FBT002
