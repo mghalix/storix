@@ -1,5 +1,6 @@
 """Tests for Storix repository workflow contracts."""
 
+import importlib.util
 import re
 import shutil
 import subprocess
@@ -393,3 +394,37 @@ def test_both_installers_offer_the_same_interface() -> None:
     for option in ('with', 'all', 'version', 'help'):
         assert option in posix.lower(), option
         assert option in windows.lower(), option
+
+
+# --- agent guidance stays true to the tooling it describes ---
+
+
+def _agents_md() -> Path:
+    """The agent guidance CLAUDE.md symlinks to."""
+    return Path(__file__).resolve().parents[2] / 'AGENTS.md'
+
+
+def test_agent_guidance_names_every_hand_written_twin() -> None:
+    """Given the codegen skip list, when documented, then the two agree.
+
+    An agent that trusts a stale list edits only the async flavor of a file
+    the generator never writes, and `unasync.py --check` stays silent
+    because nothing drifted: the sync twin is simply wrong. That failure is
+    invisible until runtime, so the list is held to the code.
+    """
+    spec = importlib.util.spec_from_file_location(
+        'unasync_contract',
+        Path(__file__).resolve().parents[2] / 'scripts' / 'unasync.py',
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    skipped: frozenset[str] = module.SKIP_NAMES
+
+    text = _agents_md().read_text(encoding='utf-8')
+    documented = {name for name in skipped if f'`{name}`' in text}
+
+    assert documented == set(skipped), (
+        'AGENTS.md must name every file in unasync.py SKIP_NAMES; missing: '
+        f'{sorted(set(skipped) - documented)}'
+    )

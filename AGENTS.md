@@ -18,8 +18,27 @@ by `scripts/unasync.py` (token substitution: `async def` -> `def`, `await ` ->
 - The codegen and CI fail if the committed `_sync` tree drifts
   (`uv run --no-sync python scripts/unasync.py --check`).
 - Hand-written twins that are NOT generated: `_compat.py`, `local.py`,
-  `azure.py`, `test_compat.py`. Their primitives differ per flavor, so the sync
-  twin is maintained by hand and must exist.
+  `azure.py`, `opendal.py`, `test_compat.py`. Edit BOTH flavors by hand, and
+  expect `--check` to stay silent about them, because the generator never
+  writes them.
+
+  This is not a gap in `scripts/unasync.py`. Token substitution renames
+  `async def` and drops `await`; it cannot rewrite one library's API into
+  another's, and these files call genuinely different libraries per flavor:
+  `aiofiles.open` against `open`, `opendal.AsyncOperator` against
+  `opendal.Operator`, the `azure.storage.filedatalake.aio` client against its
+  sync counterpart. Their bodies differ in shape, not only in keywords (a sync
+  write is `handle.writelines(chunks)` where the async one awaits per chunk),
+  so generating them would mean maintaining a transpiler for five files
+  instead of maintaining ten files. The `FORBIDDEN` scan enforces the split
+  from the other side: an `aiofiles` or `asyncio` token in a generated file
+  fails the build rather than emitting silently wrong sync code.
+
+  `SKIP_NAMES` in `scripts/unasync.py` is the authority, and a test in
+  `tests/automation/test_workflow_contracts.py` fails when this list drifts
+  from it. A stale list is the dangerous kind of wrong: an agent edits only
+  the async flavor, `--check` reports no drift because nothing is generated,
+  and the sync twin is quietly incorrect.
 
 ## Commands
 
@@ -57,6 +76,214 @@ environment, run outside the checkout, clear inherited Python environment
 state, and use `--refresh`. Keep a core scenario, every meaningful extra, and
 the missing-extra message contract. Editable installs are not packaging tests.
 
+## Git workflow: areas, branches, worktrees, commits, pull requests
+
+`main` is the only permanent in-repository branch. Contributors and
+maintainers create short-lived topic branches from an up-to-date `main` and
+open pull requests directly back to `main`. Do not create or recreate `dev`,
+`develop`, staging, or another long-lived integration branch. Do not route
+topic branches through an intermediate branch.
+
+The repository accepts squash merges only, and the validated pull request
+title becomes the Conventional Commit on `main`. Do not merge `main` into a
+topic branch to satisfy strict checks; rebase it onto `origin/main`.
+
+### Three areas name every change
+
+`core`, `cli`, and `repo` are the areas, and the same three words are reused by
+branch names, commit scopes, pull request titles, and labels:
+
+- `core` the library: the `_async` source of truth and its generated `_sync`
+  twin, backends, layers, capabilities, config, errors.
+- `cli` the driving adapters over the core: `sx` (`cli/app.py`) and the REPL
+  (`cli/shell.py`).
+- `repo` repository-wide work: CI, packaging, release automation, dependency
+  maintenance, development tooling, and agent guidance.
+
+### Core and CLI changes are separate pull requests
+
+Core and CLI behavioral changes must be independently reviewable, so a task
+that needs both is split into two pull requests, core first:
+
+```text
+feat/core/progress-events
+-> core PR labeled `core`
+-> merge into the default branch
+-> update the local default branch
+-> create feat/cli/progress-output from it
+-> CLI PR labeled `cli`
+```
+
+- The core change lands first, in its own branch and pull request. Create the
+  CLI branch only after the core pull request has merged, from the updated
+  default branch.
+- The CLI pull request contains only CLI-specific changes.
+- A behavioral pull request must not contain both core and CLI changes, and must
+  not carry both the `core` and `cli` labels. If it does, split it.
+- This holds even when the core API change exists solely to serve the CLI
+  feature. That is the common case, not an exception (see "The core boundary").
+- Do not create a stacked CLI branch or a stacked CLI pull request unless the
+  maintainer explicitly asks for one.
+- Repository-wide mechanical work (CI, packaging, release automation,
+  dependencies, tooling) is not split artificially. It is one `repo` change
+  unless it also changes core or CLI behavior.
+
+### Branch naming
+
+```text
+<type>/<area>/<kebab-case-description>
+```
+
+Type is the Conventional Commit vocabulary: `feat`, `fix`, `refactor`, `perf`,
+`docs`, `test`, `build`, `ci`, `chore`. Area is `core`, `cli`, or `repo`.
+
+```text
+feat/core/progress-events
+feat/cli/progress-output
+fix/core/path-resolution
+fix/cli/cd-command
+docs/cli/command-reference
+ci/repo/release-workflow
+chore/repo/dependencies
+```
+
+Lowercase and kebab-case throughout. No usernames, agent names, timestamps, or
+other arbitrary identifiers, and no vague description such as `fix/stuff`. The
+exception is workflow-owned `release/vX.Y.Z...` (see "Releasing").
+
+### Worktree location and naming
+
+A linked worktree lives outside the main checkout, under a per-repository
+directory beside it:
+
+```text
+<workspace>/.worktrees/<repository>/<worktree-name>
+```
+
+So when the storix checkout is `<workspace>/storix`, its worktrees are in
+`<workspace>/.worktrees/storix/`. The worktree name is the complete branch name
+with every `/` replaced by `-`:
+
+```text
+feat/core/progress-events -> <workspace>/.worktrees/storix/feat-core-progress-events
+feat/cli/progress-output  -> <workspace>/.worktrees/storix/feat-cli-progress-output
+```
+
+Keep that directory flat. Do not add `core/` or `cli/` subdirectories; the
+branch already names the area, and `feat-core-*` and `feat-cli-*` sort together
+on their own.
+
+Never create a worktree inside the checkout (for example under `.claude/`). A
+nested worktree is a second full checkout that repository-wide tooling walks:
+`./scripts/clean` recurses from the checkout root, and test and lint collection
+would see duplicate trees.
+
+Before adding a worktree, check `git worktree list` for the branch and reuse the
+existing worktree when it is appropriate. Manage the lifecycle with
+`git worktree add`, `git worktree move`, `git worktree remove`, and
+`git worktree prune`. Do not move or delete a registered worktree by hand when a
+`git worktree` command does it.
+
+### Commit messages
+
+Every commit follows Conventional Commits (`cz check` enforces it through the
+commit-msg hook; see `just hooks`). The scope is the stable high-level area:
+
+```text
+feat(core): add progress event protocol
+test(core): cover streaming progress events
+feat(cli): render transfer progress
+fix(cli): handle previous-directory navigation
+docs(cli): document the cd command
+ci(repo): validate release artifacts
+```
+
+Never nest a subsystem into the scope (`feat(cli/render):`, `feat(core/cd):`).
+The subsystem, command, or behavior belongs in the description:
+`feat(cli): add rich progress rendering`, not `feat(cli/render): add progress`.
+
+Keep commits atomic, and keep each commit inside the area its scope names.
+
+### Pull requests
+
+The title is a Conventional Commit with the same high-level scope, because it
+becomes the commit on `main`:
+
+```text
+feat(core): add progress events
+feat(cli): render transfer progress
+ci(repo): validate release artifacts
+```
+
+Apply the area label that matches: `core` for core changes, `cli` for CLI
+changes, `repo` for repository-wide maintenance. The area label is orthogonal to
+the release-note label below, so a pull request carries one of each. Do not
+create a new label unless the maintainer asks.
+
+### Pull request body: authorship and tone
+
+A pull request is a permanent public project artifact. It reads as though the
+maintainer wrote it, and it is self-contained: a future contributor with no
+access to the session that produced it gets the complete picture from the body
+alone.
+
+- Never mention agents, AI, prompts, instructions, terminal sessions,
+  conversations, or delegated work, and never imply that an agent produced the
+  implementation or the description.
+- Never address the reader directly. No `you`, `your`, `for you`, or
+  `I need your decision`.
+- Do not continue the terminal conversation in the body. It is not a reply to
+  anyone.
+- No conversational or agent-oriented headings: `Decisions worth your
+  attention`, `What I need from you`, `Notes for the maintainer`, `What I
+  decided`, `Things you should review`.
+- No process commentary: why an approach was chosen over what an agent first
+  tried, which instructions were followed, what is left for someone to decide,
+  what comes next in the session.
+- State design choices neutrally, as project decisions, tradeoffs, constraints,
+  or implementation details.
+- Concise, professional, repository-facing tone. No speculation,
+  self-congratulation, or narrative. The marketing and maturity rules in
+  "Public communication & feature standards" apply to pull request bodies too.
+
+`.github/PULL_REQUEST_TEMPLATE.md` ships the section set below. Fill the
+sections that carry real information and delete the rest; `Design decisions` and
+`Breaking changes` are optional by design, and no section wants a `None`:
+
+```markdown
+## Summary
+
+## Motivation
+
+## Changes
+
+## Design decisions
+
+## Testing
+
+## Breaking changes
+
+## Checklist
+```
+
+Write:
+
+```markdown
+## Design decisions
+
+- Progress events are emitted by the core layer.
+- Rendering remains the responsibility of CLI consumers.
+- The event API remains transport-agnostic.
+```
+
+Not:
+
+```markdown
+## Decisions worth your attention
+
+I decided to put progress events in core because I think this is what you wanted.
+```
+
 ## Releasing
 
 Versioning follows ADR 0021 (0.x shift-down): a breaking public API change
@@ -72,18 +299,11 @@ optional integrations, runtime lower bounds, typing, automation, strict docs,
 and isolated artifact smoke tests. Branch protection depends only on the
 stable aggregate job named `Required`.
 
-`main` is the only permanent in-repository branch. Contributors and
-maintainers create short-lived topic branches from an up-to-date `main` and
-open pull requests directly back to `main`. Do not create or recreate `dev`,
-`develop`, staging, or another long-lived integration branch. Do not route
-topic branches through an intermediate branch.
-
-The repository accepts squash merges only, and the validated pull request
-title becomes the Conventional Commit on `main`. Do not merge `main` into a
-topic branch to satisfy strict checks; rebase it onto `origin/main`. Branches
-matching `release/vX.Y.Z...` are short-lived and workflow-owned. Only Prepare
-release creates them. Automatic head-branch deletion removes them after merge;
-delete an abandoned branch explicitly after its pull request closes unmerged.
+Branch, worktree, commit, and pull request mechanics are in "Git workflow"
+above; only the release-specific parts are here. Branches matching
+`release/vX.Y.Z...` are short-lived and workflow-owned. Only Prepare release
+creates them. Automatic head-branch deletion removes them after merge; delete
+an abandoned branch explicitly after its pull request closes unmerged.
 
 Give every pull request an intentional release-note label before merge. Use
 `skip-changelog` for internal-only CI, release automation, dependency,
