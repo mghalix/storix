@@ -1394,3 +1394,56 @@ def test_a_derived_path_makes_no_assertion():
     fs.cp('/a.txt', StorixPath('/b.txt/x').parent)
 
     assert fs.cat('/b.txt') == b'one'
+
+
+def test_a_shallow_glob_does_not_reach_below_what_it_can_match():
+    """Given a pattern that cannot match deeply, when it runs, then entries
+    below its reach are never yielded.
+
+    A pattern without ``**`` cannot match below its own segment count, so
+    reading further costs every descendant to answer a question about one
+    level. In a home directory that is a hang rather than a slow answer.
+    """
+    fs = Storix(MemoryBackend())
+    fs.mkdir('/sub/deeper/deepest', parents=True)
+    fs.echo('x', '/a.txt')
+    fs.echo('x', '/sub/deeper/deepest/buried.txt')
+
+    matched = [str(p) for p in fs.glob('*')]
+
+    # sorted because glob yields in walk order, which is not the contract here
+    assert sorted(matched) == ['/a.txt', '/sub']
+    assert not any('buried' in path for path in matched)
+
+
+def test_a_recursive_glob_still_reaches_every_depth():
+    """Given ``**``, when it runs, then the walk stays exhaustive.
+
+    The bound is derived from the pattern, so the one pattern that spans any
+    number of segments must keep the unbounded walk.
+    """
+    fs = Storix(MemoryBackend())
+    fs.mkdir('/sub/deeper/deepest', parents=True)
+    fs.echo('x', '/a.txt')
+    fs.echo('x', '/sub/deeper/deepest/buried.txt')
+
+    found = [str(p) for p in fs.glob('**/*.txt')]
+
+    assert '/sub/deeper/deepest/buried.txt' in found
+    assert '/a.txt' in found
+
+
+def test_glob_depth_is_derived_from_the_pattern():
+    """Given a pattern, when its depth is computed, then it bounds only what
+    it safely can.
+
+    A bound that is too tight drops matches; one that is too loose only
+    costs time, which is why ``**`` anywhere gives up on bounding.
+    """
+    from storix._sync.core import _glob_depth
+
+    assert _glob_depth('*') == 1
+    assert _glob_depth('*.md') == 1
+    assert _glob_depth('sub/*.md') == 2
+    assert _glob_depth('**/*.md') is None
+    assert _glob_depth('sub/**/*.md') is None
