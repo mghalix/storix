@@ -24,6 +24,7 @@ class WriteLogLayer(LayerBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         written = 0
 
@@ -40,6 +41,7 @@ class WriteLogLayer(LayerBase):
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
         logger.info('stored path=%s bytes=%d mode=%s', path, written, mode)
 

@@ -56,6 +56,12 @@ class RawStat:
     metadata: Mapping[str, str] | None = None
     """Custom key/value metadata when the backend supports it; else None."""
 
+    version: str | None = None
+    """Opaque validator for the state this stat describes, read from the same
+    response as the rest of it (an ETag, a generation); None on backends
+    without one. A token to hand back to a conditional write as ``if_match``,
+    never to parse, order, or construct (ADR 0033)."""
+
 
 @dto
 class DirEntry:
@@ -140,6 +146,22 @@ class Capabilities:
     The core gates ``provision`` on this, raising when it is absent
     (ADR 0030)."""
 
+    conditional_writes: bool = False
+    """Can write only while the stored object still carries a given
+    ``RawStat.version``, comparing and writing as one operation at the service
+    (ADR 0033). Advertised only for a real guarantee: there is no emulation,
+    because stat-then-compare-then-write reintroduces the race the feature
+    exists to close."""
+
+    exclusive_create: bool = False
+    """Can write only while nothing exists at the path, as one operation
+    (``If-None-Match: *``, ``O_EXCL``). Separate from ``conditional_writes``
+    because the two are separate guarantees and a store can offer either
+    without the other: local disk creates exclusively but cannot compare a
+    version, and an S3-compatible endpoint may take ``If-None-Match`` while
+    refusing ``If-Match``. One flag covering both would say yes to a caller
+    the write then rejects (ADR 0033)."""
+
     def supports(self, capability: Capability) -> bool:
         """Whether the given capability is advertised."""
         return bool(getattr(self, capability))
@@ -191,6 +213,11 @@ class FileProperties(StorixBaseModel):
     metadata: Mapping[str, str] | None = None
     """Custom key/value metadata when the backend supports it; else None."""
 
+    version: str | None = None
+    """Opaque validator for the state this stat describes; None on backends
+    without one. Hand it back to a write as ``if_match`` to make that write
+    conditional on nothing having changed since (ADR 0033)."""
+
     @classmethod
     def from_raw(cls, name: str, raw: RawStat) -> Self:
         """Shape a port-level ``RawStat`` into the user-facing model.
@@ -207,6 +234,7 @@ class FileProperties(StorixBaseModel):
             accessed=raw.accessed,
             kind=raw.kind,
             metadata=raw.metadata,
+            version=raw.version,
         )
 
     def __str__(self) -> str:

@@ -37,11 +37,13 @@ from storix.errors import (
     NotADirectoryError,
     PathNotFoundError,
     PermissionDeniedError,
+    PreconditionFailedError,
     StorageError,
     StorageRootNotFoundError,
     UnsupportedOperationError,
 )
 from storix.models import Capabilities, Entry, RawStat
+from storix.preconditions import IF_MATCH_ABSENT, validate_precondition
 from storix.utils.time import utcnow
 
 from .base import BackendBase
@@ -82,6 +84,9 @@ _OPENDAL_ERRORS: Final[tuple[type[Exception], ...]] = tuple(
 # service-independent, so the map is exact rather than best-effort
 _ERROR_MAP: tuple[tuple[type[Exception], type[StorageError]], ...] = (
     (ope.NotFound, PathNotFoundError),
+    # both precondition forms fail as ConditionNotMatch, including the
+    # exclusive create, which reports "key already exists" under it
+    (ope.ConditionNotMatch, PreconditionFailedError),
     (ope.AlreadyExists, AlreadyExistsError),
     (ope.IsADirectory, IsADirectoryError),
     (ope.NotADirectory, NotADirectoryError),
@@ -182,6 +187,11 @@ class OpendalBackend(BackendBase):
             # on HTTP services, a seek on local files) wherever it can read
             # at all; the Python binding exposes no separate range flag
             ranged_reads=cap.read,
+            # asked of the service rather than assumed of the provider: an
+            # S3-compatible endpoint may take one precondition and not the
+            # other, and opendal reports each separately (ADR 0033)
+            conditional_writes=cap.write_with_if_match,
+            exclusive_create=cap.write_with_if_not_exists,
         )
 
     @staticmethod
@@ -244,6 +254,8 @@ class OpendalBackend(BackendBase):
             created=timestamp,
             modified=timestamp,
             metadata=dict(metadata) if metadata else None,
+            # the etag is already in this response; no extra request (ADR 0033)
+            version=md.etag,
         )
 
     def stat(self, path: PurePosixPath) -> RawStat:
@@ -316,13 +328,17 @@ class OpendalBackend(BackendBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a file from a bounded chunk stream.
 
         Raises:
-            ValueError: If ``chunk_size`` is zero or negative.
+            ValueError: If ``chunk_size`` is zero or negative, or if
+                ``if_match`` accompanies ``mode='a'``.
+            PreconditionFailedError: If ``if_match`` no longer holds.
         """
         size = resolve_chunk_size(chunk_size, self.default_write_chunk_size)
+        validate_precondition(if_match, mode=mode, capabilities=self.capabilities)
         try:
             raw = self.stat(path)
         except PathNotFoundError:
@@ -345,7 +361,7 @@ class OpendalBackend(BackendBase):
                 raise self._error(exc, path) from exc
             return
 
-        options = self._write_options(content_type, metadata)
+        options = self._write_options(content_type, metadata, if_match)
         try:
             with self._op.open(key, 'wb', **options) as file:
                 for chunk in batch_chunks(data, size):
@@ -355,14 +371,30 @@ class OpendalBackend(BackendBase):
 
     @staticmethod
     def _write_options(
-        content_type: str | None, metadata: Mapping[str, str] | None
+        content_type: str | None,
+        metadata: Mapping[str, str] | None,
+        if_match: str | None = None,
     ) -> dict[str, Any]:
-        """Build opendal write options for the capability-gated arguments."""
+        """Build opendal write options for the capability-gated arguments.
+
+        A precondition becomes an option on the write that is already
+        happening, so it costs a header rather than a round trip, and the
+        streaming path keeps streaming (``open`` takes these too).
+
+        Args:
+            content_type: The MIME type to persist, if any.
+            metadata: Custom metadata to persist, if any.
+            if_match: The write precondition, already validated.
+        """
         options: dict[str, Any] = {}
         if content_type is not None:
             options['content_type'] = content_type
         if metadata:
             options['user_metadata'] = dict(metadata)
+        if if_match == IF_MATCH_ABSENT:
+            options['if_not_exists'] = True
+        elif if_match is not None:
+            options['if_match'] = if_match
         return options
 
     def delete(self, path: PurePosixPath) -> None:

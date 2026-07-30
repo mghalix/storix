@@ -44,6 +44,7 @@ class WholeMemoryBackend(MemoryBackend):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         self.full_writes.append(data)
         await MemoryBackend.write_stream(
@@ -53,6 +54,7 @@ class WholeMemoryBackend(MemoryBackend):
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )
 
 

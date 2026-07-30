@@ -109,6 +109,22 @@ class DirectoryNotEmptyError(PathError, OSError):
     _errno = errno.ENOTEMPTY
 
 
+class PreconditionFailedError(PathError):
+    """A conditional write lost: the stored object changed underneath it.
+
+    Raised when the store rejects a write whose ``if_match`` precondition
+    no longer holds (HTTP 412, ``ConditionNotMet``, or the
+    ``FileExistsError`` an ``O_EXCL`` create loses with). A
+    :class:`PathError` like every other error about a single path, and
+    deliberately not a :class:`FileExistsError`: the whole value of a
+    precondition is telling "someone else changed this" apart from "the
+    write failed", so a caller can re-read, re-merge, and retry. No stdlib
+    exception means what this means, so it inherits none (ADR 0033).
+    """
+
+    _template = "precondition failed for '{path}': it is not the expected version"
+
+
 class UnsupportedOperationError(StorageError):
     """The backend does not support the requested feature.
 

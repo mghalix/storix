@@ -154,6 +154,7 @@ class ObservabilityLayer(LayerBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a chunk stream, emitting an event per pulled chunk.
 
@@ -170,4 +171,5 @@ class ObservabilityLayer(LayerBase):
             mode=mode,
             content_type=content_type,
             metadata=metadata,
+            if_match=if_match,
         )

@@ -31,8 +31,10 @@ from storix.errors import (
     IsADirectoryError,
     NotADirectoryError,
     PathNotFoundError,
+    PreconditionFailedError,
     UnsupportedOperationError,
 )
+from storix.preconditions import IF_MATCH_ABSENT
 from storix.types import EchoMode
 
 
@@ -666,3 +668,134 @@ async def test_local_provision_ensures_base_and_reports_present(tmp_path: Path):
     # Then it reports the root already present and the base still exists
     assert created is False
     assert root.is_dir()
+
+
+async def test_a_conditional_write_wins_on_the_version_it_read(
+    backend: StorageBackend,
+):
+    """Given the current version, when writing with it, then the write lands."""
+    if not backend.capabilities.conditional_writes:
+        pytest.skip('backend does not advertise conditional_writes')
+    await backend.write_stream(
+        P('/cw.txt'), _astream(b'one'), mode='w', content_type=None
+    )
+    version = (await backend.stat(P('/cw.txt'))).version
+    assert version is not None, 'conditional_writes requires a version to match'
+
+    await backend.write_stream(
+        P('/cw.txt'),
+        _astream(b'two'),
+        mode='w',
+        content_type=None,
+        if_match=version,
+    )
+
+    assert await backend.read(P('/cw.txt')) == b'two'
+
+
+async def test_a_conditional_write_loses_on_a_stale_version(backend: StorageBackend):
+    """Given a version another write replaced, when writing, then it is refused.
+
+    The whole point: the loser is told, rather than silently overwriting
+    work it never saw.
+    """
+    if not backend.capabilities.conditional_writes:
+        pytest.skip('backend does not advertise conditional_writes')
+    await backend.write_stream(
+        P('/stale.txt'), _astream(b'one'), mode='w', content_type=None
+    )
+    stale = (await backend.stat(P('/stale.txt'))).version
+    await backend.write_stream(
+        P('/stale.txt'), _astream(b'two'), mode='w', content_type=None
+    )
+
+    with pytest.raises(PreconditionFailedError):
+        await backend.write_stream(
+            P('/stale.txt'),
+            _astream(b'three'),
+            mode='w',
+            content_type=None,
+            if_match=stale,
+        )
+
+    assert await backend.read(P('/stale.txt')) == b'two'
+
+
+async def test_an_exclusive_create_refuses_an_occupied_path(backend: StorageBackend):
+    """Given an existing file, when creating exclusively, then it is refused."""
+    if not backend.capabilities.exclusive_create:
+        pytest.skip('backend does not advertise exclusive_create')
+    await backend.write_stream(
+        P('/x.txt'), _astream(b'first'), mode='w', content_type=None
+    )
+
+    with pytest.raises(PreconditionFailedError):
+        await backend.write_stream(
+            P('/x.txt'),
+            _astream(b'second'),
+            mode='w',
+            content_type=None,
+            if_match=IF_MATCH_ABSENT,
+        )
+
+    assert await backend.read(P('/x.txt')) == b'first'
+
+
+async def test_an_exclusive_create_takes_a_free_path(backend: StorageBackend):
+    """Given nothing at the path, when creating exclusively, then it lands."""
+    if not backend.capabilities.exclusive_create:
+        pytest.skip('backend does not advertise exclusive_create')
+    await backend.write_stream(
+        P('/free.txt'),
+        _astream(b'mine'),
+        mode='w',
+        content_type=None,
+        if_match=IF_MATCH_ABSENT,
+    )
+
+    assert await backend.read(P('/free.txt')) == b'mine'
+
+
+async def test_a_precondition_is_refused_on_append(backend: StorageBackend):
+    """Given mode='a', when a precondition accompanies it, then it is rejected.
+
+    There is no validator for the file as it will be after other appends,
+    so accepting one would imply a guarantee the store cannot make.
+    """
+    if not (
+        backend.capabilities.conditional_writes or backend.capabilities.exclusive_create
+    ):
+        pytest.skip('backend advertises no write preconditions')
+    await backend.write_stream(
+        P('/app.txt'), _astream(b'one'), mode='w', content_type=None
+    )
+
+    with pytest.raises(ValueError, match='if_match'):
+        await backend.write_stream(
+            P('/app.txt'),
+            _astream(b'two'),
+            mode='a',
+            content_type=None,
+            if_match=IF_MATCH_ABSENT,
+        )
+
+
+async def test_a_precondition_form_a_backend_lacks_is_refused(
+    backend: StorageBackend,
+):
+    """Given no capability, when a precondition is passed, then it raises.
+
+    Never silently unconditional: a write that believes it is guarded and
+    is not is worse than one that is told it cannot be.
+    """
+    if backend.capabilities.conditional_writes:
+        pytest.skip('backend advertises conditional_writes')
+
+    with pytest.raises(UnsupportedOperationError, match='conditional_writes'):
+        await backend.write_stream(
+            P('/nope.txt'),
+            _astream(b'x'),
+            mode='w',
+            content_type=None,
+            if_match='some-version',
+        )

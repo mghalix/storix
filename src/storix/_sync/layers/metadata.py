@@ -92,6 +92,7 @@ class MetadataLayer(LayerBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write content, then maintain the sidecar per port semantics.
 
@@ -105,6 +106,7 @@ class MetadataLayer(LayerBase):
             chunk_size=chunk_size,
             mode=mode,
             content_type=content_type,
+            if_match=if_match,
         )
         key = str(path)
         if metadata is None and mode == 'a':

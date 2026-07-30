@@ -103,6 +103,7 @@ class StorageBackend(Protocol):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a complete in-memory payload.
 
@@ -120,6 +121,7 @@ class StorageBackend(Protocol):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a file from a chunk stream.
 
@@ -135,8 +137,19 @@ class StorageBackend(Protocol):
         it, and ``None`` leaves existing metadata untouched on append (merge
         is the caller's job: stat, merge, write).
 
+        ``if_match`` is an optional precondition, gated by
+        ``conditional_writes`` like the arguments above: ``None`` writes
+        unconditionally (the default, and the only form a backend without
+        the capability ever receives), a ``RawStat.version`` writes only
+        while the stored object still carries it, and ``IF_MATCH_ABSENT``
+        writes only while nothing exists at ``path``. A backend applies it
+        as part of the write request, never as a separate comparison, and
+        rejects it with ``ValueError`` for ``mode='a'`` (ADR 0033).
+
         Raises:
-            ValueError: If ``chunk_size`` is zero or negative.
+            ValueError: If ``chunk_size`` is zero or negative, or if
+                ``if_match`` accompanies ``mode='a'``.
+            PreconditionFailedError: If ``if_match`` no longer holds.
         """
         ...
 
@@ -176,7 +189,12 @@ class StorageBackend(Protocol):
         ...
 
     def stat(self, path: PurePosixPath) -> RawStat:
-        """Return raw facts about a path (kind, size, timestamps)."""
+        """Return raw facts about a path (kind, size, timestamps).
+
+        Backends that can condition a write fill ``RawStat.version`` from
+        this same response - the validator rides along in what is already
+        being parsed, so it never costs a request of its own.
+        """
         ...
 
     def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:

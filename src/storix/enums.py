@@ -31,3 +31,5 @@ class Capability(StorixEnum):
     BULK_LISTING = auto()
     RANGED_READS = auto()
     PROVISIONING = auto()
+    CONDITIONAL_WRITES = auto()
+    EXCLUSIVE_CREATE = auto()

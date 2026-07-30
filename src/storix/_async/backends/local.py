@@ -24,8 +24,13 @@ import aiofiles.os as aioos
 from storix._async._stream import batch_chunks, resolve_chunk_size, validate_span
 from storix.constants import DEFAULT_READ_CHUNK_SIZE, DEFAULT_WRITE_CHUNK_SIZE
 from storix.enums import PathKind
-from storix.errors import PathNotFoundError, from_os_error
+from storix.errors import (
+    PathNotFoundError,
+    PreconditionFailedError,
+    from_os_error,
+)
 from storix.models import Capabilities, Entry, RawStat
+from storix.preconditions import IF_MATCH_ABSENT, validate_precondition
 
 from . import generic
 from .base import BackendBase
@@ -53,10 +58,15 @@ class LocalBackend(BackendBase):
     point outside it - pair with SandboxLayer when that matters.
     """
 
-    capabilities: Capabilities = Capabilities(provisioning=True, ranged_reads=True)
+    capabilities: Capabilities = Capabilities(
+        provisioning=True, ranged_reads=True, exclusive_create=True
+    )
     """``provisioning``: the base directory is a root the backend can create
     on demand (it does so at construction). ``ranged_reads``: a range is a
-    seek. No cloud-only features."""
+    seek. ``exclusive_create``: ``O_EXCL`` is an atomic create-or-fail in the
+    kernel. ``conditional_writes`` is deliberately absent: POSIX has no
+    compare-and-write, and emulating one with a stat would reopen the race a
+    precondition exists to close (ADR 0033). No cloud-only features."""
 
     def __init__(
         self,
@@ -159,17 +169,32 @@ class LocalBackend(BackendBase):
         mode: EchoMode,
         content_type: str | None,
         metadata: Mapping[str, str] | None = None,
+        if_match: str | None = None,
     ) -> None:
         """Write a file from a bounded chunk stream.
 
+        ``IF_MATCH_ABSENT`` becomes ``O_EXCL``, which the kernel applies as
+        one atomic create-or-fail; a version precondition is refused by the
+        capability gate rather than emulated (ADR 0033).
+
         Raises:
-            ValueError: If ``chunk_size`` is zero or negative.
+            ValueError: If ``chunk_size`` is zero or negative, or if
+                ``if_match`` accompanies ``mode='a'``.
+            PreconditionFailedError: If the path already exists and the
+                write asked for an exclusive create.
+            UnsupportedOperationError: If ``if_match`` names a version.
         """
         del content_type, metadata  # capabilities not advertised; never sent
         size = resolve_chunk_size(chunk_size, self.default_write_chunk_size)
-        flags: Literal['wb', 'ab'] = 'wb' if mode == 'w' else 'ab'
+        validate_precondition(if_match, mode=mode, capabilities=self.capabilities)
+        flags: Literal['wb', 'ab', 'xb'] = 'wb' if mode == 'w' else 'ab'
+        if if_match == IF_MATCH_ABSENT:
+            flags = 'xb'
         try:
             handle = await aiofiles.open(self._to_os(path), flags)
+        except FileExistsError as exc:
+            # only reachable via 'xb': the exclusive create lost the race
+            raise PreconditionFailedError(path) from exc
         except OSError as exc:
             raise from_os_error(exc, path) from exc
         try:
