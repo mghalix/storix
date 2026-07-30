@@ -65,6 +65,49 @@ def unstyled() -> Generator[None]:
         console._color_system = previous  # noqa: SLF001 # pyright: ignore[reportPrivateUsage]
 
 
+_OPEN_LINE_MARK: Final[str] = '%'
+"""zsh's mark for output that stopped mid-line, borrowed for the same job.
+
+zsh is where a unix user has already met it. bash leaves the case
+unmarked, and fish spells it with a glyph outside ASCII.
+"""
+
+
+def close_line(tail: str | bytes) -> None:
+    """End a line the written data did not end itself, marking that it happened.
+
+    Output that stops mid-line is information for a storage tool: the file,
+    or the command, ended without a newline. Closing that line silently
+    keeps the next prompt off the data but throws the fact away, so the
+    line is closed with a mark instead.
+
+    The mark is inverse video, as zsh's is, because that is what keeps it
+    from reading as a percent sign the command printed. It is the
+    deliberate exception to the prompt's no-background rule (``_MENU_STYLE``
+    in ``shell``): a completion menu is chrome and hands its cells back to
+    a terminal the user chose to make transparent, while a mark that could
+    pass for data has failed at its one job.
+
+    Only a terminal is marked. Redirected or captured output is data and
+    stays exactly the bytes that were written.
+
+    Args:
+        tail: The last character or byte written to stdout, empty when
+            nothing was written. An empty tail leaves the cursor at the
+            start of a line already, and a newline ended the line itself,
+            so neither is marked.
+    """
+    if not tail or tail in {'\n', b'\n'} or not sys.stdout.isatty():
+        return
+    # a console resolved against the stream in hand rather than the shared
+    # one: rich fixes a console's color system when it is built, and the
+    # shared console is built at import (see `unstyled`), so it can only
+    # answer for the stdout of that moment. A terminal that cannot do
+    # inverse video (TERM=dumb) gets a plain mark, which is where zsh's own
+    # ends up too.
+    Console(file=sys.stdout).print(Text(_OPEN_LINE_MARK, style='reverse'))
+
+
 def resolve_editor() -> str | None:
     """The editor command to open files with, or None if there is none.
 

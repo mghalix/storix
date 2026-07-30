@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import ctypes
 import os
-import shutil
 import signal
 import sys
 import tempfile
@@ -40,7 +39,11 @@ from rich.text import Text
 from storix import ObservabilityLayer, TransferEvent
 from storix._sync._compat import concurrent
 from storix.config import StorixSettings, resolve_profile
-from storix.constants import DEFAULT_CONCURRENCY, DEFAULT_TRANSFER_RANGES
+from storix.constants import (
+    DEFAULT_CONCURRENCY,
+    DEFAULT_SOURCE_READ_SIZE,
+    DEFAULT_TRANSFER_RANGES,
+)
 from storix.enums import PathKind, StorixEnum
 from storix.errors import PathNotFoundError, StorageError, TransferStoppedError
 
@@ -48,6 +51,7 @@ from . import config_cmds, maintenance
 from .config import load_prefs
 from .icons import Icons
 from .render import (
+    close_line,
     console,
     dir_state_of,
     entry_decor,
@@ -807,19 +811,22 @@ def echo(
         payload += '\n'
 
     if file is None:
+        last: str | bytes
         if piped:
-            shutil.copyfileobj(sys.stdin.buffer, sys.stdout.buffer)
+            # the pipe's own last byte is what says whether the line was left
+            # open, not `payload`: piped bytes are copied verbatim, so neither
+            # -n nor the newline a text operand gets ever applied to them
+            last = b''
+            while chunk := sys.stdin.buffer.read(DEFAULT_SOURCE_READ_SIZE):
+                sys.stdout.buffer.write(chunk)
+                last = chunk[-1:]
         else:
             # literal, like unix echo: rich would read '[bold]' as markup (and
             # raise MarkupError on a lone '[/]') and wrap at the console width
             sys.stdout.write(payload)
+            last = payload[-1:]
         sys.stdout.flush()
-        # same rule cat follows: a terminal gets a closing newline so the next
-        # prompt starts on a fresh line, and anything captured stays
-        # byte-exact. Without it, -n leaves the prompt welded to the output.
-        if not payload.endswith('\n') and sys.stdout.isatty():
-            sys.stdout.write('\n')
-            sys.stdout.flush()
+        close_line(last)
         return
     try:
         _fs().echo(
@@ -898,11 +905,8 @@ def cat(
     except StorageError as exc:
         _die('cat', exc)
 
-    # a trailing newline in a terminal so the shell prompt (and one-shot
-    # output) starts on a fresh line; piped output stays byte-exact
-    if last and last != b'\n' and sys.stdout.isatty():
-        out.write(b'\n')
     out.flush()
+    close_line(last)
 
 
 @app.command(rich_help_panel=_READ)

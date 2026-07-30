@@ -119,6 +119,13 @@ sx echo -n hello -f /notes.txt    # stores "hello"
 sx echo world -a -f /notes.txt    # appends another line
 ```
 
+On a terminal, output that stops mid-line says so: `sx echo -n hello` prints
+`hello%`, with the `%` in inverse video, and closes the line so the next prompt
+starts fresh. That is zsh's mark. It means the data ended without a newline,
+not that a percent sign was printed, and `sx cat` marks a file whose last byte
+is not a newline the same way. Redirected or captured output is data and is
+never marked.
+
 Left without text, `echo` takes the data from a pipe, so a producer writes
 straight into storage:
 
