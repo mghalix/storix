@@ -178,6 +178,11 @@ class Storix:
         self._backend = backend
         self._home = pathops.resolve(home, cwd=_ROOT, home=_ROOT)
         self._cwd = self._home
+        self._previous = self._cwd
+        """Where the last successful ``cd`` came from, for ``cd -``. Starts
+        at the session's own starting point rather than unset, so ``cd -``
+        is always answerable: a fresh session's "previous" directory is
+        where it opened."""
 
     # --- identity ---
 
@@ -377,7 +382,9 @@ class Storix:
             clone._inner = rebuilt  # noqa: SLF001 - core owns layer re-composition
             rebuilt = clone
         new = type(self)(rebuilt, home=self._home)
-        new._cwd = self._cwd  # noqa: SLF001 - carry cwd (same namespace, same class)
+        # carry the position (same namespace, same class): cwd and the way back
+        new._cwd = self._cwd  # noqa: SLF001
+        new._previous = self._previous  # noqa: SLF001
         return new
 
     @property
@@ -456,11 +463,32 @@ class Storix:
     # --- navigation ---
 
     async def cd(self, path: StrPathLike | None = None) -> Self:
-        """Change the working directory; no argument returns home."""
-        target = self._home if path is None else self._resolve(path)
+        """Change the working directory; no argument returns home.
+
+        ``cd('-')`` returns to the previous directory, exactly as in a
+        shell, which makes repeated calls a toggle between the last two.
+        Before the first move it is where the session opened, so it always
+        has an answer. A directory genuinely named ``-`` is reachable as
+        ``./-``, again like a shell. The previous directory only advances
+        on a move that succeeded, so a failed ``cd`` never costs you the
+        way back.
+
+        Args:
+            path: Directory to move to, ``'-'`` for the previous one, or
+                None for home.
+
+        Raises:
+            PathNotFoundError: If ``path`` does not exist.
+            NotADirectoryError: If ``path`` is not a directory.
+        """
+        if path == '-':
+            target = self._previous
+        else:
+            target = self._home if path is None else self._resolve(path)
         raw = await self._backend.stat(target)
         if raw.kind is not PathKind.DIRECTORY:
             raise NotADirectoryError(target)
+        self._previous = self._cwd
         self._cwd = target
         return self
 

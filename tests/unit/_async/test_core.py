@@ -124,6 +124,59 @@ async def test_cd_none_returns_home(fs: Storix):
     assert fs.pwd() == fs.home
 
 
+async def test_cd_dash_returns_to_the_previous_directory(fs: Storix):
+    await fs.mkdir('/a', '/b')
+    await fs.cd('/a')
+    await fs.cd('/b')
+
+    await fs.cd('-')
+
+    assert str(fs.pwd()) == '/a'
+
+
+async def test_cd_dash_toggles(fs: Storix):
+    """Like unix: repeated `cd -` swings between the last two directories."""
+    await fs.mkdir('/a', '/b')
+    await fs.cd('/a')
+    await fs.cd('/b')
+
+    await fs.cd('-')
+    await fs.cd('-')
+
+    assert str(fs.pwd()) == '/b'
+
+
+async def test_cd_dash_before_any_move_returns_where_the_session_opened(fs: Storix):
+    """Always answerable: a fresh session's previous directory is its start,
+    so `cd -` is a no-op rather than an error."""
+    start = fs.pwd()
+
+    await fs.cd('-')
+
+    assert fs.pwd() == start
+
+
+async def test_cd_dash_is_not_taken_by_a_directory_named_dash(fs: Storix):
+    """`-` is the flag; `./-` is the directory, exactly as in a shell."""
+    await fs.mkdir('/-')
+
+    await fs.cd('./-')
+
+    assert str(fs.pwd()) == '/-'
+
+
+async def test_a_failed_cd_leaves_the_previous_directory_alone(fs: Storix):
+    await fs.mkdir('/a', '/b')
+    await fs.cd('/a')
+    await fs.cd('/b')
+    with pytest.raises(PathNotFoundError):
+        await fs.cd('/nope')
+
+    await fs.cd('-')
+
+    assert str(fs.pwd()) == '/a'
+
+
 async def test_cd_into_file_raises(fs: Storix):
     await fs.touch('/a.txt')
     with pytest.raises(NotADirectoryError):

@@ -126,6 +126,59 @@ def test_cd_none_returns_home(fs: Storix):
     assert fs.pwd() == fs.home
 
 
+def test_cd_dash_returns_to_the_previous_directory(fs: Storix):
+    fs.mkdir('/a', '/b')
+    fs.cd('/a')
+    fs.cd('/b')
+
+    fs.cd('-')
+
+    assert str(fs.pwd()) == '/a'
+
+
+def test_cd_dash_toggles(fs: Storix):
+    """Like unix: repeated `cd -` swings between the last two directories."""
+    fs.mkdir('/a', '/b')
+    fs.cd('/a')
+    fs.cd('/b')
+
+    fs.cd('-')
+    fs.cd('-')
+
+    assert str(fs.pwd()) == '/b'
+
+
+def test_cd_dash_before_any_move_returns_where_the_session_opened(fs: Storix):
+    """Always answerable: a fresh session's previous directory is its start,
+    so `cd -` is a no-op rather than an error."""
+    start = fs.pwd()
+
+    fs.cd('-')
+
+    assert fs.pwd() == start
+
+
+def test_cd_dash_is_not_taken_by_a_directory_named_dash(fs: Storix):
+    """`-` is the flag; `./-` is the directory, exactly as in a shell."""
+    fs.mkdir('/-')
+
+    fs.cd('./-')
+
+    assert str(fs.pwd()) == '/-'
+
+
+def test_a_failed_cd_leaves_the_previous_directory_alone(fs: Storix):
+    fs.mkdir('/a', '/b')
+    fs.cd('/a')
+    fs.cd('/b')
+    with pytest.raises(PathNotFoundError):
+        fs.cd('/nope')
+
+    fs.cd('-')
+
+    assert str(fs.pwd()) == '/a'
+
+
 def test_cd_into_file_raises(fs: Storix):
     fs.touch('/a.txt')
     with pytest.raises(NotADirectoryError):
