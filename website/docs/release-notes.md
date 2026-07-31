@@ -1,5 +1,15 @@
 # Release Notes
 
+## [0.5.5] - 2026-07-31
+
+### What's Changed
+#### Fixes
+* fix(repo): keep the test credential namespace out of config isolation by @mghalix in https://github.com/mghalix/storix/pull/92
+* fix(core): delete an object-store tree in one recursive call by @mghalix in https://github.com/mghalix/storix/pull/93
+* fix(cli): transfer directories that hold no files by @mghalix in https://github.com/mghalix/storix/pull/91
+#### Documentation
+* docs(repo): ADR 0034, sx becomes a package with one job per module by @mghalix in https://github.com/mghalix/storix/pull/86
+
 ## [0.5.4] - 2026-07-30
 
 A performance and stability release for recursive search. Glob queries without recursive
