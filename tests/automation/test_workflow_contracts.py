@@ -226,6 +226,7 @@ def test_ci_has_one_stable_required_aggregate() -> None:
     for dependency in (
         'core',
         'unit',
+        'windows',
         'integration',
         'lower-bounds',
         'typing',

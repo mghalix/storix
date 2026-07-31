@@ -75,6 +75,45 @@ jobs:
       - name: Run unit and conformance tests with branch coverage
         run: uv run --no-sync just test-unit -q
 
+  windows:
+    name: Windows / Python 3.13
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "0.11.18"
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras --all-groups
+
+      # the same selection `just test-unit` runs, invoked directly: the
+      # justfile drives every recipe through bash, and coverage's threshold
+      # is the Linux Unit job's gate, not a second platform's.
+      #
+      # python-magic's Windows loader accepts msys-magic-1.dll, which Git for
+      # Windows leaves on PATH here. Loading an msys library into a native
+      # process faults while the module is still importing, which kills the
+      # interpreter before the ImportError fallback in storix.utils can run,
+      # so no storix backend can be imported at all. An ordinary Windows
+      # install ships no libmagic and takes that fallback; dropping the msys
+      # directory is what makes this runner resemble one.
+      - name: Run unit and conformance tests
+        run: |
+          $env:PATH = ($env:PATH -split ';' |
+            Where-Object { $_ -notmatch 'Git\\usr\\bin' }) -join ';'
+          uv run --no-sync pytest -q tests/unit tests/conformance
+
   integration:
     name: Optional integrations
     runs-on: ubuntu-latest
@@ -317,6 +356,7 @@ jobs:
     needs:
       - core
       - unit
+      - windows
       - integration
       - lower-bounds
       - typing
@@ -339,12 +379,14 @@ jobs:
           LOWER_BOUNDS_RESULT: ${{ needs.lower-bounds.result }}
           TYPING_RESULT: ${{ needs.typing.result }}
           UNIT_RESULT: ${{ needs.unit.result }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
         run: |
           set -euo pipefail
 
           for result in \
             "${CORE_RESULT}" \
             "${UNIT_RESULT}" \
+            "${WINDOWS_RESULT}" \
             "${INTEGRATION_RESULT}" \
             "${LOWER_BOUNDS_RESULT}" \
             "${TYPING_RESULT}" \
