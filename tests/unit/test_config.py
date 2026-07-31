@@ -39,6 +39,21 @@ from storix.config import (
 from storix.errors import ConfigurationError
 
 
+def host_absolute(*parts: str) -> str:
+    """An absolute host path built from POSIX-shaped segments.
+
+    ``base`` names a real directory, and the loader is right to treat
+    ``/from/user`` as relative on Windows, where a path with no drive is
+    relative to the current one. Anchoring at the temporary directory's
+    drive keeps such test data absolute wherever it runs. The result
+    carries backslashes there, so it belongs in a TOML literal string
+    (single quotes), never a basic string that would read them as escapes.
+    """
+    import tempfile
+
+    return str(Path(Path(tempfile.gettempdir()).anchor, *parts))
+
+
 _STORIX_ENV = (
     'STORIX_PROVIDER',
     'STORIX_LOCAL_BASE',
@@ -85,28 +100,33 @@ def test_provider_table_reaches_get_storage(sandbox):
 
 
 def test_precedence_env_beats_dotenv_beats_project_beats_user(sandbox, monkeypatch):
-    _user_config(sandbox.parent, '[local]\nbase = "/from/user"\n')
-    (sandbox / 'storix.toml').write_text('[local]\nbase = "/from/project"\n')
-    assert LocalConfig().base == '/from/project'  # project beats user
+    user, project = host_absolute('from', 'user'), host_absolute('from', 'project')
+    dotenv, env = host_absolute('from', 'dotenv'), host_absolute('from', 'env')
+    _user_config(sandbox.parent, f"[local]\nbase = '{user}'\n")
+    (sandbox / 'storix.toml').write_text(f"[local]\nbase = '{project}'\n")
+    assert LocalConfig().base == project  # project beats user
 
-    (sandbox / '.env').write_text('STORIX_LOCAL_BASE=/from/dotenv\n')
-    assert LocalConfig().base == '/from/dotenv'  # .env beats project
+    (sandbox / '.env').write_text(f'STORIX_LOCAL_BASE={dotenv}\n')
+    assert LocalConfig().base == dotenv  # .env beats project
 
-    monkeypatch.setenv('STORIX_LOCAL_BASE', '/from/env')
-    assert LocalConfig().base == '/from/env'  # env beats .env
+    monkeypatch.setenv('STORIX_LOCAL_BASE', env)
+    assert LocalConfig().base == env  # env beats .env
 
-    assert LocalConfig(base='/from/kwarg').base == '/from/kwarg'  # kwargs strongest
+    kwarg = host_absolute('from', 'kwarg')
+    assert LocalConfig(base=kwarg).base == kwarg  # kwargs strongest
 
 
 def test_storix_toml_wins_over_hidden_alias(sandbox):
-    (sandbox / 'storix.toml').write_text('[local]\nbase = "/visible"\n')
-    (sandbox / '.storix.toml').write_text('[local]\nbase = "/hidden"\n')
-    assert LocalConfig().base == '/visible'
+    visible, hidden = host_absolute('visible'), host_absolute('hidden')
+    (sandbox / 'storix.toml').write_text(f"[local]\nbase = '{visible}'\n")
+    (sandbox / '.storix.toml').write_text(f"[local]\nbase = '{hidden}'\n")
+    assert LocalConfig().base == visible
 
 
 def test_pyproject_tool_storix_section(sandbox):
-    (sandbox / 'pyproject.toml').write_text('[tool.storix.local]\nbase = "/proj"\n')
-    assert LocalConfig().base == '/proj'
+    proj = host_absolute('proj')
+    (sandbox / 'pyproject.toml').write_text(f"[tool.storix.local]\nbase = '{proj}'\n")
+    assert LocalConfig().base == proj
 
 
 def test_upward_walk_anchors_at_the_first_file(sandbox):
@@ -268,8 +288,9 @@ def test_user_relative_path_is_rejected(sandbox):
 
 
 def test_user_absolute_path_is_accepted(sandbox):
-    _user_config(sandbox.parent, '[local]\nbase = "/abs/dir"\n')
-    assert LocalConfig().base == '/abs/dir'
+    absolute = host_absolute('abs', 'dir')
+    _user_config(sandbox.parent, f"[local]\nbase = '{absolute}'\n")
+    assert LocalConfig().base == absolute
 
 
 # --- secret policy ---
@@ -638,7 +659,7 @@ def test_the_library_still_selects_a_profile_when_asked(tmp_path, monkeypatch):
 
     (tmp_path / 'data').mkdir()
     (tmp_path / 'storix.toml').write_text(
-        f'[profiles.here]\nprovider = "local"\nbase = "{tmp_path / "data"}"\n',
+        f'[profiles.here]\nprovider = "local"\nbase = \'{tmp_path / "data"}\'\n',
         encoding='utf-8',
     )
     monkeypatch.chdir(tmp_path)

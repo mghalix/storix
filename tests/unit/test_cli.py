@@ -50,6 +50,18 @@ def run(*args: str):
     return runner.invoke(cli.app, list(args))
 
 
+def printed(result) -> bytes:
+    """The bytes a command printed, with the host's line ending normalized.
+
+    The runner captures stdout through a text stream, which spells a
+    newline the way the host does, so printed text arrives with CRLF on
+    Windows. What these cases pin is which characters were printed, not
+    how a host writes a line break. Binary output bypasses that stream
+    (``cat -b`` writes to ``sys.stdout.buffer``) and is asserted raw.
+    """
+    return result.stdout_bytes.replace(b'\r\n', b'\n')
+
+
 def test_entrypoint_reports_missing_cli_extra(monkeypatch):
     def import_missing_cli(_name: str):
         error = ModuleNotFoundError(name='click')
@@ -1125,7 +1137,7 @@ def test_cat_leaves_a_newline_terminated_file_unmarked():
 
 def test_echo_appends_a_newline_without_n():
     """Given no -n, when echoing to either sink, then one newline ends it."""
-    assert run('echo', 'hi').stdout_bytes == b'hi\n'
+    assert printed(run('echo', 'hi')) == b'hi\n'
 
     run('echo', 'hi', '-f', '/a.txt')
 
@@ -1154,7 +1166,7 @@ def test_echo_keeps_a_lone_dash_literal():
     The text argument is content, not a file name, so the usual stdin
     spelling would cost the only way to write a dash.
     """
-    assert run('echo', '-').stdout_bytes == b'-\n'
+    assert printed(run('echo', '-')) == b'-\n'
 
 
 def test_echo_writes_a_pipe_verbatim():
@@ -1227,7 +1239,7 @@ def test_echo_without_text_at_a_terminal_prints_one_newline():
 
     result = runner.invoke(cli.app, ['echo'], input=pipe)
 
-    assert result.stdout_bytes == b'\n'
+    assert printed(result) == b'\n'
     assert not [size for size in pipe.reads if size]  # the runner probes read(0)
 
 
@@ -1275,7 +1287,9 @@ def test_icons_lookup_and_namespace():
 
 
 def test_push_and_pull_user_tilde_expansion(monkeypatch, tmp_path):
+    # expanduser reads HOME on POSIX and USERPROFILE on Windows
     monkeypatch.setenv('HOME', str(tmp_path))
+    monkeypatch.setenv('USERPROFILE', str(tmp_path))
     local_file = tmp_path / 'home_file.txt'
     local_file.write_text('tilde content')
 
@@ -3061,10 +3075,31 @@ def test_tab_expands_a_pattern_written_absolute_to_absolute_names(globbable):
     assert _press_tab('cat /*.txt') == 'cat /a.txt /b.txt '
 
 
-def test_edit_writes_the_editors_changes_back(monkeypatch):
+@pytest.fixture
+def fake_editor(tmp_path, monkeypatch):
+    """Point $EDITOR at a Python script whose body is given per test.
+
+    ``sed -i`` and ``true`` are the natural stand-ins and neither is a
+    program every platform has, so the interpreter already running the
+    tests plays the editor. The body gets ``p``, the file to edit, and
+    works in bytes: a text write would turn a newline into CRLF on
+    Windows and change the content the command reads back.
+    """
+
+    def install(body: str) -> None:
+        script = tmp_path / 'fake_editor.py'
+        script.write_text(
+            f'import pathlib, sys\np = pathlib.Path(sys.argv[1])\n{body}\n'
+        )
+        monkeypatch.setenv('EDITOR', f'{sys.executable} {script}')
+
+    return install
+
+
+def test_edit_writes_the_editors_changes_back(fake_editor):
     """The point of the command: edit a backend file with a local editor."""
     run('echo', 'hello', '-f', '/a.txt')
-    monkeypatch.setenv('EDITOR', 'sed -i s/hello/edited/')
+    fake_editor("p.write_bytes(p.read_bytes().replace(b'hello', b'edited'))")
 
     result = run('edit', '/a.txt')
 
@@ -3072,11 +3107,11 @@ def test_edit_writes_the_editors_changes_back(monkeypatch):
     assert run('cat', '/a.txt').stdout == 'edited\n'
 
 
-def test_edit_does_not_write_when_the_file_is_untouched(monkeypatch):
+def test_edit_does_not_write_when_the_file_is_untouched(fake_editor, monkeypatch):
     """A no-op edit must not cost a write (or a new version on an object
     store), so the content decides, not the fact that an editor ran."""
     run('echo', 'hello', '-f', '/a.txt')
-    monkeypatch.setenv('EDITOR', 'true')
+    fake_editor('pass')
     writes: list[str] = []
     real_echo = Storix.echo
 
@@ -3093,14 +3128,8 @@ def test_edit_does_not_write_when_the_file_is_untouched(monkeypatch):
     assert 'unchanged' in result.stdout
 
 
-def test_edit_creates_a_missing_file_from_what_you_type(monkeypatch, tmp_path):
-    # sed cannot write into an empty file (no lines to act on), so this one
-    # needs an editor that just puts content there
-    script = tmp_path / 'fake_editor.py'
-    script.write_text(
-        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('new\\n')\n"
-    )
-    monkeypatch.setenv('EDITOR', f'{sys.executable} {script}')
+def test_edit_creates_a_missing_file_from_what_you_type(fake_editor):
+    fake_editor("p.write_bytes(b'new\\n')")
 
     result = run('edit', '/fresh.txt')
 
@@ -3108,8 +3137,8 @@ def test_edit_creates_a_missing_file_from_what_you_type(monkeypatch, tmp_path):
     assert run('cat', '/fresh.txt').stdout == 'new\n'
 
 
-def test_edit_leaves_a_missing_file_missing_when_nothing_is_typed(monkeypatch):
-    monkeypatch.setenv('EDITOR', 'true')
+def test_edit_leaves_a_missing_file_missing_when_nothing_is_typed(fake_editor):
+    fake_editor('pass')
 
     result = run('edit', '/fresh.txt')
 
@@ -3128,9 +3157,14 @@ def test_edit_refuses_a_directory(monkeypatch):
 
 
 def test_edit_says_which_variable_to_set_when_there_is_no_editor(monkeypatch):
+    from storix.cli import render
+
     run('echo', 'hello', '-f', '/a.txt')
     monkeypatch.delenv('EDITOR', raising=False)
     monkeypatch.delenv('VISUAL', raising=False)
+    # having no editor at all is a POSIX state: Windows falls back to
+    # notepad, which the command would launch and then wait on forever
+    monkeypatch.setattr(render.sys, 'platform', 'linux')
 
     result = run('edit', '/a.txt')
 
@@ -3185,10 +3219,12 @@ def test_unix_has_no_editor_fallback(monkeypatch):
 def test_edit_uses_the_configured_editor(prefs_from, monkeypatch, tmp_path):
     script = tmp_path / 'fake_editor.py'
     script.write_text(
-        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_text('via prefs\\n')\n"
+        "import pathlib, sys\npathlib.Path(sys.argv[1]).write_bytes(b'via prefs\\n')\n"
     )
     monkeypatch.delenv('EDITOR', raising=False)
-    prefs_from(f'[cli]\neditor = "{sys.executable} {script}"\n')
+    # a TOML literal string: a Windows interpreter path is full of
+    # backslashes, and a basic string would read them as escapes
+    prefs_from(f"[cli]\neditor = '{sys.executable} {script}'\n")
 
     assert run('edit', '/a.txt').exit_code == 0
     assert run('cat', '/a.txt').stdout == 'via prefs\n'
