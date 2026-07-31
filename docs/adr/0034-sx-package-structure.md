@@ -41,9 +41,9 @@ change no behavior.
 cli/commands/
     __init__.py     imports the modules, in the order the panels appear
     navigate.py     ls pwd cd tree find exists
-    write.py        mkdir touch echo edit rm rmdir cp mv
     read.py         cat stat du url
-    transfer.py     pull push
+    write.py        mkdir touch echo edit rm rmdir cp mv
+    transfer.py     push pull
     session.py      whereami provision shell
     config.py       the sx config group      (was cli/config_cmds.py)
     maintenance.py  update install uninstall doctor
@@ -53,31 +53,10 @@ The grouping is the one `sx --help` already shows. A user reading the help and
 a contributor reading the tree navigate by the same names, and "which file is
 `du` in" has an answer that does not require grep.
 
-The order above is the panel order the help has today, which is Navigate,
-Write, Read, Transfer, Session and setup - not alphabetical, and not
-read-before-write. It reads oddly in a directory listing and is correct in
-the only place that matters, because these lines are also the import order
-(see D2).
-
 `config_cmds.py` moves in and loses its suffix. That name existed only to avoid
 colliding with `cli/config.py`, which holds preference loading; a package
 solves the collision properly, and `commands/config.py` beside `cli/config.py`
 is unambiguous because the paths say which is which.
-
-Two helpers leave `app.py` with the commands rather than in them, because
-more than one command module needs each:
-
-```text
-cli/listing.py   what ls and tree share: argument resolution, the sort key
-                 and its ordering, the ls -l table, the block grouping
-cli/failure.py   _die, the one way a command reports a failure and exits
-```
-
-Neither is a command, so neither belongs under `commands/`; both sit beside
-`render.py` and `state.py` as leaves the command modules draw on. `_die` is
-not in `registry.py` because it needs `render` and `state` and the registry
-stays free of CLI imports, and not in `render.py` because that module
-presents output rather than ending a run.
 
 ### D2. The Typer instance moves to `cli/registry.py`
 
@@ -100,13 +79,7 @@ site.
 
 **Panel order is registration order**, which makes `commands/__init__.py` load
 bearing rather than incidental. It says so, and a test asserts the rendered
-panel order so a reordered import is caught rather than noticed. A second test
-asserts the registered command names against a written-out list, so a module
-dropped from that import block fails loudly instead of shrinking `sx`.
-
-The panel constants move with the app, for the same reason: a command names
-its panel beside the function that implements it, so the constant it names
-has to be somewhere both the command modules and the app can see.
+panel order so a reordered import is caught rather than noticed.
 
 ### D3. The shell becomes a package, one module per job
 
@@ -126,10 +99,9 @@ turning a typed line into structure, where an operator split can be added
 without touching completion or rendering.
 
 The dependency direction is one way. `parsing` knows nothing of the session;
-`globbing` uses `parsing` and the session; `completion` uses `parsing` and the
-session, and `keys` uses `globbing` (the Tab binding's filter is "is the
-cursor on a pattern"); `loop` uses all of them and the command tree. Nothing
-below `loop` imports `loop`.
+`globbing` uses `parsing` and the session; `completion` and `keys` use both;
+`loop` uses all of them and the command tree. Nothing below `loop` imports
+`loop`.
 
 ### D4. Everything already single-purpose stays put
 
