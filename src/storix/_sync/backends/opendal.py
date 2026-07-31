@@ -46,6 +46,7 @@ from storix.models import Capabilities, Entry, RawStat
 from storix.preconditions import IF_MATCH_ABSENT, validate_precondition
 from storix.utils.time import utcnow
 
+from . import generic
 from .base import BackendBase
 
 
@@ -178,6 +179,11 @@ class OpendalBackend(BackendBase):
             msg = f'opendal {service!r} configuration invalid: {exc}'
             raise ConfigurationError(msg) from exc
         cap = self._op.capability()
+        self._native_copy = cap.copy
+        """Whether the service copies an object server-side. A performance
+        trait, so it gates an override rather than joining ``Capabilities``:
+        every service answers ``copy``, only the number of round trips and
+        the bytes crossing this process differ."""
         self.capabilities = Capabilities(
             content_type=cap.write_with_content_type,
             custom_metadata=cap.write_with_user_metadata,
@@ -397,6 +403,55 @@ class OpendalBackend(BackendBase):
             options['if_match'] = if_match
         return options
 
+    def copy(self, src: PurePosixPath, dst: PurePosixPath) -> None:
+        """Copy a file inside the service, no bytes through this process.
+
+        The generic fallback reads the whole object down and writes it back
+        up, so a copy costs the object twice over the network and lands
+        stripped of the content type and custom metadata that a server-side
+        copy carries with it. A service without one (the in-memory service)
+        keeps that fallback, so the port answers ``copy`` either way.
+
+        opendal overwrites the plain key of a directory without complaint,
+        which would leave a file shadowing a live directory, so the
+        destination is checked before the copy. The source is only told
+        apart from a missing key once the copy has already failed, where an
+        extra request costs nothing that matters.
+
+        Raises:
+            PathNotFoundError: If ``src`` does not exist.
+            IsADirectoryError: If either side is a directory.
+        """
+        if not self._native_copy:
+            generic.copy(self, src, dst)
+            return
+        self._reject_directory(dst)
+        try:
+            self._op.copy(self._key(src), self._key(dst))
+        except ope.NotFound as exc:
+            self._reject_directory(src)
+            raise self._error(exc, src) from exc
+        except _OPENDAL_ERRORS as exc:
+            raise self._error(exc, src) from exc
+
+    def _reject_directory(self, path: PurePosixPath) -> None:
+        """Refuse a path that holds a directory.
+
+        Asks the directory-form key directly, which is one request for the
+        exact question, where a full ``stat`` spends a second one
+        discovering the path is not a file.
+
+        Raises:
+            IsADirectoryError: If ``path`` is a directory.
+        """
+        try:
+            self._op.stat(self._dir_key(path))
+        except ope.NotFound:
+            return
+        except _OPENDAL_ERRORS as exc:
+            raise self._error(exc, path) from exc
+        raise IsADirectoryError(path)
+
     def delete(self, path: PurePosixPath) -> None:
         """Delete a leaf: a file or an *empty* directory.
 
@@ -510,6 +565,35 @@ class OpendalBackend(BackendBase):
         except _OPENDAL_ERRORS as exc:
             raise self._error(exc, path) from exc
 
+    def du(self, path: PurePosixPath) -> int:
+        """Total content size of a tree, from one recursive listing.
+
+        The listing already carries every object's size, so a subtree costs
+        one paged request where the generic walk costs a listing per
+        directory. A service that cannot list recursively keeps that walk,
+        which is the condition ``bulk_listing`` already reports.
+
+        Raises:
+            PathNotFoundError: If nothing lives at ``path``.
+        """
+        raw = self.stat(path)
+        if raw.kind is PathKind.FILE:
+            return raw.size
+        if not self.capabilities.bulk_listing:
+            return generic.du(self, path)
+        total = 0
+        try:
+            entries = self._op.list(self._dir_key(path), recursive=True)
+            for entry in entries:
+                metadata = entry.metadata
+                # directory markers report zero, so skipping them changes no
+                # total; it only avoids reading a length that means nothing
+                if not metadata.is_dir:
+                    total += metadata.content_length
+        except _OPENDAL_ERRORS as exc:
+            raise self._error(exc, path) from exc
+        return total
+
     def make_dir(self, path: PurePosixPath, *, parents: bool) -> None:
         """Create a directory (``parents=True`` behaves like mkdir -p).
 
@@ -567,19 +651,32 @@ class OpendalBackend(BackendBase):
     def set_metadata(self, path: PurePosixPath, metadata: Mapping[str, str]) -> None:
         """Replace a file's custom metadata without touching its content.
 
-        opendal has no standalone set-metadata operation, so this
-        rewrites the object with its own content and the new metadata.
+        opendal has no standalone set-metadata operation, so this rewrites
+        the object with its own content and the new metadata. The stored
+        content type is read from the same stat and put back with it: a
+        rewrite that omits it leaves the object with none, and the content
+        type is not a field this operation is asked to touch.
+
+        The whole object crosses this process to change a header. Lifting
+        that needs a service-side metadata rewrite (S3 spells it as a copy
+        onto itself with a replace directive), which opendal does not
+        expose.
+
+        Raises:
+            IsADirectoryError: If ``path`` is a directory.
+            UnsupportedOperationError: If the service cannot store custom
+                metadata.
         """
         if not self.capabilities.custom_metadata:
             raise UnsupportedOperationError(Capability.CUSTOM_METADATA)
-        raw = self.stat(path)
-        if raw.kind is PathKind.DIRECTORY:
+        md = self._stat_md(path)
+        if md.is_dir:
             raise IsADirectoryError(path)
         key = self._key(path)
         try:
             payload = self._op.read(key)
             self._op.write(
-                key, payload, user_metadata=dict(metadata) if metadata else None
+                key, payload, **self._write_options(md.content_type, metadata)
             )
         except _OPENDAL_ERRORS as exc:
             raise self._error(exc, path) from exc

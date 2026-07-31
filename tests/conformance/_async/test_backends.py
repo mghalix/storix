@@ -26,6 +26,7 @@ from storix._async.layers import (
     ObservabilityLayer,
     SandboxLayer,
 )
+from storix.enums import PathKind
 from storix.errors import (
     AlreadyExistsError,
     DirectoryNotEmptyError,
@@ -630,6 +631,28 @@ async def test_copy_file_is_independent(backend: StorageBackend):
     # mutating the copy must not touch the original (no buffer aliasing)
     await put(backend, '/dst.txt', b' more', mode='a')
     assert await backend.read(P('/src.txt')) == b'payload'
+
+
+async def test_copy_missing_source_raises(backend: StorageBackend):
+    with pytest.raises(PathNotFoundError):
+        await backend.copy(P('/nowhere.txt'), P('/dst.txt'))
+
+
+async def test_copy_of_a_directory_raises(backend: StorageBackend):
+    await backend.make_dir(P('/d'), parents=False)
+    with pytest.raises(IsADirectoryError):
+        await backend.copy(P('/d'), P('/dst.txt'))
+
+
+async def test_copy_onto_a_directory_raises(backend: StorageBackend):
+    # a native server-side copy writes the destination key without asking
+    # what lives there, which on an object store would leave a file
+    # shadowing a live directory rather than refusing
+    await put(backend, '/src.txt', b'payload')
+    await backend.make_dir(P('/d'), parents=False)
+    with pytest.raises(IsADirectoryError):
+        await backend.copy(P('/src.txt'), P('/d'))
+    assert (await backend.stat(P('/d'))).kind is PathKind.DIRECTORY
 
 
 async def test_delete_tree_removes_everything(backend: StorageBackend):
