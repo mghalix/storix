@@ -2,13 +2,89 @@
 
 ## [0.5.5] - 2026-07-31
 
-### What's Changed
-#### Fixes
-* fix(repo): keep the test credential namespace out of config isolation by @mghalix in https://github.com/mghalix/storix/pull/92
-* fix(core): delete an object-store tree in one recursive call by @mghalix in https://github.com/mghalix/storix/pull/93
-* fix(cli): transfer directories that hold no files by @mghalix in https://github.com/mghalix/storix/pull/91
-#### Documentation
-* docs(repo): ADR 0034, sx becomes a package with one job per module by @mghalix in https://github.com/mghalix/storix/pull/86
+An object-store release. Removing a directory tree on R2 went from 154 seconds
+to 3, transfers stopped silently dropping directories that hold no files, and
+the credentialed test suite started actually running: an isolation fixture had
+been deleting the very credentials it needed, so every cloud test had been
+skipping while reporting success.
+
+### Fixed
+
+- **Removing a tree on an object store no longer takes minutes** (#93): the
+  opendal-backed backends never overrode `delete_tree`, so `rm -rf` fell through
+  to the generic emulation and issued one delete per object. It now calls
+  opendal's `remove_all`, which walks the subtree inside the engine and deletes
+  through the service's own bulk endpoint. Measured on 300 files in 31 nested
+  directories:
+
+  | profile       | before |                  after |
+  | ------------- | -----: | ---------------------: |
+  | Cloudflare R2 | 154.4s |                   2.9s |
+  | Azure ADLS    |  0.38s | 0.33s (already native) |
+
+  Verified by listing the deleted root afterwards rather than by the call
+  returning. `remove_all` is idempotent and accepts a file as readily as a
+  directory, so a `stat` in front of it preserves the missing-path and
+  not-a-directory contract. One consequence worth knowing: the delete is now a
+  single engine call, so an interrupt is only seen when it returns.
+
+- **Transfers carry directories that hold no files** (#91): `pull` reported
+  `empty-dir/ -> empty-dir (0 files)` and created nothing, because it built its
+  local directory set from the parents of the files it fetched, which for an
+  empty tree is nothing at all - not even the destination. `push` had the same
+  defect at depth and only looked correct because it added the destination root
+  explicitly, so a top-level empty directory landed while a nested one did not.
+
+  Both directions now take their directory set from the traversal each already
+  performs, so a tree round-trips with its shape intact. The summary reports
+  directories too, because a files-only count is what made the defect read as
+  success:
+
+  ```console
+  / > pull mixed/
+  mixed/ -> mixed (1 file, 5 directories)
+
+  This was a CLI defect throughout. walk yields an entry for every directory
+  including empty ones, and cp -r already preserved them, so the library was
+  never affected.
+  ```
+
+- The credentialed test suite runs (#92): tests/conftest.py clears every
+  STORIX*\* variable so a developer's own connection settings cannot steer a
+  test run. The integration credentials are STORIX_TEST*<BACKEND>\_\*, which
+  that prefix also matches, so the autouse fixture deleted them before the
+  backend fixture could read them. Every azure, azblob, s3 and gcs
+  parameter took its "credentials not configured" skip with the credentials
+  set.
+
+- A fully skipped run is indistinguishable from a machine with no credentials,
+  so just test-integration reported success while touching no provider. The
+  same selection goes from 128 skipped to passing against live ADLS and R2 with
+  the prefix excluded. Clearing is now narrowed to what the loader actually
+  reads, and a contract test runs a probe beside a copy of the fixture so a
+  rewrite of the loop cannot quietly reintroduce it.
+
+### Internal
+
+- sx is a package, one job per module (#90, ADR 0034): cli/app.py held
+  every command plus the helpers they share, and cli/shell.py held the REPL,
+  its parser, its completion, its key bindings, its glob expansion and its menu
+  layout. Both are now packages: commands/ with one module per help panel, and
+  shell/ split into loop, parsing, globbing, completion, keys and layout.
+
+- No behavior changed. sx --help and every command's help render byte for
+  byte as before, which is the evidence the move is only a move. The
+  parsing module is what makes command chaining tractable later, rather than
+  adding shell grammar to a file that already splits redirects in one function
+  and marks quote state in another.
+- Worktree retirement and release note curation are written down (#89):
+  after a merge, a squash means the branch's own commits are never ancestors of
+  the default branch, so git branch -d refusing and
+  git merge-base --is-ancestor reporting "not merged" are not evidence the
+  work did not land. The guidance says how to confirm it before deleting, and
+  what curated release notes look like, with a test that rejects any section
+  heading outside the documented vocabulary.
+
 
 ## [0.5.4] - 2026-07-30
 
