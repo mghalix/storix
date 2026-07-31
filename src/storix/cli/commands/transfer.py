@@ -32,7 +32,7 @@ from ..registry import (
     _TRANSFER,  # pyright: ignore[reportPrivateUsage]
     app,
 )
-from ..render import _count_label, console
+from ..render import console, count_label
 from ..state import (
     _fs,  # pyright: ignore[reportPrivateUsage]
     stat_all,
@@ -201,8 +201,8 @@ def _transferred(files: int, directories: int) -> str:
         directories: How many directories it created, including the
             destination root itself.
     """
-    f = _count_label(files, 'file', 'files')
-    d = _count_label(directories, 'directory', 'directories')
+    f = count_label(files, 'file', 'files')
+    d = count_label(directories, 'directory', 'directories')
     return f'{files} {f}, {directories} {d}'
 
 

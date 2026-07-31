@@ -34,8 +34,8 @@ from ..registry import (
     app,
 )
 from ..render import (
-    _count_label,
     console,
+    count_label,
     dir_state_of,
     entry_decor,
     entry_label,
@@ -344,8 +344,8 @@ def tree(
             render(_LevelBuffer(walked, root), root, '', 1)
         except StorageError as exc:  # the walk pull or a --sort stat batch can fail
             _die('tree', exc)
-    d = _count_label(dirs, 'directory', 'directories')
-    f = _count_label(files, 'file', 'files')
+    d = count_label(dirs, 'directory', 'directories')
+    f = count_label(files, 'file', 'files')
     console.print(f'\n{dirs} {d}, {files} {f}')
 
 

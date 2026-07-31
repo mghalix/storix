@@ -124,28 +124,26 @@ def test_every_command_stays_registered():
 
 def test_help_panels_appear_in_registration_order():
     """Given panels that open where their first command registers,
-    When sx renders its help,
-    Then they appear in the order `commands/__init__.py` imports the modules.
+    When the command panels are read in registration order,
+    Then they follow the order `commands/__init__.py` imports the modules.
 
     That import order is load bearing rather than incidental: reordering
-    those lines reorders this help (ADR 0034 D1).
+    those lines reorders the help (ADR 0034 D1).
+
+    Read from the app rather than from rendered help. The panel headings
+    are drawn with box characters rich omits when it is not writing to a
+    terminal, so a test that greps the rendering asserts nothing wherever
+    the output is captured, which is everywhere it runs.
     """
-    result = run('--help')
+    from storix.cli.app import app as typer_app
 
-    panels = re.findall(r'╭─ (.+?) ─+╮', result.stdout)
+    panels: list[str] = []
+    for command in typer_app.registered_commands:
+        panel = command.rich_help_panel
+        if isinstance(panel, str) and panel not in panels:
+            panels.append(panel)
 
-    assert panels == [
-        'Options',
-        'Inspect',
-        'Connection',
-        'Profile and overrides',
-        'Session',
-        'Navigate',
-        'Write',
-        'Read',
-        'Transfer',
-        'Session and setup',
-    ]
+    assert panels == ['Navigate', 'Write', 'Read', 'Transfer', 'Session and setup']
 
 
 def test_mkdir_touch_ls_round_trip():

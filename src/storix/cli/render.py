@@ -187,7 +187,7 @@ _ONE_DECIMAL_BELOW: Final[int] = 10
 """Under this scaled value coreutils shows one decimal (5.1M vs 165M)."""
 
 
-def _count_label(count: int, singular: str, plural: str) -> str:
+def count_label(count: int, singular: str, plural: str) -> str:
     """Choose a count-sensitive label.
 
     Args:
