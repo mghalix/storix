@@ -37,8 +37,12 @@ from storix.config import (
 )
 from storix.errors import ConfigurationError
 
-from .render import console, err
-from .state import resolve_provider, selection
+from ..registry import (
+    _SETUP,  # pyright: ignore[reportPrivateUsage]
+    app,
+)
+from ..render import console, err
+from ..state import resolve_provider, selection
 
 
 if TYPE_CHECKING:
@@ -96,6 +100,7 @@ def latest_version() -> str | None:
         return None
 
 
+@app.command('update', rich_help_panel=_SETUP)
 def update(
     version: Annotated[
         str | None,
@@ -253,6 +258,7 @@ def _reinstall(extras: frozenset[str]) -> None:
     raise typer.Exit(_run(['uv', 'tool', 'install', '--force', spec]))
 
 
+@app.command('install', rich_help_panel=_SETUP)
 def install(
     extras: Annotated[
         str,
@@ -270,6 +276,7 @@ def install(
     _reinstall(target)
 
 
+@app.command('uninstall', rich_help_panel=_SETUP)
 def uninstall(
     extras: Annotated[
         str,
@@ -297,6 +304,7 @@ def uninstall(
     _reinstall(target)
 
 
+@app.command('doctor', rich_help_panel=_SETUP)
 def doctor(
     *,
     updates: Annotated[

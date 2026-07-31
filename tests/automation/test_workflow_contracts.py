@@ -1,9 +1,11 @@
 """Tests for Storix repository workflow contracts."""
 
 import importlib.util
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tomllib
 
 from pathlib import Path
@@ -428,3 +430,113 @@ def test_agent_guidance_names_every_hand_written_twin() -> None:
         'AGENTS.md must name every file in unasync.py SKIP_NAMES; missing: '
         f'{sorted(set(skipped) - documented)}'
     )
+
+
+_NOTES_SECTIONS: Final[frozenset[str]] = frozenset(
+    {
+        'Added',
+        'Changed',
+        'Changed (breaking)',
+        'Removed',
+        'Fixed',
+        'Documentation',
+        'Internal',
+    }
+)
+"""The section headings AGENTS.md documents for a curated release entry."""
+
+_CURATED_SINCE: Final[tuple[int, int, int]] = (0, 4, 9)
+"""The first release written to that shape. Earlier entries predate it."""
+
+_NOTES_HEADING: Final[re.Pattern[str]] = re.compile(r'(?P<marks>#{2,6}) (?P<title>.+)')
+
+
+def test_release_notes_use_the_documented_section_vocabulary() -> None:
+    """Given the released notes, when scanned, then every section is documented.
+
+    `Prepare release` prepends a generated block of pull request titles under
+    `#### Features` and `#### Fixes`, which is a changelog rather than release
+    notes. Curating it away is a manual step, and a manual step that nothing
+    checks is one that eventually gets skipped.
+    """
+    offenders: list[str] = []
+    version: tuple[int, int, int] | None = None
+    fenced = False
+
+    for line in _CANONICAL_NOTES.read_text(encoding='utf-8').splitlines():
+        if line.startswith('```'):
+            fenced = not fenced
+        if fenced:
+            continue
+        heading = _NOTES_HEADING.fullmatch(line.rstrip())
+        if heading is None:
+            continue
+        title = heading.group('title').strip()
+        if heading.group('marks') == '##':
+            release = re.fullmatch(r'\[(\d+)\.(\d+)\.(\d+)\].*', title)
+            version = (
+                None
+                if release is None
+                else (int(release[1]), int(release[2]), int(release[3]))
+            )
+        elif version is not None and version >= _CURATED_SINCE:
+            if heading.group('marks') != '###' or title not in _NOTES_SECTIONS:
+                offenders.append(f'{line.strip()!r} under {version}')
+
+    assert not offenders, (
+        'release notes sections must be one of '
+        f'{sorted(_NOTES_SECTIONS)} at "###"; found: {offenders}'
+    )
+
+
+# --- the credentialed suite can actually receive its credentials ---
+
+
+def test_test_credentials_survive_configuration_isolation(tmp_path: Path) -> None:
+    """Given a STORIX_TEST_* variable, when a test reads it, then it is there.
+
+    The autouse isolation fixture clears `STORIX_*` so a developer's own
+    connection settings cannot steer a run. `STORIX_TEST_*` is the suite's
+    own namespace and must not be caught by that: clearing it made every
+    credentialed conformance backend skip with "credentials not
+    configured" while the credentials were set, which reads as a clean
+    run and exercises nothing.
+    """
+    # the fixture is delivered by conftest discovery, which is by directory,
+    # so the probe runs beside a copy of it rather than inside the tree
+    shutil.copy(_ROOT / 'tests' / 'conftest.py', tmp_path / 'conftest.py')
+    probe = tmp_path / 'test_probe.py'
+    probe.write_text(
+        'import os\n\n\n'
+        'def test_probe():\n'
+        "    assert os.environ.get('STORIX_TEST_CONTRACT_PROBE') == 'present'\n"
+        "    assert os.environ.get('STORIX_CONTRACT_PROBE') is None\n",
+        encoding='utf-8',
+    )
+
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            '-m',
+            'pytest',
+            str(probe),
+            '-q',
+            '-p',
+            'no:cacheprovider',
+            '--rootdir',
+            str(_ROOT),
+            '-c',
+            str(_ROOT / 'pyproject.toml'),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_ROOT,
+        env={
+            **os.environ,
+            'STORIX_TEST_CONTRACT_PROBE': 'present',
+            'STORIX_CONTRACT_PROBE': 'leaked',
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
