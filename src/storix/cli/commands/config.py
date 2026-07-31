@@ -33,8 +33,12 @@ from storix.config import (
 )
 from storix.errors import ConfigurationError
 
-from .render import console, err, launch_editor
-from .state import resolve_provider, selection
+from ..registry import (
+    _SETUP,  # pyright: ignore[reportPrivateUsage]
+    app,
+)
+from ..render import console, err, launch_editor
+from ..state import resolve_provider, selection
 
 
 _MISSING = object()
@@ -48,6 +52,8 @@ config_app = typer.Typer(
     help='See, explain, and edit storix configuration.',
     no_args_is_help=True,
 )
+
+app.add_typer(config_app, rich_help_panel=_SETUP)
 
 _SCOPE = Annotated[
     str, typer.Option('--scope', help='user | project (default: project)')
@@ -309,7 +315,7 @@ def _show_effective() -> None:
     """
     from storix.config import StorixSettings, config_provenance
 
-    from .state import selection
+    from ..state import selection
 
     profile, environment = selection()
     provider = resolve_provider(None, profile)
@@ -393,7 +399,7 @@ def _print_effective(key: str) -> None:
     """
     from storix.config import StorixSettings, config_provenance
 
-    from .config import load_prefs
+    from ..config import load_prefs
 
     parts = list(split_key(key))
     section = parts[0] if len(parts) > 1 else ''

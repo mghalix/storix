@@ -32,6 +32,22 @@ creating one is a provider control-plane operation rather than a filesystem
 operation. That is what [`sx provision`](commands.md#provisioning-the-storage-root)
 is for, and where it cannot help it says so.
 
+## A directory transfer carries the whole tree
+
+Given a directory, `push` and `pull` reproduce its shape at the destination,
+not only the files in it. A directory holding nothing is created too, at any
+depth, so a tree survives a round trip unchanged. The summary line counts both:
+
+```console
+/ ❯ pull /media/season-1 ./season-1
+/media/season-1 -> season-1 (12 files, 4 directories)
+```
+
+On an object store there are no real directories, so an empty one is a
+zero-byte marker key per level. A prefix with neither objects nor a marker
+under it does not exist at the store at all, and pulling it fails the way any
+missing path does.
+
 ## Tuning a transfer
 
 `sx` reads the same `STORIX_*` environment your application does, so the

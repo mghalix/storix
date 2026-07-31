@@ -624,6 +624,36 @@ def test_delete_tree_removes_everything(backend: StorageBackend):
     assert backend.exists(P('/'))
 
 
+def test_delete_tree_spares_a_name_sharing_sibling(backend: StorageBackend):
+    """A tree delete is bounded by the directory, not by its name as a prefix.
+
+    On an object store the delete is a key-prefix operation, where
+    ``/d`` and ``/d2`` sit under prefixes that share their opening
+    characters; a delete keyed on the bare name takes both.
+    """
+    backend.make_dir(P('/d'), parents=True)
+    put(backend, '/d/gone.txt', b'x')
+    backend.make_dir(P('/d2'), parents=True)
+    put(backend, '/d2/kept.txt', b'y')
+
+    backend.delete_tree(P('/d'))
+
+    assert not backend.exists(P('/d'))
+    assert backend.read(P('/d2/kept.txt')) == b'y'
+
+
+def test_delete_tree_missing_raises(backend: StorageBackend):
+    with pytest.raises(PathNotFoundError):
+        backend.delete_tree(P('/missing'))
+
+
+def test_delete_tree_on_a_file_raises(backend: StorageBackend):
+    put(backend, '/a.txt', b'x')
+    with pytest.raises(NotADirectoryError):
+        backend.delete_tree(P('/a.txt'))
+    assert backend.read(P('/a.txt')) == b'x'
+
+
 # --- concurrent fan-out (the sync twin runs these through the thread pool) ---
 
 

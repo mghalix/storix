@@ -432,6 +432,36 @@ class OpendalBackend(BackendBase):
         except _OPENDAL_ERRORS as exc:
             raise self._error(exc, path) from exc
 
+    async def delete_tree(self, path: PurePosixPath) -> None:
+        """Delete ``path`` and everything below it in one engine call.
+
+        opendal walks the subtree inside the engine and deletes through
+        the service's own bulk endpoint where one exists (S3 and its
+        compatibles take up to a thousand keys per request), where the
+        generic fallback spends a stat, a listing and a delete per
+        object and cannot finish a large tree in reasonable time.
+
+        ``remove_all`` is idempotent and takes a file as readily as a
+        directory, so the port's missing-path and non-directory contract
+        comes from the stat that precedes it.
+
+        A tree large enough to take many seconds is deleted inside a
+        single engine call, so a cancellation in the sync flavor is only
+        observed once that call returns; interrupting mid-delete needs
+        the engine to expose the walk, which it does not.
+
+        Raises:
+            PathNotFoundError: If nothing lives at ``path``.
+            NotADirectoryError: If ``path`` is a file.
+        """
+        raw = await self.stat(path)
+        if raw.kind is PathKind.FILE:
+            raise NotADirectoryError(path)
+        try:
+            await self._op.remove_all(self._dir_key(path))
+        except _OPENDAL_ERRORS as exc:
+            raise self._error(exc, path) from exc
+
     async def list_dir(self, path: PurePosixPath) -> AsyncIterator[Entry]:
         """Yield the direct children of a directory, sizes included.
 
@@ -502,6 +532,16 @@ class OpendalBackend(BackendBase):
         port's contract is enforced explicitly here: plain mkdir checks
         the target and parent itself, and ``parents=True`` creates a
         real marker for every missing level.
+
+        The per-level stat is what makes ``parents=True`` safe to fan
+        out. Sibling targets share ancestors, so a batched
+        ``mkdir(*dirs, parents=True)`` has every call reaching for the
+        same few ancestor keys at once; the stat means only the first
+        writes each one. Putting every level unconditionally is fewer
+        requests on paper and measurably worse in practice: the same-key
+        write storm draws HTTP 429 ("Reduce your concurrent request rate
+        for the same object") from R2 before the puts it saved pay for
+        themselves.
         """
         try:
             existing = await self.stat(path)
