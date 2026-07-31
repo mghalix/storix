@@ -187,6 +187,17 @@ _ONE_DECIMAL_BELOW: Final[int] = 10
 """Under this scaled value coreutils shows one decimal (5.1M vs 165M)."""
 
 
+def count_label(count: int, singular: str, plural: str) -> str:
+    """Choose a count-sensitive label.
+
+    Args:
+        count: Quantity the label describes.
+        singular: Label used for exactly one item.
+        plural: Label used for every other count.
+    """
+    return singular if count == 1 else plural
+
+
 def human_size(size: int) -> str:
     """GNU-style human size: powers of 1024, single-letter suffix.
 
