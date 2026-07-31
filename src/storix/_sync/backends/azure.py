@@ -402,6 +402,31 @@ class AzureBackend(BackendBase):
         except AzureError as exc:
             raise self._error(exc, path) from exc
 
+    def du(self, path: PurePosixPath) -> int:
+        """Total content size of a tree, from one recursive listing.
+
+        dfs lists a whole subtree in one paged request carrying every
+        path's size, where the generic walk costs a listing per directory.
+
+        No stat precheck, for the reason ``list_dir`` gives: the same
+        listing answers every case. A missing path raises ``PathNotFound``,
+        an empty directory lists nothing, and a file target lists itself,
+        which sums to its own size.
+
+        Raises:
+            PathNotFoundError: If nothing lives at ``path``.
+        """
+        total = 0
+        try:
+            for item in self._filesystem.get_paths(
+                path=self._key(path) or None, recursive=True
+            ):
+                if not item.is_directory:
+                    total += item.content_length or 0
+        except AzureError as exc:
+            raise self._error(exc, path) from exc
+        return total
+
     def stat(self, path: PurePosixPath) -> RawStat:
         """Return raw facts about a path (directory sizes are 0)."""
         key = self._key(path)
