@@ -166,6 +166,24 @@ def _count_label(count: int, singular: str, plural: str) -> str:
     return singular if count == 1 else plural
 
 
+def _transferred(files: int, directories: int) -> str:
+    """Summarize what a directory transfer moved.
+
+    Both counts are reported because a transfer can be entirely
+    directories: an empty tree moves no bytes and still reproduces its
+    shape at the destination, and a files-only summary would read as a
+    transfer that did nothing.
+
+    Args:
+        files: How many files the transfer copied.
+        directories: How many directories it created, including the
+            destination root itself.
+    """
+    f = _count_label(files, 'file', 'files')
+    d = _count_label(directories, 'directory', 'directories')
+    return f'{files} {f}, {directories} {d}'
+
+
 class _ListingSort(StorixEnum):
     """Key a listing is ordered by, shared by ``ls`` and ``tree``.
 
@@ -1243,13 +1261,21 @@ def pull(
 
     if st.kind is PathKind.DIRECTORY:
         dst = Path(local).expanduser() if local else Path(src.name)
-        remote_files = [e for e in fs.walk(src, all=True) if not e.is_dir]
+        walked = list(fs.walk(src, all=True))
+        remote_files = [e for e in walked if not e.is_dir]
         stats = stat_all(fs, [e.path for e in remote_files])
         total_bytes = sum(s.size for s in stats)
         targets = [(e.path, dst / e.path.relative_to(src)) for e in remote_files]
-        # each unique local parent once, not one mkdir per file
-        for parent in {out_path.parent for _, out_path in targets}:
-            parent.mkdir(parents=True, exist_ok=True)
+        # every directory the walk saw, not only the parents the files
+        # imply: a directory holding no files is still part of the structure
+        # being copied, and deriving the set from the files alone silently
+        # drops it. walk never yields its own starting directory, so dst is
+        # added here, which is what makes an entirely empty source land at
+        # all. mkdir dedupes through the set and parents=True absorbs the
+        # ancestors, so this stays one call per directory.
+        dirs = {dst} | {dst / e.path.relative_to(src) for e in walked if e.is_dir}
+        for directory in dirs:
+            directory.mkdir(parents=True, exist_ok=True)
         done: set[Path] = set()
         done_lock = threading.Lock()
         try:
@@ -1284,7 +1310,8 @@ def pull(
             _cancelled('pull')
         except StorageError as exc:
             _die('pull', exc)
-        console.print(f'{remote} -> {dst} ({len(remote_files)} files)')
+        moved = _transferred(len(remote_files), len(dirs))
+        console.print(f'{remote} -> {dst} ({moved})')
         return
 
     dst = Path(local).expanduser() if local else Path(src.name)
@@ -1326,15 +1353,23 @@ def push(
 
     if src.is_dir():
         dst = fs.resolve(remote) if remote else fs.pwd() / src.name
-        files = [f for f in src.rglob('*') if f.is_file()]
+        # one traversal classified as it goes: the directories are as much
+        # of the tree as the files are, and a set derived from the files
+        # alone loses every directory holding none of them
+        files: list[Path] = []
+        dirs = {dst}
+        for entry in src.rglob('*'):
+            if entry.is_dir():
+                dirs.add(dst / entry.relative_to(src))
+            elif entry.is_file():
+                files.append(entry)
         total_bytes = sum(f.stat().st_size for f in files)
         targets = [(f, dst / f.relative_to(src)) for f in files]
-        # each unique remote directory once, in one core-batched mkdir,
-        # not one round-trip-heavy mkdir per file; parents=True already
+        # the whole set in one core-batched mkdir, not one round-trip-heavy
+        # mkdir per directory; parents=True already
         # makes existing directories a silent success, so any failure
         # here is real (permission, an intermediate file, a missing
         # bucket) and must die, not be suppressed (ADR 0029)
-        dirs = {dst} | {remote_file.parent for _, remote_file in targets}
         try:
             fs.mkdir(*sorted(dirs), parents=True)
             with (
@@ -1365,7 +1400,7 @@ def push(
             _cancelled('push')
         except StorageError as exc:
             _die('push', exc)
-        console.print(f'{local} -> {dst} ({len(files)} files)')
+        console.print(f'{local} -> {dst} ({_transferred(len(files), len(dirs))})')
         return
 
     dst = fs.resolve(remote) if remote else fs.pwd() / src.name
