@@ -1,9 +1,11 @@
 """Tests for Storix repository workflow contracts."""
 
 import importlib.util
+import os
 import re
 import shutil
 import subprocess
+import sys
 import tomllib
 
 from pathlib import Path
@@ -428,3 +430,56 @@ def test_agent_guidance_names_every_hand_written_twin() -> None:
         'AGENTS.md must name every file in unasync.py SKIP_NAMES; missing: '
         f'{sorted(set(skipped) - documented)}'
     )
+
+
+# --- the credentialed suite can actually receive its credentials ---
+
+
+def test_test_credentials_survive_configuration_isolation(tmp_path: Path) -> None:
+    """Given a STORIX_TEST_* variable, when a test reads it, then it is there.
+
+    The autouse isolation fixture clears `STORIX_*` so a developer's own
+    connection settings cannot steer a run. `STORIX_TEST_*` is the suite's
+    own namespace and must not be caught by that: clearing it made every
+    credentialed conformance backend skip with "credentials not
+    configured" while the credentials were set, which reads as a clean
+    run and exercises nothing.
+    """
+    # the fixture is delivered by conftest discovery, which is by directory,
+    # so the probe runs beside a copy of it rather than inside the tree
+    shutil.copy(_ROOT / 'tests' / 'conftest.py', tmp_path / 'conftest.py')
+    probe = tmp_path / 'test_probe.py'
+    probe.write_text(
+        'import os\n\n\n'
+        'def test_probe():\n'
+        "    assert os.environ.get('STORIX_TEST_CONTRACT_PROBE') == 'present'\n"
+        "    assert os.environ.get('STORIX_CONTRACT_PROBE') is None\n",
+        encoding='utf-8',
+    )
+
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            '-m',
+            'pytest',
+            str(probe),
+            '-q',
+            '-p',
+            'no:cacheprovider',
+            '--rootdir',
+            str(_ROOT),
+            '-c',
+            str(_ROOT / 'pyproject.toml'),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=_ROOT,
+        env={
+            **os.environ,
+            'STORIX_TEST_CONTRACT_PROBE': 'present',
+            'STORIX_CONTRACT_PROBE': 'leaked',
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
