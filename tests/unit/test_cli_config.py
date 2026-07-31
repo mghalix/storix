@@ -2,6 +2,7 @@
 
 import os
 import stat
+import sys
 
 from collections.abc import Generator
 from pathlib import Path
@@ -93,7 +94,10 @@ def test_set_allows_a_secret_in_user_scope_and_tightens_the_file(sandbox, tmp_pa
     user_file = tmp_path / 'xdg' / 'storix' / 'config.toml'
     assert result.exit_code == 0
     assert user_file.is_file()
-    assert stat.S_IMODE(user_file.stat().st_mode) == 0o600
+    if sys.platform != 'win32':
+        # Windows keeps no POSIX mode: chmod there sets the read-only
+        # attribute and stat reports 0o666 whatever was asked for
+        assert stat.S_IMODE(user_file.stat().st_mode) == 0o600
 
 
 def test_set_refuses_a_key_the_provider_does_not_have(sandbox):

@@ -1,3 +1,4 @@
+import os
 import time
 
 from collections.abc import AsyncIterator
@@ -649,6 +650,12 @@ async def test_observability_layer_awaits_an_async_sink():
     assert [e.transferred for e in events] == [3]
 
 
+@pytest.mark.xfail(
+    not hasattr(os, 'pwrite'),
+    reason='a parallel download writes with os.pwrite, which Windows has not',
+    raises=AttributeError,
+    strict=True,
+)
 async def test_observability_layer_identifies_each_range_of_one_file(
     tmp_path, monkeypatch
 ):

@@ -7,6 +7,7 @@ quirks live in the per-backend test files.
 """
 
 import os
+import sys
 import uuid
 
 from collections.abc import AsyncIterator
@@ -37,6 +38,15 @@ from storix.errors import (
 )
 from storix.preconditions import IF_MATCH_ABSENT
 from storix.types import EchoMode
+
+
+# A real Windows filesystem answers EACCES where POSIX answers EISDIR, and
+# ENOENT where POSIX answers ENOTDIR, so the local backend faithfully maps a
+# different errno there and the POSIX spelling of the contract cannot hold.
+# The backends that synthesize their own errors are unaffected; the assertion
+# widens to the family rather than dropping the case.
+_DIRECTORY_AS_FILE = OSError if sys.platform == 'win32' else IsADirectoryError
+_FILE_AS_PARENT = OSError if sys.platform == 'win32' else NotADirectoryError
 
 
 @pytest.fixture(
@@ -218,7 +228,7 @@ async def test_append_creates_missing(backend: StorageBackend):
 @pytest.mark.parametrize('mode', ['w', 'a'])
 async def test_write_onto_directory_raises(backend: StorageBackend, mode: EchoMode):
     await backend.make_dir(P('/d'), parents=False)
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(_DIRECTORY_AS_FILE):
         await put(backend, '/d', b'x', mode=mode)
 
 
@@ -229,7 +239,7 @@ async def test_read_missing_raises(backend: StorageBackend):
 
 async def test_read_directory_raises(backend: StorageBackend):
     await backend.make_dir(P('/d'), parents=False)
-    with pytest.raises(IsADirectoryError):
+    with pytest.raises(_DIRECTORY_AS_FILE):
         await backend.read(P('/d'))
 
 
@@ -528,7 +538,7 @@ async def test_make_dir_missing_parent_raises(backend: StorageBackend):
 
 async def test_make_dir_parent_is_file_raises(backend: StorageBackend):
     await put(backend, '/a.txt')
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(_FILE_AS_PARENT):
         await backend.make_dir(P('/a.txt/d'), parents=False)
 
 

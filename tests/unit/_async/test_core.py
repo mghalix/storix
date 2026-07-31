@@ -1,5 +1,6 @@
 # ruff: noqa: A004
 import io
+import os
 
 from pathlib import Path, PurePosixPath as P
 
@@ -1125,6 +1126,12 @@ async def test_download_writes_the_whole_file(tmp_path):
     assert dest.read_bytes() == payload
 
 
+@pytest.mark.xfail(
+    not hasattr(os, 'pwrite'),
+    reason='a parallel download writes with os.pwrite, which Windows has not',
+    raises=AttributeError,
+    strict=True,
+)
 async def test_download_in_parallel_ranges_matches_sequential(tmp_path, monkeypatch):
     """Given several ranges, when downloaded, then the file is assembled in order."""
     from storix._async import core

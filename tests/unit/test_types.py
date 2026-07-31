@@ -14,6 +14,28 @@ def test_storixpath_maybe_file_and_maybe_dir() -> None:
     assert StorixPath('dir').maybe_dir() is True
 
 
+def test_a_session_path_renders_with_forward_slashes_on_every_platform() -> None:
+    """Given a joined session path, when rendered, then it uses '/'.
+
+    StorixPath subclasses PurePosixPath so a backend key never depends on
+    the host that wrote it. It was PurePath once, which on Windows renders
+    every separator as a backslash and silently changes the shape of every
+    stored key, while a POSIX-only test run stays green. The base class is
+    asserted alongside the rendering because only the base class can fail
+    the invariant on a POSIX host.
+    """
+    from pathlib import PurePosixPath
+
+    assert issubclass(StorixPath, PurePosixPath)
+
+    joined = StorixPath('/data') / 'nested' / 'file.txt'
+
+    assert str(joined) == '/data/nested/file.txt'
+    assert '\\' not in str(joined)
+    # a backslash is an ordinary name character here, never a separator
+    assert StorixPath('one\\two').parts == ('one\\two',)
+
+
 def test_storixpath_guess_mimetype_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         utils,
