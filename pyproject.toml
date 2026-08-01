@@ -120,7 +120,7 @@ dev = [
     # the website/ site generator, used by `just docs-build` and the CI docs
     # job: a development tool, never a runtime dependency of the shipped
     # package (website/requirements.txt pins it too, for Cloudflare Pages)
-    "zensical==0.0.50",
+    "zensical==0.0.51",
 ]
 #<------------------------------------------------>#
 [build-system]
